@@ -1,0 +1,11 @@
+[package]
+name = "rustcraft-gameplay-flat-world"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustcraft-mod-api.workspace = true

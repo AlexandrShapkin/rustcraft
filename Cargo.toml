@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine-core",
+    "crates/mod-api",
+    "crates/agent-api",
+    "crates/bot-api",
+    "crates/content",
+    "crates/runtime",
+    "crates/gameplay-blocks",
+    "crates/gameplay-flat-world",
+    "crates/client",
+    "crates/server",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[workspace.dependencies]
+rustcraft-engine-core = { path = "crates/engine-core" }
+rustcraft-mod-api = { path = "crates/mod-api" }
+rustcraft-agent-api = { path = "crates/agent-api" }
+rustcraft-bot-api = { path = "crates/bot-api" }
+rustcraft-content = { path = "crates/content" }
+rustcraft-runtime = { path = "crates/runtime" }
+rustcraft-gameplay-blocks = { path = "crates/gameplay-blocks" }
+rustcraft-gameplay-flat-world = { path = "crates/gameplay-flat-world" }

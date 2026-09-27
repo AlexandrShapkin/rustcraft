@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-09-28",
+  "bootstrap_version": "v3",
+  "checks": {
+    "toml:Cargo.toml": "ok",
+    "toml:crates/agent-api/Cargo.toml": "ok",
+    "toml:crates/bot-api/Cargo.toml": "ok",
+    "toml:crates/client/Cargo.toml": "ok",
+    "toml:crates/content/Cargo.toml": "ok",
+    "toml:crates/engine-core/Cargo.toml": "ok",
+    "toml:crates/gameplay-blocks/Cargo.toml": "ok",
+    "toml:crates/gameplay-flat-world/Cargo.toml": "ok",
+    "toml:crates/mod-api/Cargo.toml": "ok",
+    "toml:crates/runtime/Cargo.toml": "ok",
+    "toml:crates/server/Cargo.toml": "ok",
+    "toml:rust-toolchain.toml": "ok",
+    "toml:rustfmt.toml": "ok",
+    "bash-n:scripts/doctor.sh": "ok",
+    "bash-n:scripts/check.sh": "ok",
+    "bash-n:scripts/references.sh": "ok",
+    "exists:AGENTS.md": "ok",
+    "exists:justfile": "ok",
+    "exists:docs/ARCHITECTURE.md": "ok",
+    "exists:docs/AGENTS_AND_BOTS.md": "ok",
+    "exists:docs/CONTENT_SYSTEM.md": "ok",
+    "exists:docs/REFERENCE_POLICY.md": "ok",
+    "exists:reference/SOURCES.md": "ok",
+    "exists:reference/sources.json": "ok",
+    "exists:prompts/00-bootstrap.md": "ok",
+    "exists:BOOTSTRAP_CHANGELOG.md": "ok",
+    "json:reference/sources.json": "ok",
+    "json:reference/LOCK.json": "ok"
+  },
+  "notes": [
+    "Generation environment does not provide Rust/Cargo/just, so compile and justfile execution were not run here.",
+    "Reference management script was executed in status mode successfully; public references are declared but intentionally not vendored in the bootstrap archive.",
+    "Run `just refs-fetch` to clone enabled public references and place the local vanilla Beta 1.7.3 texture pack under reference/assets/ as documented.",
+    "Run `just bootstrap-check` on the target Arch Linux machine immediately after extraction."
+  ]
+}

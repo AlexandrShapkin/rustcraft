@@ -1,0 +1,12 @@
+[package]
+name = "rustcraft-gameplay-blocks"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustcraft-engine-core.workspace = true
+rustcraft-mod-api.workspace = true

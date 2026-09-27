@@ -1,0 +1,11 @@
+[package]
+name = "rustcraft-mod-api"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustcraft-engine-core.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "rustcraft-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustcraft-content.workspace = true
+rustcraft-gameplay-blocks.workspace = true
+rustcraft-gameplay-flat-world.workspace = true
+rustcraft-mod-api.workspace = true
+rustcraft-runtime.workspace = true

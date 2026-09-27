@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "mc173",
+      "name": "theorzr/mc173",
+      "url": "https://github.com/theorzr/mc173.git",
+      "path": "reference/external/mc173",
+      "tier": "core",
+      "role": "Independent Rust implementation reference for Beta 1.7.3 server/world/block/entity behavior and Rust-specific implementation ideas.",
+      "declared_license": "Apache-2.0",
+      "enabled": true
+    },
+    {
+      "id": "betrockplusplus",
+      "name": "OfficialPixelBrush/BetrockPlusPlus",
+      "url": "https://github.com/OfficialPixelBrush/BetrockPlusPlus.git",
+      "path": "reference/external/BetrockPlusPlus",
+      "tier": "core",
+      "role": "Independent C++ client/server reimplementation reference for protocol, world formats, rendering/resource interpretation and implementation tradeoffs.",
+      "declared_license": "AGPL-3.0",
+      "enabled": true
+    },
+    {
+      "id": "mc-b173-release",
+      "name": "jacobo-mc/mc_b1.7.3_release",
+      "url": "https://github.com/jacobo-mc/mc_b1.7.3_release.git",
+      "path": "reference/external/mc_b1.7.3_release",
+      "tier": "core",
+      "role": "Reconstructed Beta 1.7.3 code/assets used only to research historical behavior, constants and presentation conventions.",
+      "declared_license": "MIT (repository declaration; underlying reconstructed game material remains reference-only for this project)",
+      "enabled": true
+    },
+    {
+      "id": "beta-wiki",
+      "name": "OfficialPixelBrush/beta-wiki",
+      "url": "https://github.com/OfficialPixelBrush/beta-wiki.git",
+      "path": "reference/external/beta-wiki",
+      "tier": "supplemental",
+      "role": "Technical Beta 1.7.3 protocol/specification documentation.",
+      "declared_license": null,
+      "enabled": true
+    },
+    {
+      "id": "nostalgia",
+      "name": "McHistory/nostalgia",
+      "url": "https://github.com/McHistory/nostalgia.git",
+      "path": "reference/external/nostalgia",
+      "tier": "supplemental",
+      "role": "Legacy Minecraft mappings for understanding decompiled Beta sources and historical names.",
+      "declared_license": null,
+      "enabled": true
+    },
+    {
+      "id": "libreprog",
+      "name": "OfficialPixelBrush/LibreProg",
+      "url": "https://github.com/OfficialPixelBrush/LibreProg.git",
+      "path": "reference/external/LibreProg",
+      "tier": "supplemental",
+      "role": "Redistributable open-source visual/audio asset reference compatible with Beta 1.7.3.",
+      "declared_license": "BSD-3-Clause",
+      "enabled": true
+    }
+  ]
+}
