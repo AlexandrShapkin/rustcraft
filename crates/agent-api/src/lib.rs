@@ -1,6 +1,6 @@
 //! Semantic intent shared by humans, network players, bots, replays and tests.
 
-use rustcraft_engine_core::Vec3;
+use rustcraft_engine_core::{BlockId, BlockPos, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MoveIntent {
@@ -8,9 +8,18 @@ pub struct MoveIntent {
     pub strafe: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceIntent {
+    pub position: BlockPos,
+    pub block: BlockId,
+}
+
 impl Default for MoveIntent {
     fn default() -> Self {
-        Self { forward: 0.0, strafe: 0.0 }
+        Self {
+            forward: 0.0,
+            strafe: 0.0,
+        }
     }
 }
 
@@ -20,6 +29,21 @@ pub struct AgentIntent {
     pub look_delta: Vec3,
     pub jump: bool,
     pub crouch: bool,
+    /// Generic held primary action. The active game decides what it means.
+    pub primary_action: bool,
+    /// Generic held/pressed secondary action. The active game decides what it means.
+    pub secondary_action: bool,
+    /// Legacy M0-M3 Minecraft action aliases retained during incremental migration.
     pub attack: bool,
     pub use_action: bool,
+    pub select_hotbar: Option<u8>,
+    pub scroll_hotbar: i8,
+    pub break_block: Option<BlockPos>,
+    pub place_block: Option<PlaceIntent>,
+    pub craft: bool,
+    pub inventory_click: Option<(u8, u8)>,
+}
+
+pub trait Controller {
+    fn next_intent(&mut self) -> AgentIntent;
 }

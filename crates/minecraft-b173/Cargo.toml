@@ -1,0 +1,16 @@
+[package]
+name = "rustcraft-minecraft-b173"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustcraft-content.workspace = true
+rustcraft-engine-core.workspace = true
+rustcraft-game-api.workspace = true
+rustcraft-gameplay-blocks.workspace = true
+rustcraft-gameplay-flat-world.workspace = true
+rustcraft-mod-api.workspace = true

@@ -2,13 +2,17 @@
 resolver = "2"
 members = [
     "crates/engine-core",
+    "crates/game-api",
     "crates/mod-api",
     "crates/agent-api",
     "crates/bot-api",
     "crates/content",
     "crates/runtime",
+    "crates/render",
     "crates/gameplay-blocks",
     "crates/gameplay-flat-world",
+    "crates/minecraft-b173",
+    "crates/sandbox-test",
     "crates/client",
     "crates/server",
 ]
@@ -26,6 +30,7 @@ all = "warn"
 
 [workspace.dependencies]
 rustcraft-engine-core = { path = "crates/engine-core" }
+rustcraft-game-api = { path = "crates/game-api" }
 rustcraft-mod-api = { path = "crates/mod-api" }
 rustcraft-agent-api = { path = "crates/agent-api" }
 rustcraft-bot-api = { path = "crates/bot-api" }
@@ -33,3 +38,10 @@ rustcraft-content = { path = "crates/content" }
 rustcraft-runtime = { path = "crates/runtime" }
 rustcraft-gameplay-blocks = { path = "crates/gameplay-blocks" }
 rustcraft-gameplay-flat-world = { path = "crates/gameplay-flat-world" }
+rustcraft-minecraft-b173 = { path = "crates/minecraft-b173" }
+rustcraft-render = { path = "crates/render" }
+bytemuck = { version = "1.23", features = ["derive"] }
+png = "0.17"
+pollster = "0.4"
+wgpu = "26"
+winit = "0.30"

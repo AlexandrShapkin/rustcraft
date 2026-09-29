@@ -3,6 +3,11 @@
 First-party gameplay modules and third-party mods share semantic concepts but do not need the same
 execution mechanism.
 
+The fundamental extension contract is the Game API, not a Minecraft-owned mod layer.
+`minecraft_b173`, another native game, and native first-party extensions all register packages,
+definitions, systems and capabilities through the same public mechanisms. Downloaded third-party
+code will use a versioned sandbox adapter over those concepts rather than privileged engine access.
+
 ## First-party
 
 Native Rust, statically linked into the normal product build. Registration happens at startup;

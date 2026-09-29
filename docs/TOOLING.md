@@ -88,3 +88,51 @@ When available:
 - Context7: current third-party library/API documentation.
 
 Do not hard-code credentials in `.codex/config.toml` or the repository.
+
+## Offscreen block presentation inspector (M3.8)
+
+`just render-test SCENE [options]` writes deterministic PNGs and scene manifests beneath
+ignored `target/render-tests/`, overwriting that scene's previous generated output. It needs
+a wgpu adapter (software GL/llvmpipe works), but no visible window or readable window surface.
+A missing GPU/asset fails explicitly; normal CPU tests never require either.
+
+Examples:
+
+```sh
+just render-test face-neg-z --mode corners
+just render-test face-neg-z --mode uv --wireframe
+just render-test dropped-bookshelf --rear
+just render-test gui-bookshelf --native
+just render-test cube-log --axis x
+just render-test cube-bookshelf --facing east --base-rotation 90
+just render-test gui-grid
+just render-test-all
+just fidelity-m3
+```
+
+Faces: `face-pos-x`, `face-neg-x`, `face-pos-y`, `face-neg-y`, `face-pos-z`, `face-neg-z`.
+Representations: `cube-NAME`, `dropped-NAME`, `gui-NAME`, `inventory-NAME`, `hotbar-NAME`,
+`cursor-NAME`; NAME is a first-party semantic name such as bookshelf/log/grass. The last three
+are isolated item representations, not screenshots of an entire interactive screen.
+Modes: `solid`, `corners`, generated `uv`, local-resource `atlas` (default for blocks).
+`--wireframe` adds triangle edges, vertex marks, normals and face labels; `--no-cull` is
+explicitly diagnostic. `--rear` exposes the opposite sides; `--native` uses a 16-pixel GUI
+region rather than the enlarged inspection view. `--item-age TICKS` and `--count N` select
+deterministic dropped-stack presentation. `--facing north|east|south|west|up|down`,
+`--axis x|y|z`, `--rotation 0|90|180|270` and `--base-rotation` exercise the orientation
+foundation even on currently nondirectional first-party blocks; these do not modify gameplay
+content. Combined diagnostic controls compose base*facing*axis*horizontal.
+
+`just render-test-all` and `just fidelity-m3` run the complete offscreen suite, including rear
+and native views. The older CPU-only recipe is now `just render-unit-test`. The reusable
+`inspection::BlockModel::resolve(BlockState, resolver)` API exposes content/state selection
+separately from GPU rendering. No texture-pack editor or golden-image acceptance is implied.
+
+## Non-Minecraft architecture integration game
+
+`just sample-game` builds and runs the `sandbox-test` profile. The recipe first checks its normal
+Cargo dependency tree and fails if it contains `minecraft-b173`, either legacy gameplay crate, or
+the mixed M0-M3 runtime. The game registers four `sandbox_test:` voxel definitions through
+`game-api`, consumes generic controller intent, queues a `SetBlock` command, and writes a generated
+offscreen image to `target/sample-game/sandbox-test.png`. It uses no proprietary resources and is
+an architecture test rather than a second product.

@@ -1,7 +1,9 @@
-# Reference study
+# Feature reference study
 
-Use this skill when implementation depends on Beta 1.7.3 behavior, protocol, legacy file formats,
-asset conventions or the interpretation of historical code.
+Use this skill before implementing any player-observable Beta-like behavior: controls, gameplay,
+inventory, crafting, item entities, HUD/UI, block visuals, mining, entities, world generation,
+weather, audio or animation. It is unnecessary for purely internal storage, CI, serialization,
+transport, logging or profiler work.
 
 1. Read `reference/SOURCES.md` and `docs/REFERENCE_POLICY.md`.
 2. Run `just refs-status`.
@@ -14,10 +16,15 @@ asset conventions or the interpretation of historical code.
    - vanilla texture pack for visual baseline;
    - `LibreProg` for redistributable/open asset examples.
 5. Cross-check important ambiguous behavior rather than trusting one implementation blindly.
-6. Extract the behavioral/format conclusion; do not port the reference architecture.
-7. Implement original idiomatic Rust that follows this repository's contracts.
-8. If the conclusion is durable or affects future work, record a short project-authored note under
-   `reference/notes/` with sources consulted and any deliberate divergence.
+6. Extract semantic invariants and implementation-independent expectations; identify details safe
+   to change and useful optimization opportunities. Do not port the reference architecture.
+7. Choose original idiomatic Rust behavior using the current project priority order. Exact
+   reproduction is optional when a meaningful measured/justified benefit supports a deviation.
+8. Before production edits, record `reference/notes/features/<feature>.md` with sources and locked
+   revisions, original classes/methods/assets, reference behavior, semantic invariants,
+   implementation-independent expectations, details safe to change, optimization opportunities,
+   chosen RustCraft behavior, intentional deviations and acceptance criteria.
+9. If the conclusion is durable or affects future work, record it in project documentation too.
 
 Never copy substantial third-party/reference code into production source. Never automatically
 execute/build downloaded reference repositories merely to inspect them.

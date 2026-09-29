@@ -16,5 +16,10 @@ Examples:
 - timing-sensitive mechanics should use explicit logical durations rather than accidentally depend
   on an arbitrary scheduler rate.
 
+Survival mode is authoritative simulation state. Breaking produces semantic drops and item
+entities, pickup inserts through the shared inventory API, and crafting matches registered shaped
+or shapeless recipes. Development mode may retain a prefilled loadout and instant breaking for
+diagnostics; this distinction is not a renderer-only flag.
+
 When choosing between historical quirk compatibility and a clear native mechanic, prefer the clear
 mechanic unless the quirk is central to the expected play style.

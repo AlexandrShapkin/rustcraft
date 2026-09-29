@@ -14,9 +14,11 @@ A controllable player/entity receives semantic intent from a controller. Candida
 - replay controller;
 - deterministic test/script controller.
 
-The simulation should consume concepts such as movement, look direction, jump, crouch, attack,
-use/interact, break/place, inventory actions and crafting actions. It must not depend directly on
-window-system events or device key codes.
+The universal boundary consumes movement, look direction, jump, crouch and generic primary or
+secondary actions. A game package decides whether those actions mean mine, place, interact or
+something else. Legacy M0-M3 break/place/inventory/crafting fields remain temporarily for
+compatibility and are game conveniences, not permanent universal semantics. The simulation must
+not depend directly on window-system events or device key codes.
 
 ## Bot model
 
@@ -30,11 +32,19 @@ crafting and communication where permitted.
 The semantic Bot API must be versionable and should remain stable across internal ECS/chunk/runtime
 rewrites.
 
+Survival observations expose nearby dropped item stacks, the selected semantic item (including
+tool durability), inventory slots and mining progress. Survival actions use the same intent path
+as a human controller: bots select hotbar slots, hold/release breaking, place blocks, manipulate
+inventory and request registered recipes. They do not receive direct world or inventory mutation.
+
 ## Mod-aware bots
 
 Bots should be able to reason about unknown server-added content through semantic definitions:
 block/item/entity IDs, tags, properties, preferred tools, recipes and interaction capabilities.
 They should not require textures or audio to understand modded content.
+
+Generic observations expose namespaced definitions and capabilities. Minecraft-specific helpers
+may be layered above them; they do not define the universal Agent API.
 
 ## Headless stepping
 

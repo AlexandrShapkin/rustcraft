@@ -8,8 +8,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+rustcraft-agent-api.workspace = true
+rustcraft-bot-api.workspace = true
 rustcraft-content.workspace = true
-rustcraft-gameplay-blocks.workspace = true
-rustcraft-gameplay-flat-world.workspace = true
+rustcraft-engine-core.workspace = true
+rustcraft-minecraft-b173.workspace = true
 rustcraft-mod-api.workspace = true
 rustcraft-runtime.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "rustcraft-sandbox-test"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pollster.workspace = true
+rustcraft-agent-api.workspace = true
+rustcraft-content.workspace = true
+rustcraft-engine-core.workspace = true
+rustcraft-game-api.workspace = true
+rustcraft-render.workspace = true

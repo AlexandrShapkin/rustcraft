@@ -10,3 +10,11 @@ workspace = true
 [dependencies]
 rustcraft-agent-api.workspace = true
 rustcraft-content.workspace = true
+rustcraft-engine-core.workspace = true
+rustcraft-minecraft-b173.workspace = true
+rustcraft-mod-api.workspace = true
+rustcraft-render.workspace = true
+rustcraft-runtime.workspace = true
+pollster.workspace = true
+winit.workspace = true
+wgpu.workspace = true

@@ -14,8 +14,34 @@ Independent reimplementations are useful for cross-checking interpretation and s
 implementations. Technical wikis/mappings are navigation aids. Vanilla assets are a visual baseline.
 Libre/open assets are preferred for redistributable tests/examples.
 
-The product contract still wins: this project is not bug-for-bug compatible and may deliberately
-replace historical behavior with cleaner explicit mechanics while retaining familiar gameplay.
+The product contract still wins: this project is not pixel-identical, algorithmically identical or
+bug-for-bug compatible. It may deliberately replace historical behavior or presentation with
+clearer mechanics and scalable implementations while retaining semantic expectations and a
+recognizable Beta-like identity.
+
+## Reference-first feature gate
+
+Observable gameplay and UI work must begin with a bounded study of the locked references. Invoke
+`.agents/skills/reference-study/SKILL.md`, run `just refs-status`, and write a concise note under
+`reference/notes/features/` before changing production code. The note records sources, revisions,
+observable behavior, input and presentation semantics, edge cases, intentional deviations and an
+acceptance criterion set. Purely internal storage, CI, transport, serialization, logging and profiler
+changes are exempt unless they alter visible behavior.
+
+Each new feature note records:
+
+- reference behavior;
+- semantic invariants;
+- implementation-independent expectations;
+- details safe to change;
+- optimization opportunities;
+- chosen RustCraft behavior;
+- intentional deviations;
+- acceptance criteria.
+
+Reference research informs a decision; it does not automatically select exact reproduction.
+Historical M3 exact-fidelity notes remain valid evidence for that completed repair campaign, but
+their local acceptance target is not the default policy for future work.
 
 ## Rules
 
@@ -31,7 +57,8 @@ Do not:
 - make the Java class hierarchy/API structure the engine architecture;
 - copy AGPL reference implementation code into this project's source;
 - commit local proprietary game assets/reference source by default;
-- package Mojang-owned vanilla assets into bootstrap archives/releases by default.
+- package Mojang-owned vanilla assets into bootstrap archives/releases by default;
+- preserve an inefficient historical implementation solely because it is historically exact.
 
 When a durable finding matters, record the question, sources consulted, conclusion and deliberate
 project divergence (if any) under `reference/notes/`.

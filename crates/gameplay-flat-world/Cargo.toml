@@ -8,4 +8,5 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+rustcraft-engine-core.workspace = true
 rustcraft-mod-api.workspace = true

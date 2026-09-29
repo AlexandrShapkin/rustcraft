@@ -24,9 +24,11 @@ compatibility and bug-dependent contraptions are not requirements.
 
 ## Visual direction
 
-Keep the old game's baseline readability and style. Do not make realism the objective. Distant LOD,
-better culling, batching, modern GPU APIs and larger view distance are valid optimizations if the
-ordinary gameplay image does not become worse.
+Keep the old game's baseline readability and style. Do not make realism the objective. Mipmapping,
+filtering, compression, LOD, culling, batching, dynamic quality, modern GPU paths and larger view
+distance are valid optimizations. Moderate visual differences are acceptable for meaningful
+performance, frame-time, memory, scalability or extensibility gains when gameplay remains
+recognizable and semantically clear.
 
 Not baseline goals: ray tracing, global illumination, volumetric effects, realistic fluids,
 rigid-body block physics, ecosystem simulation, seasons, GOAP-heavy or neural mob AI.

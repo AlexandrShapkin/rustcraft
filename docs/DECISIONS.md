@@ -57,3 +57,252 @@ Status: accepted.
 
 SIMD, io_uring, custom allocators, NUMA, lock-free structures, special databases and similar
 techniques require a representative workload and measurement before adoption.
+
+## D-009 — M0 simulation uses a generic voxel world and semantic action path
+
+Status: accepted.
+
+The first headless slice keeps chunk storage, AABB collision and fixed-step movement in generic
+engine/runtime code. First-party blocks and flat generation register through gameplay modules;
+break/place requests arrive as semantic controller intent and are also exposed through the Bot API.
+
+## D-010 — wgpu and winit are isolated to the graphical path
+
+Status: accepted.
+
+The render crate owns wgpu device/surface/pipeline resources and CPU mesh extraction. The client
+owns the winit event loop and translates platform input into semantic intent; runtime and server
+remain free of graphics dependencies.
+
+## D-011 — Render presentation copies only dirty world sections
+
+Status: accepted.
+
+The client keeps a RenderWorld presentation cache. Initial chunks are extracted once, then runtime
+dirty notifications update changed X/Z sections and their boundary neighbors. CPU face-culling
+meshes and GPU buffers are chunk-level resources; greedy meshing is deferred.
+
+## D-012 — Local development resources resolve through content paths
+
+Status: accepted.
+
+The client uses the content crate's local resolver for the ignored/development terrain atlas path.
+The renderer receives a resolved path and does not encode Minecraft asset locations in engine APIs.
+
+## D-013 — World coordinates use X/Z horizontal and Y up
+
+Status: accepted.
+
+World, collision, section origins, mesh vertices and first-person camera math use X and Z for
+horizontal axes and positive Y for vertical height. The view is right-handed with camera forward
+mapped to -Z. CPU matrix helpers construct and multiply rows; `P * V * I` is converted once to
+four f32 columns for WGSL `matrix * vector`. A transpose alone cannot repair mixed row/column
+constructors. See `docs/RENDER_DIAGNOSTICS.md` for the verified convention and staged evidence.
+
+## D-014 — Material tint is separate from lighting
+
+Status: accepted.
+
+First-party texture resolution supplies linear RGB tint with a white default. The renderer applies
+it separately from face brightness. The flat-world grass top uses a fixed authored tint for its
+grayscale atlas tile; biome coloration remains outside M1. Diagnostic checker/stone scenes stay
+white-tinted and unlit.
+
+## D-015 — M2 content, state and inventory
+
+Status: implemented.
+
+Blocks and items use separate typed u32 handles and semantic names in registries. A stored
+BlockState holds a block handle and reserved variant bits (currently all authored states use zero).
+Definitions express full-cube/empty collision, material, face resources, breakability, optional
+item/block correspondence, stack limits, capabilities, emission and independent light opacity.
+First-party atlas coordinates stay in gameplay-blocks; renderer APIs receive resolved tiles/tints.
+
+Simulation owns a fixed 36-slot inventory (Option<ItemStack>, u16 counts), including the selected
+nine-slot hotbar index. Selection, wheel changes and use/break arrive through AgentIntent. Placement
+validates the selected item, destination and solid-block/player intersection before consuming one
+item. Explicit controller placement also validates the semantic ray's adjacent cell and block hint;
+explicit breaking must match the ray target. Direct simulation action methods remain useful to
+trusted headless scenarios; controllers do not receive mutable World access. Development stacks
+are seeded by semantic names at composition time and can be replaced without changing inventory.
+
+## D-016 — M2 lighting and mesh invalidation
+
+Status: implemented.
+
+World owns packed four-bit sky/block channels in contiguous section arrays. Runtime Lighting owns
+contiguous direct-sky seeds per loaded section and column bounds. Initialization traverses loaded
+columns plus a one-section vertical light margin. An edit recomputes direct seeds only in its X/Z
+column, then runs a deduplicated FIFO relaxation queue. Opening/closing sky and adding/removing
+emitters converge using attenuation of at least one for propagated edges; vertical direct sky
+retains 15 through clear air. Column extension initializes only that newly expanded column.
+
+Every changed voxel/light value marks its section and any face-adjacent sections needed for
+neighbor samples. Presentation copies dirty sections and their light halos, and existing GPU mesh
+entries are replaced. Empty geometry is not drawn. M2 uses max(sky, block), a small brightness
+floor and directional face shading; smooth lighting/AO is deferred. The temporary full-cube lamp
+proves emission and removal. No renderer writes authoritative light or block state.
+
+Opaque, Cutout, Translucent and Invisible are content classifications. Opaque neighbors hide
+faces; identical nonopaque neighbors suppress shared faces; different nonopaque materials retain
+interfaces. M2's atlas glass uses binary alpha and the cutout shader path. Fractional alpha and
+sorted translucent rendering remain explicitly deferred, as do more sophisticated leaf interiors.
+
+## D-017 — HUD and diagnostics are presentation
+
+Status: implemented.
+
+The purpose-built HUD consumes a read-only snapshot of slots, selection and the simulation's
+RayHit voxel. Project-authored 5x7 glyphs, nearest atlas icons and integer scale produce crisp UI.
+F3 is client state, never AgentIntent. DebugMetricsSnapshot periodically gathers simulation,
+renderer, mesh, process and optional hardware counters; drawing code reads no world or OS data.
+Debug text geometry/uploads are cached until text or dimensions change. Crosshair, slot and outline
+geometry use bounded reusable buffers. Outline edges are currently projected screen-space lines.
+
+## D-018 — Measurement definitions and scheduler policy
+
+Status: implemented.
+
+Headless runtime metrics use fixed 240-sample histories, without per-sample allocation. Rolling FPS
+is 1 / mean frame interval. 1% low is 1 / mean of the slowest ceil(N/100) intervals, unavailable
+before 100 valid samples. Tick and mesh durations use bounded histories. Actual TPS and rebuilds/s
+are completed counts divided by elapsed monotonic wall time, refreshed after at least one second;
+they are not configured-rate constants. Displayed target TPS is 20. Simulation timings exclude
+presentation extraction/meshing; mesh timings include generation/upload preparation.
+
+FixedStepClock retains fractional elapsed time, runs at most five 50 ms ticks per event-loop turn,
+and deliberately drops whole excess ticks after a longer stall. It never increases tick dt or
+changes the subsequent rate. The catch-up flag identifies turns needing multiple ticks. This
+bounds the work after suspend/drag/long frames instead of accumulating an unbounded backlog.
+
+Linux process sampling runs every 500 ms using /proc/self/status (RSS, threads), /proc/self/stat
+(process user+system ticks) and /proc/stat (aggregate ticks and logical CPU count). CPU 100% means
+one logical core; RSS is the kernel's inexpensive approximate resident figure. No new dependency
+is needed. Other OSes or unreadable samples return None/N/A. See the kernel's
+[/proc documentation](https://www.kernel.org/doc/html/latest/filesystems/proc.html).
+
+GPU frame duration uses optional wgpu TIMESTAMP_QUERY from world-pass beginning to HUD-pass end,
+asynchronous readback and queue timestamp period. It excludes presentation wait and capture copy.
+Hardware utilization/VRAM have a separate optional client provider. Exactly one DRM device must
+match adapter PCI vendor/device IDs; otherwise N/A. The Linux provider reads supported
+[amdgpu sysfs counters](https://docs.kernel.org/gpu/amdgpu/thermal.html) at 500 ms intervals.
+These are whole-device figures, not process VRAM or utilization inferred from frame duration.
+No NVML/vendor dependency is mandatory. Unsupported timestamp/hardware metrics remain N/A.
+
+## D-019 — M3 survival state and telemetry labels
+
+Status: implemented.
+
+`GameMode` is authoritative simulation state. Development mode seeds the temporary loadout;
+Survival starts empty and routes block breaking through drops, item entities, pickup and inventory.
+Item entities are compact value records with semantic `ItemStack`, velocity, age and pickup delay;
+the runtime performs bounded merge/pickup passes and exposes semantic observations. ItemStack damage
+is mutable per stack for tools, while the item definition supplies category, tier, speed and maximum
+durability. Recipes are semantic shaped/shapeless records in a registry; the small 2x2 player grid
+supports the first progression recipes. Rendering receives item position snapshots only.
+
+F3 labels adapter telemetry as `Device GPU busy` and `Device VRAM`; process CPU/RSS remain distinct.
+Present mode is shown explicitly with `(VSYNC)` for FIFO. These values are whole-device where the
+platform provider says so and remain N/A without a matching provider.
+
+## D-020 — M3.1 interaction presentation
+
+Status: implemented.
+
+Continuous mining uses the existing semantic `AgentIntent.attack` field as a held state. The
+client clears it on release, focus loss and inventory mode; Survival mining resets on release or
+target change and advances only on fixed simulation ticks. Dropped items are extracted into a
+world-space sprite buffer and rendered with depth testing, while the HUD remains screen-space.
+Inventory is a read-only snapshot with semantic slot-operation calls. Crack feedback is a
+transient world-space overlay generated from the target block and mining stage; it never rebuilds
+the persistent chunk mesh.
+
+## D-021 — Beta resource-backed M3.2 presentation
+
+Status: implemented.
+
+The player inventory uses the semantic `gui/inventory.png` resource and the researched 176×166
+layout. Block items opt into a shared 3D/isometric presentation for GUI, hotbar, cursor and world
+drop paths; sprite items retain a 2D path. Destroy stages resolve to terrain atlas tiles 240–249.
+Reference behavior is recorded before implementation in the M3.2 feature note, while the content
+profile remains responsible for resource and presentation selection.
+
+## D-022 — M3.8 canonical presentation geometry and offscreen inspection
+
+One immutable full-cube face definition owns position perimeter, UV correspondence, normals
+and triangle indices. World, GUI and dropped-item transforms consume that geometry. The
+atlas uses top-left image coordinates; only `tile_uv` performs atlas addressing. GUI items
+use the source-derived column-vector transform, a depth-cleared pass and back-face culling;
+GUI projection is independent of the gameplay camera. Resolved `BlockModel` carries semantic
+face textures/tints and model rotation for both production presentation and inspection.
+
+`offscreen::Scene` renders clip-space vertices to its own readable color/depth attachments.
+It never copies a swapchain image or requires a visible window. The client CLI is the
+first-party content adapter; renderer code contains no Beta block IDs or local asset paths.
+Generated charts work without assets. Real-texture cases use the existing local resource
+resolver. Outputs are deterministic local PNGs, suitable for future toleranced image diffs;
+no unaccepted golden image or proprietary image is checked into source control.
+
+## D-023 — compact semantic orientation foundation
+
+Retain the existing `BlockState { block: BlockId, variant: u16 }` (8 bytes including padding),
+with typed `Facing`, `Axis` and `HorizontalRotation` accessors. Facing uses bits 0..2, axis
+3..4, horizontal rotation 5..6; other bits are reserved/preserved. Zero means North (-Z),
+Y axis, R0. Typed constructors produce equal values for equal settings; no state-ID registry,
+per-voxel string/map, allocation or opaque Beta metadata interpretation is introduced.
+
+A block definition declares `orientation_property` (None/Facing/Axis/HorizontalRotation)
+and a `base_model_rotation`. Proper signed orthogonal matrices rotate around the cube center.
+Composition is base * state (column vectors: state first). First-party blocks currently keep
+None/identity, so placement/gameplay behavior does not change. State survives world storage
+and presentation extraction. Meshing rotates the complete geometry and its neighbor-facing
+normal while keeping UVs attached; `state_texture` is a separate resolver hook for content
+that selects a different material by state. Metadata import mappings and directional-block
+gameplay are deferred. No furnace/door/stair mechanics were added.
+
+## D-024 — engine mechanism and game policy boundary
+
+The dependency direction is platform → engine → `game-api` → game package → optional packages.
+Engine crates contain reusable voxel/runtime mechanisms and never depend on `minecraft-b173`.
+Minecraft Beta behavior and content are policy implemented by the first-party game package using
+the same public registration mechanisms available to another native game or native mod.
+
+The initial `game-api` is intentionally small: validated namespaced IDs, generic voxel
+definitions, package registration, native fixed/update schedules, a controlled block-mutation
+command buffer and profile composition. Static function systems and compact/indexed storage avoid
+hot-path indirection. New capabilities and commands require a concrete consumer.
+
+## D-025 — incremental Minecraft package migration
+
+`minecraft-b173` is the composition boundary for the existing first-party block and flat-world
+modules. Client and server depend on it rather than importing those modules directly, and validate
+its public Game API registration at startup. The M0-M3 `runtime` and `mod-api` remain transitional:
+they mix reusable mechanisms with Minecraft inventory, mining, drops and crafting policy. Those
+areas migrate when next extended, preserving accepted behavior rather than forcing a rewrite.
+
+## D-026 — GameProfile and non-Minecraft architecture test
+
+`GameProfile` composes namespaced package, resource and system identities with the existing content
+manifest. It is composition metadata, not a general package manager. `sandbox-test` is a tiny
+non-Minecraft game that registers four generated/debug blocks, consumes generic controller intent,
+runs native scheduled systems, applies a queued world command and renders through the shared
+offscreen renderer. Its Just recipe rejects dependencies on Minecraft, legacy gameplay crates and
+the mixed runtime, making it a permanent dependency-direction integration test.
+
+Compact `BlockState { BlockId, variant }` remains the engine storage strategy. Beta metadata
+mapping, Minecraft properties and gameplay meaning belong in the Minecraft package.
+
+## D-027 — semantics and scalability outrank exact Beta fidelity
+
+Status: accepted; current project direction.
+
+Beta 1.7.3 remains the first-party gameplay/content reference, visual style baseline and source of
+recognizable interaction contracts. It is not a pixel-identical, behavior-identical or
+algorithmically identical compatibility target. Prior exact-fidelity M3 notes remain historical
+evidence for a completed repair campaign; they do not set the default policy for future systems.
+
+Engineering priority is: clear predictable semantics; performance and frame-time stability;
+large-world/content/mod scalability; Game API cleanliness; overall Beta-like identity; exact
+fidelity. A measured or well-justified optimization may accept moderate visual differences while
+preserving semantic readability. Substantial choices compare runtime/frame-time, memory,
+scalability and extensibility benefit with visual/semantic cost, complexity and maintenance.

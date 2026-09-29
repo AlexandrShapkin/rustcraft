@@ -31,6 +31,14 @@ The architecture should eventually provide equivalents of:
 - capability resolver;
 - resource manager.
 
+`GameProfile` is the native composition boundary above these primitives. It names the packages,
+resources and systems that form one game instance; it does not replace manifest resolution or
+content-addressed delivery. A Minecraft profile composes `voxel_std` and `minecraft_b173`; another
+game can compose `voxel_std` and its own package without loading Minecraft.
+
+Definitions and resources use validated namespaced IDs. Numeric registry handles remain valid for
+compact runtime storage after semantic registration/resolution.
+
 ## Content-addressed cache
 
 Immutable blobs should ultimately be keyed by a strong content hash so identical data shared by
