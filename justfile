@@ -158,6 +158,24 @@ worldgen-bench:
 persistence-bench:
     cargo run --release -p rustcraft-server -- --persistence-bench
 
+world-stream-bench:
+    cargo run --release -p rustcraft-server -- --world-stream-bench
+
+# Headless production streaming/controller route: fresh generation, normal-speed travel, edit,
+# eviction, disk reload, negative coordinates, distant player reopen, and continued travel.
+world-travel-test:
+    cargo run --release -p rustcraft-client -- --world-travel-test
+
+# Deterministic production-controller route in an isolated ignored test world.
+# Example: RUSTCRAFT_MESH_WORKERS=2 just stream-perf target/stream-perf-w2 stream-perf-w2
+stream-perf saves_dir="target/stream-perf-saves" world="stream-perf":
+    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=185 cargo run --release -p rustcraft-client -- --survival --stream-perf
+
+# Bounded actual-client M4 acceptance. Uses the selected surface/GPU and exits non-zero when
+# terrain margin, input/event responsiveness, route coverage, or visibility latency fails.
+client-stream-auto saves_dir="target/client-stream-auto-saves" world="client-stream-auto":
+    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=185 cargo run --release -p rustcraft-client -- --survival --stream-perf
+
 # Print the sole authoritative Engine/Product SemVer.
 version:
     python3 scripts/release.py version

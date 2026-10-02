@@ -182,15 +182,16 @@ latency guarantees.
 
 The headless `just world-roundtrip` integration generated two neighboring columns on two workers,
 persisted a semantic-state edit, closed/reopened the world, and verified the edit and a still-
-ungenerated deterministic neighbor. Client startup now creates/opens named worlds and autosaves
-mutations, but initial assembly waits synchronously for worker results and residency remains a fixed
-3x3 neighborhood. Those limitations make these measurements a foundation, not M4 completion.
+ungenerated deterministic neighbor. The client now assembles its safe startup neighborhood on a
+background bootstrap worker and requests a bounded moving residency area; interactive travel and
+full M4 acceptance remain outstanding.
 
 The M4 player record now uses an outer v2 envelope and three Minecraft-owned component codecs.
 Changed revisions checkpoint every two seconds by default (configurable 1–2 seconds); one
 coalescing worker keeps filesystem sync off the simulation/render tick. Checkpoint diagnostics
-report encoded bytes, write time, sync time and total worker latency; sync measures OS-requested
-file/directory synchronization, not guaranteed physical-media latency. The prior manual 116-byte
+report encoded bytes, write time, sync/replace time and total worker latency; sync/replace measures
+the atomic checkpoint transaction including OS-requested file/directory synchronization, not
+guaranteed physical-media latency. The prior manual 116-byte
 single-payload save measured 0.072 ms encode and 3.307 ms atomic write+sync, with 0.032 ms read and
 0.029 ms decode on reopen. It is a pre-component legacy-format sample, not a comparison against
 the final async/two-slot layout. The empty inventory payload was 65 bytes before component framing;
@@ -204,3 +205,342 @@ at checkpoint revision 203 with all three components, demonstrating recovery of 
 checkpoint; unsaved motion after it remains within the configured 1–2 second window. Underwater
 fog adds only a camera uniform and fragment distance/mix work on world opaque/translucent fragments;
 no GPU timing comparison is available yet, so no frame-time cost is claimed.
+
+`just world-stream-bench` is a headless release workload over 91 deterministic interest centers,
+including negative coordinates, multiple travel reversals, save-before-evict, and edits in two
+separated columns. Runtime simulation spreads new-column light seeding/propagation and eviction
+boundary cleanup over bounded 4,096-voxel slices. The client admits at most two ready columns per
+fixed tick into a lighting queue bounded to eight columns including active work. This matters
+because synchronous `Simulation` column publication previously took 26.710 ms in its worst single
+call (an earlier sample reached 62.883 ms).
+
+Latest release run: 77 generated, 180 loaded, 77 misses, 741 evicted, 77 saved before eviction,
+maximum 14 resident and 5 load/generation pending-or-in-flight, maximum lighting queue 5. Summed
+worker load/decode was 1,397.669 ms; generation 43.040 ms; incremental lighting/publication work
+3,627.883 ms; maximum measured slice 3.206 ms; total wall time 5,094.440 ms. These vary by run and
+describe the headless benchmark, not an interactive frame-time improvement. The 3.206 ms maximum
+is 23.504 ms lower than the historical 26.710 ms synchronous sample, while work is spread across
+ticks rather than removed. Light-driven
+section invalidations coalesce until propagation converges. Two separated edits were observed
+after residency reload and persisted decode. `sample_chunk_state_hash=384029af…7192a807` is the
+canonical voxel-state hash of one independently regenerated benchmark column at `(4,2)`; it is not
+the fixed-region worldgen hash and is not a hash of the edited streaming world. The separate
+16-column canonical worldgen hash remains
+`e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`.
+
+Interactive release diagnostics on the owner’s AMD Radeon Vega 8 identify RADV Vulkan, not
+llvmpipe. Before the current repair, the owner observed ~37.8 FPS, 26.46 ms frames, ~6 FPS 1% low,
+TPS 18.8, and ~0.92 ms GPU frame time while traveling; the same screenshot showed ~6.03 s lighting
+work, 602 rebuilds, 80 stale meshes, and 7 mesh workers. In a local release reproduction with
+those 7 workers, the converged scene returned to ~57–59 FPS and TPS~20, but active travel left up
+to 7 lighting columns queued and resident columns grew 29→57 without eviction. This isolates the
+regression to CPU-side streaming/lighting/remesh pressure rather than GPU execution, while present
+FIFO accounts for most of the ~17 ms converged frame interval. The newer repair defers direct-sky
+scan from publication into bounded slices, avoids boundary seeds for opaque non-emissive cells,
+coalesces presentation invalidation until a column's lighting converges, removes the per-publication
+resident-section scan by carrying the new column's section list into lighting, and queues cleanup
+for unrelated evictions rather than globally blocking eviction while any lighting work is active.
+It also coordinates default CPU work to four mesh, one load, and one generation worker on an
+8-logical-CPU host; `RUSTCRAFT_MESH_WORKERS` remains available for a real-device sweep. CPU phase
+timings and request→voxel/light/all-section-upload latency windows are now exposed in F3. These
+changes have focused correctness tests, but must not be described as a measured interactive
+improvement until a same-device travel/convergence run completes. `just stream-perf` launches the
+isolated scratch-world forward-travel workload with F3 tracing enabled.
+
+Residency request ordering now uses bounded speed × time on a stable travel heading, measured from
+actual per-fixed-tick displacement, to scale a bias along a normalized 70% movement / 30% camera
+horizontal-direction blend.
+A single sample is clamped to 8 blocks, speed to 32 blocks/s, the movement horizon to 12 seconds,
+and lookahead to three columns. A heading change resets the sustained duration; stopping decays it.
+This avoids a high-priority jump from a brief fast nudge while moving requests ahead in the visible
+direction during committed travel; actual movement remains the stronger directional signal, and
+camera rotation alone does not increase the priority horizon.
+F3 `motion_lead` reports the current lookahead. Eviction is
+considered every fixed tick outside retain radius; dirty, save-in-flight, lighting and dropped-item
+columns remain protected.
+
+Real-surface radius-6 release profile on AMD Radeon Vega 8 / RADV Vulkan (4 mesh workers, FIFO,
+fixed flight for 30 s, then idle until queues converged): active travel averaged about 55–56 FPS
+(18.0 ms frame), 1% low 23.8–24.7 ms, TPS 19.9–20.0, GPU frame 1.0–1.2 ms. Fully converged final
+sample was 56.94 FPS, 17.56 ms frame, 29.34 ms 1% low, TPS 19.92, 13.4% process CPU and 1.59 ms GPU
+frame. The full desired radius first became ready at 51.98 s from world-ready; startup-safe was
+242.7 ms. At convergence: 113 desired, 123 resident columns (retain area plus temporary/pinned
+state), 984 resident sections, 162 visible sections, 15 evictions, and no async/lighting/mesh backlog.
+The moving window reported request→voxel p95 4.32 s, request→lighting p95 7.47 s, and
+request→all-section-upload p95 7.60 s (max 10.12 s). The run completed 4,176 mesh jobs with 14
+stale and 2 coalesced, used 221.6 MiB process RSS, 49.3 MiB snapshot estimate, 28.7 MiB logical GPU
+mesh bytes and 57.6 MiB allocated buffer capacity. It confirms a short far-latency tail but does not
+show whether a manually controlled player outruns terrain; at that checkpoint M4-002/M4-009
+remained open pending visual acceptance and improved arrival latency. Earlier radius-6 attempt on
+llvmpipe/GL was closed and
+excluded from hardware conclusions.
+
+A second real-surface radius-6 release flight after the sustained-motion priority update converged
+at 57.90 FPS, 17.27 ms frame, 29.54 ms 1% low, TPS 19.99, and 1.60 ms GPU frame. During travel it
+averaged about 57 FPS with 23.9–25.3 ms 1% lows. It reached the full 113-column desired area in
+50.91 s; request→voxel p95 was 4.36 s, request→lighting p95 7.55 s, and request→all-section-upload
+p95 7.69 s (max 10.23 s). It completed 4,186 mesh jobs (21 stale, 2 coalesced), converged at 120
+resident columns with 15 evictions, and had no async/lighting/mesh backlog at final sampling. The
+priority lead reached its configured three-column cap during sustained flight and decayed to zero
+after stopping; however, the aggregate visible-latency p95 did not improve beyond run variance.
+
+After adding camera-view direction to the bounded motion bias, the same auto-flight diagnostic on
+AMD Radeon Vega 8 / RADV Vulkan completed and closed itself after queue convergence. Final sample:
+57.83 FPS, 17.29 ms frame, 29.23 ms 1% low, TPS 19.71, GPU frame 1.56 ms, 13.3% process CPU,
+220.2 MiB RSS. During the 30-second flight FPS remained roughly 57–59; the view/motion lead reached
+3 columns and returned to zero while idle. The 113-column desired area became ready in 46.64 s;
+request→voxel p95 was 3.93 s, request→lighting p95 7.00 s, and request→all-section-upload p95
+7.05 s (max 8.67 s). At convergence, 120 columns/960 sections were resident, 11 columns had been
+evicted, all async/lighting/mesh queues were empty, and 3,870 mesh jobs had 7 stale results. This is
+consistent with the previous runs but does not establish that a manually controlled player never
+outruns visible terrain.
+
+Controlled 60-second AMD Radeon Vega 8 / RADV Vulkan sweeps used the same 30-second four-leg flight,
+four mesh workers, and fresh worlds. These pre-repair runs compare radius/lookahead; p95 values are
+request-to-all-section-upload, not a claim about forward visible margin:
+
+| Load radius | Retain | Lookahead | Desired | Generated | Visible p95 | Request→lighting p95 | Lighting queue p95 | FPS / TPS |
+| ---: | ---: | :---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 4 | on | 29 | 81 | 6.60 s | 6.58 s | 4.25 s | 58.3 / 20.64* |
+| 4 | 5 | on | 49 | 103 | 7.41 s | 12.43 s | 9.53 s | 58.3 / 19.92 |
+| 4 | 5 | off | 49 | 103 | 7.40 s | 12.54 s | 9.54 s | 58.1 / 19.99 |
+| 5 | 6 | on | 81 | 118 | 7.51 s | 11.70 s | 7.03 s | 58.1 / 19.67 |
+| 6 | 7 | on | 113 | 135 | 7.70 s | 7.55 s | 2.86 s | 58.3 / 19.99 |
+
+`*` TPS is the client's whole-run rolling estimate and occasionally exceeds 20; it is not a stable
+fixed-step-drift measurement. The radius-4 A/B is effectively indistinguishable (well below run
+variance), so this route does not establish a measurable lookahead benefit. More importantly, the
+radius sweep does not show larger radii reducing arrival latency. The controlled traces locate the
+large tail in serialized work: radius-3 request→voxel p95 was 3.26 s, lighting queue wait p95
+4.25 s, while lighting's per-column accumulated CPU p95 was about 52 ms; mesh queue/execution p95
+was about 48/12 ms, upload wait about 103 ms, and publication CPU below 0.1 ms. Load and generation
+stages report their true submit→worker queue delay separately now; prior
+reports subtracted worker CPU from request latency and are not actual queue-wait measures.
+
+A separate same-route worker sweep after the boundary fast path held radius 3 and lookahead on,
+varying total heavy workers as mesh workers + one load + one generation worker (save worker was idle):
+
+| Total heavy workers | Mesh workers | FPS | 1% low | TPS | Visible p95 | Lighting queue p95 | Mesh queue / execution p95 | Upload wait p95 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 1 | 58.55 | 29.69 ms | 20.00 | 6.01 s | 4.38 s | 551 / 5.0 ms | 31 ms |
+| 4 | 2 | 58.15 | 29.95 ms | 19.91 | 6.13 s | 4.47 s | 221 / 7.5 ms | 45 ms |
+| 5 | 3 | 58.31 | 30.02 ms | 19.68 | 6.15 s | 4.17 s | 112 / 9.5 ms | 178 ms |
+| 6 | 4 | 58.55 | 29.78 ms | 19.99 | 6.02 s | 4.47 s | 93 / 11.9 ms | 195 ms |
+
+This sweep does not show a material FPS/TPS or visible-latency advantage from more than three
+workers; it does reduce mesh queue wait while moving more time into mesh execution/upload waiting.
+The existing four-mesh-worker default (six heavy workers including load/generation) is retained for
+now because it keeps the mesh queue tail short without changing the dominant ~4.4 s lighting queue
+wait. This is a measurement of this route/device, not a universal worker formula.
+
+On the same radius-3 route, current-distance lighting reprioritization without aging produced a
+starvation tail (maximum lighting wait about 31 s), so that version was discarded. Aging bounds
+that behavior but did not materially improve p95. The retained queue-aging policy is tested; it is
+not yet accepted as a throughput fix. Skipping border scans for sides without resident neighbors
+reduced boundary inspections from 1.18M to 0.525M in the route sample, but visible p95 only moved
+from about 6.6 s to about 6.0 s across runs. This is a measurable operation reduction, not closure
+of M4-009. Canonical worldgen remains unchanged. The primary unresolved KPI is still request→useful
+terrain visible to the player, and a directional ready/visible-margin metric plus owner-controlled
+normal-speed travel acceptance remain necessary.
+
+The client default is now load radius 4 / retain radius 5; `RUSTCRAFT_STREAM_RADIUS=3..12`
+remains supported. The final autonomous route and margin evidence are recorded below.
+Outside-retain columns are considered for eviction every simulation tick,
+while dirty, saving, boundary-lighting-dependent, and entity-pinned columns remain resident safely.
+The owner has reported responsive input but slow terrain arrival during manual travel; this batch's
+controlled flight is scripted and does not replace that manual acceptance. Initial bulk lighting
+now runs on a bounded worker; boundary reconciliation is advanced in 32-operation resumable
+quanta under a shared 2 ms event-loop streaming budget (`RUSTCRAFT_STREAM_MAIN_BUDGET_MS`,
+diagnostic override). Dirty snapshots/mesh requests are coalesced and processed a section at a
+time, and result/request/eviction application yields when the same callback budget expires. Hardware GPU
+timestamps are available for the Vega 8/Vulkan runs (~0.7–1.3 ms), while measured CPU present time
+includes FIFO/vsync. These measurements do not justify renderer optimization; the unresolved work is
+streaming/lighting throughput and verified player-visible margin.
+
+## Event-loop starvation investigation (M4-010)
+
+An owner-controlled `just client-survival` run confirmed strong lags. This environment selected
+llvmpipe/GL, so the numbers below diagnose scheduling but are not Vega 8/Vulkan acceptance. The
+first ~30 seconds included event-loop gaps up to 1.34 s, fixed-tick gaps up to 339 ms, and 13.45 s
+of dropped fixed-step time. `residency_ms` reached p95 183 ms/max 336 ms; synchronous
+`RenderWorld::sync_sections` over the accumulated dirty set reached p95 64 ms/max 243 ms. The
+debug overlay itself reached p95 ~15.7 ms when enabled. Per simulation tick, boundary reconciliation
+could process 8,192 work units; each dirty snapshot performed its own 18³ neighborhood extraction,
+and several columns could enqueue many sections before the next event turn. This is consistent
+with main-thread work starvation, not a synchronous startup barrier. Input callback handling itself
+was small in the trace, while input-to-render p95/max reached ~582/1,291 ms because no frame was
+rendered promptly.
+
+The repair makes the event-loop callback the budget boundary: default 2 ms shared streaming budget,
+input dispatch first, repeated 32-unit boundary-light slices within a 35% sub-budget, one
+initial-light result per turn, and coalesced snapshot/mesh/eviction work resumed over later turns.
+On the actual AMD Vega 8/RADV/Vulkan client (radius 3, F3 enabled), the final 93-second run reported
+~58.3 FPS, 27.9 ms 1% low, ~20.6 TPS, 0 dropped fixed ticks, GPU frame ~0.91 ms, frame
+p50/p95/p99/max ~16.4/29.0/34.0/36.5 ms, and event-loop gap p99/max ~33.8/34.7 ms. Fixed-step
+CPU p95 was ~0.12 ms, residency p95 ~0.39 ms, boundary-light service p95 ~3.24 ms (the indivisible
+vertical-ray scan and multiple quanta can exceed the loop's soft time budget), snapshot sync p95
+~4.29 ms/max ~8.95 ms, and mesh scheduling p95 ~0.015 ms. The once-per-second F3 rebuild caused
+rare ~22.6 ms outliers; typical cost was under 0.5 ms. This demonstrates that the multi-second
+event-loop starvation was removed on the test device, but it is not full travel acceptance: no
+manual movement/turn/reverse confirmation was received, and loaded-world request→visible p95 remained
+~88.4 seconds while only 10 of 18 published columns had completed boundary lighting by the end.
+Streaming throughput is still a separate open M4-009/M4-002 issue. An intermediate 512-unit pump
+was rejected because one uninterruptible batch drove boundary-light p95 to ~22 ms. The current
+32-unit pump repeats within the callback budget while allowing one atomic vertical-ray scan (the
+lighting algorithm's minimum unit). Individual snapshot/upload costs remain measured because a
+wall-time loop budget cannot preempt one operation already executing. The synthetic backlog-yield
+test covers retaining work for later turns.
+
+## Bulk initial-lighting repair (M4-009)
+
+The old stream path admitted one active column into `Lighting` and advanced exactly one 8,192-unit
+slice each 20 Hz fixed tick on the event/simulation thread. A typical ten-section column scans 256
+vertical x/z rays; each ray is charged about 2,560 units. The seed phase alone therefore needs at
+least 86 ticks (about 4.3 s) before shaded-cell/emitter relaxation and boundaries, and queued columns
+wait behind that single non-preemptive integration. The 52 ms/column CPU sample was thus stretched
+across seconds of tick scheduling. This is the measured mechanism behind the initial-light queue
+tail; actual old queue-wait p95 on Vega 8 was about 4.25 s.
+
+The new `InitialLightingScheduler` takes owned voxel sections and a cloned immutable registry,
+constructs full initial direct-sky and block-light arrays off-thread, and returns the still-unpublished
+voxel sections plus light arrays and direct-source data. Direct sky is scanned vertically; the
+existing relaxation visits only shaded cells, prior light and actual emitters. The simulation
+applies arrays by moving section storage, then performs bounded reconciliation only on faces with
+resident neighbors. Adjacent candidates are checked so emitter/light sources at a seam converge
+independently of A→B/B→A arrival order. Columns are not available to collision/rendering until full
+initial lighting is done; remesh invalidation occurs once after reconciliation. Incremental block
+edits remain on the existing update path.
+
+Focused tests pass for worker-vs-synchronous single-column arrays, seam emitter order convergence
+(A→B, B→A and synchronous simultaneous reference), queue capacity/result delivery, and the existing
+incremental lighting suite. `world-stream-bench` now exercises this scheduler for 257 loaded and
+generated columns, retains the edit/evict/revisit path, and reports per-job p50/p95/max queue and
+worker elapsed. Release headless worker sweep (load=1, generation=1; no mesh/render consumers):
+
+| Initial-light workers | Columns/s | Queue wait p50/p95/max | Worker elapsed p50/p95/max |
+| ---: | ---: | ---: | ---: |
+| 1 | 22.2 | 7.5 / 28.0 / 56.4 ms | 12.5 / 20.0 / 22.3 ms |
+| 2 | 22.4 | 0.05 / 13.0 / 20.4 ms | 15.8 / 22.3 / 26.4 ms |
+| 3 | 23.3 | 0.04 / 0.08 / 13.9 ms | 18.3 / 22.9 / 26.8 ms |
+| 4 | 23.6 | 0.04 / 0.09 / 10.5 ms | 17.7 / 23.7 / 27.8 ms |
+
+This is not a same-device render/CPU contention sweep: concurrent full lighting raises each job's
+elapsed time and yields only ~6% aggregate throughput gain at four workers. One worker remains the
+default (`RUSTCRAFT_LIGHT_WORKERS` override), with three default mesh workers plus load and
+generation workers for six compute-heavy workers on the 8-logical-CPU development host. Separate
+save/player-checkpoint workers are I/O-oriented and are not included in that count.
+
+An attempted automated 30-second client flight in this execution environment selected
+`llvmpipe (LLVM 22.1.8) / GL`, not AMD Vega 8/RADV Vulkan. It was stopped and excluded from hardware
+acceptance. That partial software-renderer trace did show initial-light worker queue p95 ~50 ms and
+worker elapsed p95 ~15 ms, compared with old multi-second queueing, but boundary-reconciliation
+queue wait remained ~1.35 s p95; request→light-ready was still ~1.93 s p95. Software-renderer FPS
+and visibility numbers are not comparable to the earlier Vega 8 baseline. No post-repair radius
+sweep, movement-direction ready-margin acceptance, or manual Vega 8 walking/turn/reverse check was
+possible here. The canonical worldgen hash remains a separately checked acceptance gate and must
+remain `e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`; the benchmark's
+`sample_chunk_state_hash=384029af…7192a807` remains only its independent sample-column hash.
+
+At that checkpoint M4-009 and M4-002 therefore remained open. The initial-light multi-second queue
+defect is repaired
+architecturally, but same-device request→visible p95, residual boundary scheduling, active/converged
+frame/TPS, and normal-speed directional render-ready margin are still unverified.
+
+## Render-ready starvation investigation (M4-011)
+
+The shared 2 ms safeguard exposed a separate last-mile defect. The old service order ran boundary
+lighting before fixed-step work; residency completion/admission, snapshots and mesh scheduling were
+then serviced only from 20 Hz fixed ticks and in a fixed order. Since all four stages consulted the
+same deadline, an early stage could consume its remainder, and dirty snapshot/mesh `HashSet`s did
+not guarantee that a forward/near section was selected first. The owner did not observe a frontier
+in the latest baseline session, so there is no captured per-column frontier lifecycle or post-fix
+manual travel result yet. A prior reused-world run reported request→visible p95 near 88 seconds;
+that value is the failure baseline, not an isolated queue-stage attribution.
+
+The revised service runs once after input/fixed-step processing on each event-loop turn. It gives
+critical completed-result application, boundary reconciliation, snapshot synchronization, mesh
+submission, and per-render mesh-ready upload service separate allowances within the existing
+nominal budget. Required (3x3), visible (next inner ring), then prefetch urgency is carried by the
+generic residency priority score and reused to order snapshot/mesh submission. Completed meshes
+prefer camera-forward sections within the same urgency ring. Initial resident meshes are seeded in
+urgency/distance order instead of coordinate order. A diagnostic llvmpipe/GL trace showed why
+starvation needed to be separated from prerequisite blocking: eight active/queued boundary jobs
+exhausted the former eight-column capacity, leaving completed light results waiting for capacity
+(critical stage reported 311 unserviced turns despite zero budget skips). Radius-3 desired residency
+was 29 columns, so the interim boundary capacity became 32. Final square-radius support uses a
+bounded capacity of 256. Locally complete initial-light results become
+presentation-ready immediately; later boundary reconciliation only invalidates actual changed-light
+sections. This is progressive presentation, not a claim that boundary work has completed. F3 reports
+per-stage budget skips, consecutive turns without service, observed backlog age, plus the nearest
+forward column's broad lifecycle (`FRONTIER`).
+The age is measured since the client first observed a non-empty backlog in this process; it is a
+diagnostic lower bound, not a persisted per-item enqueue timestamp. The owner reported no camera or
+control lag, but terrain still appeared behind the player and the approached chunk stayed invisible
+until block interaction, which made it appear immediately. This indicated delay in the last-mile
+presentation path rather than input responsiveness. After the follow-up changes, the owner retested
+`client-survival` on the AMD/Vulkan client: the forward chunk appeared on its own without breaking a
+block, and controls remained responsive. The visible draw distance still felt short (about one
+chunk). This closes the reproduced render-ready starvation symptom, not the broader terrain-ahead/
+latency acceptance tracked by M4-002 and M4-009. No post-fix F3 stage trace or sustained turn/reverse
+run was captured, so performance percentiles are not claimed. The llvmpipe trace is diagnostic
+only, not Vega/Vulkan acceptance. Boundary reconciliation still runs on the event thread in
+resumable slices.
+
+## Autonomous streaming completion acceptance
+
+The final area policy uses Chebyshev squares. Radius membership costs are 49/81/121/169 Desired
+columns at load radii 3/4/5/6, compared with the former Euclidean 29/49/81/113 and Manhattan
+25/41/61/85. The earlier controlled radius sweep showed no terrain-arrival benefit from increasing
+past four and made the extra startup work explicit. Radius 3 supplied too little observed visible
+margin; the final normal-speed route at radius 4 retained a positive buffer. The selected defaults
+are therefore load 4, retain 5, a complete 3x3 control-release core, visible urgency through radius
+2. Lookahead defaults off: on/off had the same 0.5-column minimum forward Safe/Visible margin;
+request-to-visible p95 was 1.30/1.50 s, which is not a meaningful benefit over run variance.
+When explicitly enabled, prediction remains bounded and movement-dominant within (never across)
+urgency classes.
+
+`just world-travel-test` uses production simulation, residency, load/generation, initial lighting,
+snapshot and meshing paths. It passed fresh generation, normal 4-block/s semantic-controller travel,
+straight and 90-degree turns, diagonal and negative-coordinate legs, 180-degree reversal, return
+through evicted terrain, persisted edit reload, distant saved-player reopen and continued travel.
+Its fresh minimum `[forward Safe, forward Visible, lateral Safe, lateral Visible, rear Visible]`
+was `[0.5, 1.5, 1.0, 1.0, 1.0]`; reused minimum was `[1.0, 2.0, 1.0, 1.5, 2.0]`.
+Fresh request-to-visible p50/p95/max was 0.300/0.489/0.688 s; reused was
+1.232/2.242/2.328 s. Fresh/reused resident peaks were bounded at 101/100 columns and 808/800
+sections on the headless path.
+
+The actual-window `just client-stream-auto` ran the seven-leg route for 168 seconds in both fresh
+and saved worlds. Only llvmpipe 23.1.1 / GL was available, so these are correctness/scheduler and
+software-present responsiveness results, not AMD/Vulkan hardware-performance acceptance:
+
+| Metric | Fresh world | Reused world |
+| --- | ---: | ---: |
+| Startup complete 3x3 Safe+Visible | 876 ms | 789 ms |
+| Distinct player columns / returned | 33 / yes | 33 / yes |
+| Minimum forward Safe / Visible | 0.5 / 1.5 col | 0.5 / 0.5 col |
+| Request→visible p50 / p95 / max | 0.511 / 0.859 / 1.082 s | 0.524 / 1.297 / 1.973 s |
+| Oldest critical-stage backlog max | 6.894 s | 6.595 s |
+| Frame p95 / p99 / worst | 63.01 / 69.75 / 74.55 ms | 75.17 / 92.17 / 106.05 ms |
+| Event-loop p95 / max | 62.95 / 74.56 ms | 75.35 / 106.53 ms |
+| Input→simulation p95 / max | 70.17 / 79.12 ms | 76.58 / 90.62 ms |
+| Input→render p95 / max | 71.65 / 80.95 ms | 76.34 / 92.80 ms |
+| TPS / dropped simulation | 19.86 / 0 s | 20.60 / 0 s |
+| Resident column / section peak | 150 / 1,200 | 160 / 1,280 |
+
+The reused run's >100 ms event-loop maximum was a measured `render_present` wait on llvmpipe;
+non-present streaming p95s were fixed step 0.031, residency 0.528, snapshot 0.015, mesh schedule
+0.011 and mesh poll/upload 0.023 ms. The fresh run's respective p95s were 0.033, 0.598, 0.015,
+0.011 and 0.026 ms. No fixed ticks were dropped. Fresh peak estimates were 42.2 MiB authoritative
+voxel/light, 57.7 MiB snapshots, and 49.3/79.1 MiB logical/capacity mesh storage; reused estimates
+were 45.0, 55.3, and 48.1/75.8 MiB. The retained radius is 121 columns; transition, active-light
+and presentation retirement account for the bounded observed peaks, and obsolete queued lighting
+is now cancelled at eviction.
+
+The old apparent boundary was both geometric and lifecycle-induced: an Euclidean disk made unequal
+cardinal/diagonal reach, while a full boundary-light queue held already locally-ready columns before
+snapshot/mesh publication. Boundary reconciliation no longer gates Safe or Visible. It remains
+eventual, deterministic work; its age is excluded from the critical-queue KPI. Four-direction border
+mesh tests verify both shared faces after neighbor arrival, and A→B/B→A/simultaneous lighting tests
+verify final seam order independence. Canonical generator hash remains
+`e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`; the independent streaming
+sample hash remains `384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807`.

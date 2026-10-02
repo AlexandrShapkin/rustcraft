@@ -241,7 +241,7 @@ fn measure_async_remesh_stress() {
     let mut worker_mesh_ms = 0.0;
     let mut upload_waves = 0;
     while scheduler.stats().ready > 0 {
-        let ready = scheduler.take_ready(Vec3::ZERO, 2, 2 * 1024 * 1024);
+        let ready = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 2, 2 * 1024 * 1024);
         assert!(!ready.is_empty());
         upload_waves += 1;
         for result in ready {

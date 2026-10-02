@@ -133,9 +133,14 @@ work in this milestone.
 
 ## M4 — world generation & persistence foundation
 
-Status: active; generic storage, generator contracts, first-party generation and headless
-round-trip are under implementation. The normal client startup path is integrated but not yet fully
-non-blocking, and the full validation matrix remains outstanding.
+Status: active. Generic storage, generator contracts, first-party generation, headless round-trip,
+and the first local-player residency/streaming slice are implemented. M4-001's synchronous startup
+barrier is closed. Autonomous production-controller and actual-client travel now close M4-002 and
+M4-010: a normal-speed route crosses straight, turn, diagonal, reverse and negative-coordinate
+frontiers with nonzero Safe/Visible margin, bounded residency, persistence/revisit, continuous view
+intent and no streaming-induced dropped ticks. M4-011 remains closed. M4-009 scheduler/correctness
+acceptance is closed with sub-second warm p95 request-to-visible; hardware frame-performance remains
+conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan.
 
 - generic chunk/section lifecycle and deterministic generation contracts;
 - game-owned generation policy, with Beta-like terrain policy confined to `minecraft-b173`;
@@ -148,12 +153,24 @@ non-blocking, and the full validation matrix remains outstanding.
 - deterministic, order/worker-count-independent generation and persistence benchmarks.
 
 Current baseline: `rustcraft-world` has versioned/checksummed semantic chunk and player-record files,
-bounded generation/save worker pools, stale generation/save rejection, compression metrics and a
-portable filesystem backend. Minecraft generation version 1, semantic local-player persistence and
-named client create/open are integrated. Static liquid presentation includes compiled-medium
-underwater fog. Initial client startup still blocks while the nearby area is assembled; runtime
-generation as the player moves, eviction, a bounded asynchronous load pool, interactive acceptance
-and complete M4 validation remain required.
+bounded load/generation/save worker pools, stale request/result and save rejection, compression
+metrics, and a portable filesystem backend. Minecraft generation version 1, semantic local-player
+persistence and named client create/open are integrated. Static liquid presentation includes
+compiled-medium underwater fog. Client startup now assembles its minimum safe neighborhood on a
+cancellable background worker while the window remains responsive; the ready neighborhood is
+centered on the restored player. Runtime residency uses a generic interest controller (diagnostic
+default load radius 4, retain radius 5; configurable with `RUSTCRAFT_STREAM_RADIUS=3..12`), async disk load/generation, staged per-turn result application and resumable boundary lighting, an unavailable-column movement/raycast guard, save-before-evict, and renderer/mesh
+removal on eviction. Newly arrived columns now use a bounded worker-based bulk initial-lighting
+stage and publish voxel/light arrays atomically; only neighbor-boundary reconciliation and
+incremental edits remain on the lighting path. Boundary reconciliation advances in repeated
+32-unit slices. Critical apply, boundary, snapshot and mesh submission now receive ordered reserved
+windows within the 2 ms default budget; near REQUIRED/VISIBLE sections precede PREFETCH sections,
+and completed meshes are uploaded nearest-camera first. The canonical fixed-
+region worldgen hash remains unchanged. Headless streaming stress and edited-column revisit tests
+pass. Desired/Retained use predictable Chebyshev squares; a connected complete 3x3 Safe+Visible core
+gates control, `SAFE => VISIBLE`, and eventual boundary-light work cannot redefine that frontier.
+Hardware-specific M4-009 performance evidence remains conditional, as do
+dropped-entity/world-time persistence and planned M4 generation-fidelity work.
 
 The older multiplayer/content-resolution scope is moved to an inactive later roadmap item. Network
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and

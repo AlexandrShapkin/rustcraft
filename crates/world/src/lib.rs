@@ -4,7 +4,7 @@
 use rustcraft_engine_core::{BlockId, BlockState, CHUNK_VOLUME, Chunk, ChunkPos};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
@@ -195,7 +195,7 @@ impl From<io::Error> for WorldError {
 }
 
 /// Game-owned codec bridge. Persistent data stores `key`, never profile-local numeric IDs.
-pub trait SemanticBlockResolver {
+pub trait SemanticBlockResolver: Send + Sync {
     fn key_for(&self, state: BlockState) -> Option<&str>;
     fn state_for(&self, key: &str, variant: u16) -> Option<BlockState>;
 }
@@ -228,6 +228,7 @@ pub trait ChunkGenerator: Send + Sync + 'static {
 pub struct GeneratedColumn {
     pub position: ChunkPos,
     pub generation: u64,
+    pub queue_wait_ms: f64,
     pub generation_ms: f64,
     pub sections: Result<Vec<(i32, Chunk)>, WorldError>,
 }
@@ -243,11 +244,217 @@ pub struct GenerationMetrics {
     pub generation_total_ms: f64,
 }
 
+pub struct LoadCompletion {
+    pub request: ResidencyRequest,
+    /// `None` means no persisted file exists. All other failures are explicit and must not
+    /// transition into generation.
+    pub result: Result<Option<Vec<(i32, Chunk)>>, WorldError>,
+    pub queue_wait_ms: f64,
+    pub load_ms: f64,
+}
+
+struct LoadJob {
+    storage: WorldStorage,
+    request: ResidencyRequest,
+    resolver: Arc<dyn SemanticBlockResolver>,
+    queued_at: std::time::Instant,
+}
+
+struct LoadWorker {
+    sender: Option<SyncSender<LoadJob>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+/// Bounded chunk file/decode workers. Both file access and semantic palette resolution happen on
+/// workers; missing is represented separately from corrupt/incompatible data.
+pub struct ChunkLoadScheduler {
+    workers: Vec<LoadWorker>,
+    results: Option<Receiver<LoadCompletion>>,
+    next_worker: usize,
+    queued: Arc<AtomicUsize>,
+    in_flight: Arc<AtomicUsize>,
+    completed: Arc<AtomicU64>,
+    missing: Arc<AtomicU64>,
+    failed: Arc<AtomicU64>,
+    load_micros: Arc<AtomicU64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ChunkLoadMetrics {
+    pub queued: usize,
+    pub in_flight: usize,
+    pub completed: u64,
+    pub missing: u64,
+    pub failed: u64,
+    pub total_load_ms: f64,
+}
+
+impl ChunkLoadScheduler {
+    pub fn new(worker_count: usize, queue_capacity_per_worker: usize) -> Self {
+        let count = worker_count.max(1);
+        let capacity = queue_capacity_per_worker.max(1);
+        let (result_tx, results) = mpsc::sync_channel(count * capacity);
+        let queued = Arc::new(AtomicUsize::new(0));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let completed = Arc::new(AtomicU64::new(0));
+        let missing = Arc::new(AtomicU64::new(0));
+        let failed = Arc::new(AtomicU64::new(0));
+        let load_micros = Arc::new(AtomicU64::new(0));
+        let mut workers = Vec::with_capacity(count);
+        for _ in 0..count {
+            let (sender, receiver) = mpsc::sync_channel::<LoadJob>(capacity);
+            let tx = result_tx.clone();
+            let q = queued.clone();
+            let f = in_flight.clone();
+            let c = completed.clone();
+            let m = missing.clone();
+            let e = failed.clone();
+            let t = load_micros.clone();
+            let thread = thread::Builder::new()
+                .name("world-load-worker".into())
+                .spawn(move || {
+                    while let Ok(job) = receiver.recv() {
+                        q.fetch_sub(1, Ordering::Relaxed);
+                        f.fetch_add(1, Ordering::Relaxed);
+                        let queue_wait_ms = job.queued_at.elapsed().as_secs_f64() * 1000.0;
+                        let started = std::time::Instant::now();
+                        let result = job.storage.load_runtime_chunk_if_present(
+                            job.request.position,
+                            job.resolver.as_ref(),
+                        );
+                        let elapsed = started.elapsed();
+                        t.fetch_add(
+                            elapsed.as_micros().min(u128::from(u64::MAX)) as u64,
+                            Ordering::Relaxed,
+                        );
+                        f.fetch_sub(1, Ordering::Relaxed);
+                        match &result {
+                            Ok(Some(_)) => {
+                                c.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Ok(None) => {
+                                m.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                e.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        if tx
+                            .send(LoadCompletion {
+                                request: job.request,
+                                result,
+                                queue_wait_ms,
+                                load_ms: elapsed.as_secs_f64() * 1000.0,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                })
+                .expect("world load worker thread creation failed");
+            workers.push(LoadWorker {
+                sender: Some(sender),
+                thread: Some(thread),
+            });
+        }
+        drop(result_tx);
+        Self {
+            workers,
+            results: Some(results),
+            next_worker: 0,
+            queued,
+            in_flight,
+            completed,
+            missing,
+            failed,
+            load_micros,
+        }
+    }
+
+    pub fn submit(
+        &mut self,
+        storage: WorldStorage,
+        request: ResidencyRequest,
+        resolver: Arc<dyn SemanticBlockResolver>,
+    ) -> Result<(), WorldError> {
+        let count = self.workers.len();
+        for offset in 0..count {
+            let index = (self.next_worker + offset) % count;
+            let job = LoadJob {
+                storage: storage.clone(),
+                request,
+                resolver: resolver.clone(),
+                queued_at: std::time::Instant::now(),
+            };
+            self.queued.fetch_add(1, Ordering::Relaxed);
+            match self.workers[index]
+                .sender
+                .as_ref()
+                .expect("live load worker")
+                .try_send(job)
+            {
+                Ok(()) => {
+                    self.next_worker = (index + 1) % count;
+                    return Ok(());
+                }
+                Err(TrySendError::Full(_)) => {
+                    self.queued.fetch_sub(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    self.queued.fetch_sub(1, Ordering::Relaxed);
+                }
+            }
+        }
+        Err(WorldError::InvalidData("load queue full"))
+    }
+
+    pub fn take_ready(&mut self, limit: usize) -> Vec<LoadCompletion> {
+        let mut ready = Vec::with_capacity(limit);
+        let Some(results) = self.results.as_ref() else {
+            return ready;
+        };
+        while ready.len() < limit {
+            match results.try_recv() {
+                Ok(result) => ready.push(result),
+                Err(_) => break,
+            }
+        }
+        ready
+    }
+
+    pub fn metrics(&self) -> ChunkLoadMetrics {
+        ChunkLoadMetrics {
+            queued: self.queued.load(Ordering::Relaxed),
+            in_flight: self.in_flight.load(Ordering::Relaxed),
+            completed: self.completed.load(Ordering::Relaxed),
+            missing: self.missing.load(Ordering::Relaxed),
+            failed: self.failed.load(Ordering::Relaxed),
+            total_load_ms: self.load_micros.load(Ordering::Relaxed) as f64 / 1000.0,
+        }
+    }
+}
+
+impl Drop for ChunkLoadScheduler {
+    fn drop(&mut self) {
+        for worker in &mut self.workers {
+            worker.sender.take();
+        }
+        self.results.take();
+        for worker in &mut self.workers {
+            if let Some(thread) = worker.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+}
+
 struct GenerationJob {
     generator: Arc<dyn ChunkGenerator>,
     seed: i64,
     position: ChunkPos,
     generation: u64,
+    queued_at: std::time::Instant,
 }
 struct Worker {
     sender: Option<SyncSender<GenerationJob>>,
@@ -259,7 +466,7 @@ struct Worker {
 /// outstanding results before callers can publish them.
 pub struct GenerationScheduler {
     workers: Vec<Worker>,
-    results: Receiver<GeneratedColumn>,
+    results: Option<Receiver<GeneratedColumn>>,
     latest: HashMap<ChunkPos, u64>,
     outstanding: HashSet<(ChunkPos, u64)>,
     next_worker: usize,
@@ -290,7 +497,7 @@ struct SaveWorker {
 /// the caller. The owner must feed completions back to `PersistenceDirtyTracker`.
 pub struct SaveScheduler {
     workers: Vec<SaveWorker>,
-    results: Receiver<SaveCompletion>,
+    results: Option<Receiver<SaveCompletion>>,
     next_worker: usize,
     queued: Arc<AtomicUsize>,
     in_flight: Arc<AtomicUsize>,
@@ -300,15 +507,16 @@ pub struct SaveScheduler {
 
 impl SaveScheduler {
     pub fn new(worker_count: usize, queue_capacity_per_worker: usize) -> Self {
-        let (result_tx, results) = mpsc::channel();
+        let count = worker_count.max(1);
+        let capacity = queue_capacity_per_worker.max(1);
+        let (result_tx, results) = mpsc::sync_channel(count * capacity);
         let queued = Arc::new(AtomicUsize::new(0));
         let in_flight = Arc::new(AtomicUsize::new(0));
         let completed = Arc::new(AtomicU64::new(0));
         let failed = Arc::new(AtomicU64::new(0));
         let mut workers = Vec::new();
-        for _ in 0..worker_count.max(1) {
-            let (sender, receiver) =
-                mpsc::sync_channel::<SaveJob>(queue_capacity_per_worker.max(1));
+        for _ in 0..count {
+            let (sender, receiver) = mpsc::sync_channel::<SaveJob>(capacity);
             let result_tx = result_tx.clone();
             let queued_count = queued.clone();
             let flight_count = in_flight.clone();
@@ -350,7 +558,7 @@ impl SaveScheduler {
         drop(result_tx);
         Self {
             workers,
-            results,
+            results: Some(results),
             next_worker: 0,
             queued,
             in_flight,
@@ -393,7 +601,7 @@ impl SaveScheduler {
     }
     pub fn take_completed(&mut self) -> Vec<SaveCompletion> {
         let mut result = Vec::new();
-        while let Ok(completion) = self.results.try_recv() {
+        while let Some(completion) = self.results.as_ref().and_then(|rx| rx.try_recv().ok()) {
             result.push(completion);
         }
         result
@@ -412,6 +620,7 @@ impl Drop for SaveScheduler {
         for worker in &mut self.workers {
             worker.sender.take();
         }
+        self.results.take();
         for worker in &mut self.workers {
             if let Some(thread) = worker.thread.take() {
                 let _ = thread.join();
@@ -436,6 +645,663 @@ pub enum ChunkPhase {
     Dirty,
     Saving,
     Evictable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResidencyPhase {
+    Requested,
+    Loading,
+    Generating,
+    InitialLighting,
+    Ready,
+    Saving,
+    Failed,
+}
+
+/// End-to-end streaming urgency. Membership geometry is Chebyshev/square; lookahead may only
+/// reorder columns inside one class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ResidencyUrgency {
+    Current,
+    SafeCore,
+    Visible,
+    Prefetch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResidencyRequest {
+    pub position: ChunkPos,
+    pub token: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct ResidencyPlan {
+    pub requests: Vec<ResidencyRequest>,
+    pub evict: Vec<ChunkPos>,
+    pub cancelled: Vec<ResidencyRequest>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ResidencyMotion {
+    pub displacement: [f32; 2],
+    pub elapsed_seconds: f32,
+    pub view_direction: [f32; 2],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ResidencyEntry {
+    token: u64,
+    phase: ResidencyPhase,
+}
+
+/// Generic interest-driven column residency policy. It computes requests and eviction candidates;
+/// storage, generation, publication and save-before-evict remain owned by the caller.
+#[derive(Debug)]
+pub struct WorldResidency {
+    load_radius: i32,
+    retain_radius: i32,
+    center: Option<ChunkPos>,
+    motion_direction_x: f64,
+    motion_direction_z: f64,
+    motion_speed_blocks_per_second: f64,
+    sustained_motion_seconds: f64,
+    priority_direction_x: i64,
+    priority_direction_z: i64,
+    priority_lookahead_milli: i64,
+    next_token: u64,
+    entries: HashMap<ChunkPos, ResidencyEntry>,
+}
+
+impl WorldResidency {
+    fn chebyshev_distance_from(&self, position: ChunkPos) -> i64 {
+        let center = self.center.unwrap_or(ChunkPos { x: 0, z: 0 });
+        let dx = i64::from(position.x) - i64::from(center.x);
+        let dz = i64::from(position.z) - i64::from(center.z);
+        dx.abs().max(dz.abs())
+    }
+
+    #[must_use]
+    pub fn is_desired(&self, position: ChunkPos) -> bool {
+        self.center.is_some()
+            && self.chebyshev_distance_from(position) <= i64::from(self.load_radius)
+    }
+
+    #[must_use]
+    pub fn is_retained_by_radius(&self, position: ChunkPos) -> bool {
+        self.center.is_some()
+            && self.chebyshev_distance_from(position) <= i64::from(self.retain_radius)
+    }
+
+    #[must_use]
+    pub fn urgency(&self, position: ChunkPos) -> ResidencyUrgency {
+        match self.chebyshev_distance_from(position) {
+            0 => ResidencyUrgency::Current,
+            1 => ResidencyUrgency::SafeCore,
+            2 => ResidencyUrgency::Visible,
+            _ => ResidencyUrgency::Prefetch,
+        }
+    }
+
+    pub fn new(load_radius: i32, hysteresis: i32) -> Self {
+        let load_radius = load_radius.max(1);
+        Self {
+            load_radius,
+            retain_radius: load_radius + hysteresis.max(0),
+            center: None,
+            motion_direction_x: 0.0,
+            motion_direction_z: 0.0,
+            motion_speed_blocks_per_second: 0.0,
+            sustained_motion_seconds: 0.0,
+            priority_direction_x: 0,
+            priority_direction_z: 0,
+            priority_lookahead_milli: 0,
+            next_token: 0,
+            entries: HashMap::new(),
+        }
+    }
+
+    pub fn phase(&self, position: ChunkPos) -> Option<ResidencyPhase> {
+        self.entries.get(&position).map(|entry| entry.phase)
+    }
+
+    pub fn set_phase(&mut self, request: ResidencyRequest, phase: ResidencyPhase) -> bool {
+        let Some(entry) = self.entries.get_mut(&request.position) else {
+            return false;
+        };
+        if entry.token != request.token {
+            return false;
+        }
+        entry.phase = phase;
+        true
+    }
+
+    #[must_use]
+    pub fn is_current(&self, request: ResidencyRequest) -> bool {
+        self.entries
+            .get(&request.position)
+            .is_some_and(|entry| entry.token == request.token)
+    }
+
+    pub fn request_retry(&mut self, position: ChunkPos) -> ResidencyRequest {
+        self.next_token = self.next_token.wrapping_add(1).max(1);
+        let request = ResidencyRequest {
+            position,
+            token: self.next_token,
+        };
+        self.entries.insert(
+            position,
+            ResidencyEntry {
+                token: request.token,
+                phase: ResidencyPhase::Requested,
+            },
+        );
+        request
+    }
+
+    pub fn published(&mut self, position: ChunkPos, token: u64) -> bool {
+        let request = ResidencyRequest { position, token };
+        self.set_phase(request, ResidencyPhase::Ready)
+    }
+
+    pub fn defer(&mut self, request: ResidencyRequest) {
+        if self.is_current(request) {
+            self.entries.remove(&request.position);
+        }
+    }
+
+    pub fn evicted(&mut self, position: ChunkPos) {
+        self.entries.remove(&position);
+    }
+
+    pub fn update(
+        &mut self,
+        center: ChunkPos,
+        resident: &HashSet<ChunkPos>,
+        pinned: &HashSet<ChunkPos>,
+    ) -> ResidencyPlan {
+        self.update_with_motion(center, resident, pinned, 0.0, 0.0, 0.0)
+    }
+
+    /// Like [`Self::update`], but biases requests along sustained displacement. Lookahead is
+    /// speed × time on a stable heading, capped at three columns; brief movement therefore cannot
+    /// trigger a large prefetch, and a heading change restarts the duration.
+    pub fn update_with_motion(
+        &mut self,
+        center: ChunkPos,
+        resident: &HashSet<ChunkPos>,
+        pinned: &HashSet<ChunkPos>,
+        displacement_x: f32,
+        displacement_z: f32,
+        elapsed_seconds: f32,
+    ) -> ResidencyPlan {
+        self.update_with_motion_in_view(
+            center,
+            resident,
+            pinned,
+            ResidencyMotion {
+                displacement: [displacement_x, displacement_z],
+                elapsed_seconds,
+                view_direction: [displacement_x, displacement_z],
+            },
+        )
+    }
+
+    /// Motion controls the bounded lookahead magnitude; the view direction determines which
+    /// requested columns in that area are most useful to render next.
+    pub fn update_with_motion_in_view(
+        &mut self,
+        center: ChunkPos,
+        resident: &HashSet<ChunkPos>,
+        pinned: &HashSet<ChunkPos>,
+        motion: ResidencyMotion,
+    ) -> ResidencyPlan {
+        self.center = Some(center);
+        let dt = if motion.elapsed_seconds.is_finite() {
+            motion.elapsed_seconds.clamp(0.0, 1.0) as f64
+        } else {
+            0.0
+        };
+        let displacement_x = if motion.displacement[0].is_finite() {
+            f64::from(motion.displacement[0].clamp(-8.0, 8.0))
+        } else {
+            0.0
+        };
+        let displacement_z = if motion.displacement[1].is_finite() {
+            f64::from(motion.displacement[1].clamp(-8.0, 8.0))
+        } else {
+            0.0
+        };
+        let distance = displacement_x.hypot(displacement_z);
+        if dt > 0.0 && distance > 0.01 {
+            let direction_x = displacement_x / distance;
+            let direction_z = displacement_z / distance;
+            let observed_speed = (distance / dt).clamp(0.0, 32.0);
+            let alignment =
+                self.motion_direction_x * direction_x + self.motion_direction_z * direction_z;
+            if self.sustained_motion_seconds == 0.0 || alignment < 0.707 {
+                self.sustained_motion_seconds = dt;
+                self.motion_speed_blocks_per_second = observed_speed;
+            } else {
+                self.sustained_motion_seconds = (self.sustained_motion_seconds + dt).min(12.0);
+                self.motion_speed_blocks_per_second =
+                    self.motion_speed_blocks_per_second * 0.75 + observed_speed * 0.25;
+            }
+            self.motion_direction_x = direction_x;
+            self.motion_direction_z = direction_z;
+        } else {
+            self.sustained_motion_seconds = (self.sustained_motion_seconds - dt * 2.0).max(0.0);
+        }
+        let lookahead_columns =
+            (self.motion_speed_blocks_per_second * self.sustained_motion_seconds / 16.0)
+                .clamp(0.0, 3.0);
+        let lookahead_milli = (lookahead_columns * 1024.0).round() as i64;
+        let view_length =
+            f64::from(motion.view_direction[0]).hypot(f64::from(motion.view_direction[1]));
+        let (view_x, view_z) = if view_length.is_finite() && view_length > 1.0e-6 {
+            (
+                f64::from(motion.view_direction[0]) / view_length,
+                f64::from(motion.view_direction[1]) / view_length,
+            )
+        } else {
+            (self.motion_direction_x, self.motion_direction_z)
+        };
+        // Actual travel is the stronger predictor. The view direction still biases visible
+        // terrain, but looking sideways cannot erase priority along the player's velocity.
+        let blended_x = self.motion_direction_x * 0.7 + view_x * 0.3;
+        let blended_z = self.motion_direction_z * 0.7 + view_z * 0.3;
+        let blended_length = blended_x.hypot(blended_z);
+        let (priority_direction_x, priority_direction_z) = if blended_length > 1.0e-6 {
+            (blended_x / blended_length, blended_z / blended_length)
+        } else {
+            (self.motion_direction_x, self.motion_direction_z)
+        };
+        let direction_x = (priority_direction_x * 1024.0).round() as i64;
+        let direction_z = (priority_direction_z * 1024.0).round() as i64;
+        self.priority_direction_x = direction_x;
+        self.priority_direction_z = direction_z;
+        self.priority_lookahead_milli = lookahead_milli;
+        let mut plan = ResidencyPlan::default();
+        let in_radius = |position: ChunkPos, radius: i32| {
+            let dx = i64::from(position.x) - i64::from(center.x);
+            let dz = i64::from(position.z) - i64::from(center.z);
+            dx.abs().max(dz.abs()) <= i64::from(radius)
+        };
+
+        let abandoned = self
+            .entries
+            .iter()
+            .filter_map(|(position, entry)| {
+                (!resident.contains(position)
+                    && !pinned.contains(position)
+                    && !in_radius(*position, self.retain_radius))
+                .then_some(ResidencyRequest {
+                    position: *position,
+                    token: entry.token,
+                })
+            })
+            .collect::<Vec<_>>();
+        for request in abandoned {
+            self.entries.remove(&request.position);
+            plan.cancelled.push(request);
+        }
+
+        let radius = self.load_radius;
+        for z in center.z.saturating_sub(radius)..=center.z.saturating_add(radius) {
+            for x in center.x.saturating_sub(radius)..=center.x.saturating_add(radius) {
+                let position = ChunkPos { x, z };
+                if !in_radius(position, radius)
+                    || resident.contains(&position)
+                    || self.entries.contains_key(&position)
+                {
+                    continue;
+                }
+                plan.requests.push(self.request_retry(position));
+            }
+        }
+        plan.requests
+            .sort_by_key(|request| self.priority_key(request.position));
+        plan.evict = resident
+            .iter()
+            .copied()
+            .filter(|position| {
+                !pinned.contains(position) && !in_radius(*position, self.retain_radius)
+            })
+            .collect();
+        plan.evict.sort_by_key(|position| {
+            let dx = i64::from(position.x) - i64::from(center.x);
+            let dz = i64::from(position.z) - i64::from(center.z);
+            std::cmp::Reverse(dx.abs().max(dz.abs()))
+        });
+        plan
+    }
+
+    pub fn retain_radius(&self) -> i32 {
+        self.retain_radius
+    }
+
+    pub fn load_radius(&self) -> i32 {
+        self.load_radius
+    }
+
+    pub fn motion_lookahead_columns(&self) -> f32 {
+        (self.motion_speed_blocks_per_second * self.sustained_motion_seconds / 16.0).clamp(0.0, 3.0)
+            as f32
+    }
+
+    /// Stable distance/forward score shared by residency submission and downstream world work.
+    /// Lower keys are more urgent; the game remains responsible for choosing the interest point
+    /// and movement/view signals that update this generic ordering.
+    pub fn priority_key(&self, position: ChunkPos) -> (i64, i64, i32, i32) {
+        let center = self.center.unwrap_or(ChunkPos { x: 0, z: 0 });
+        let dx = i64::from(position.x) - i64::from(center.x);
+        let dz = i64::from(position.z) - i64::from(center.z);
+        let distance = dx.abs().max(dz.abs());
+        let radial_distance = dx * dx + dz * dz;
+        let forward_alignment = dx * self.priority_direction_x + dz * self.priority_direction_z;
+        // Keep urgency classes dominant over lookahead. The local score only orders work within a
+        // class, so sustained motion cannot make distant speculation outrank the contiguous core.
+        let urgency = self.urgency(position) as i64;
+        const URGENCY_STRIDE: i64 = 1_000_000_000_000;
+        (
+            urgency * URGENCY_STRIDE + distance * 1_048_576
+                - forward_alignment * self.priority_lookahead_milli,
+            radial_distance,
+            position.x,
+            position.z,
+        )
+    }
+
+    pub fn desired_column_count(&self) -> usize {
+        if self.center.is_none() {
+            return 0;
+        }
+        let r = self.load_radius;
+        let width = r.saturating_mul(2).saturating_add(1) as usize;
+        width.saturating_mul(width)
+    }
+
+    pub fn pending_column_count(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| {
+                matches!(
+                    entry.phase,
+                    ResidencyPhase::Requested
+                        | ResidencyPhase::Loading
+                        | ResidencyPhase::Generating
+                )
+            })
+            .count()
+    }
+}
+
+#[cfg(test)]
+mod residency_tests {
+    use super::*;
+
+    #[test]
+    fn requests_nearby_first_and_uses_negative_coordinates_with_hysteresis() {
+        let mut residency = WorldResidency::new(1, 1);
+        let center = ChunkPos { x: -4, z: 7 };
+        let resident = HashSet::from([center]);
+        let plan = residency.update(center, &resident, &HashSet::new());
+        assert_eq!(plan.requests.len(), 8);
+        assert!(plan.requests.iter().all(|request| {
+            (request.position.x - center.x).abs() <= 1 && (request.position.z - center.z).abs() <= 1
+        }));
+        assert_eq!(residency.desired_column_count(), 9);
+        assert_eq!(residency.retain_radius(), 2);
+        let just_outside_load =
+            residency.update(ChunkPos { x: -2, z: 7 }, &resident, &HashSet::new());
+        assert!(!just_outside_load.evict.contains(&center));
+    }
+
+    #[test]
+    fn desired_and_retained_membership_are_complete_chebyshev_squares() {
+        for (radius, expected) in [(3, 49), (4, 81), (5, 121), (6, 169)] {
+            let center = ChunkPos { x: -7, z: 11 };
+            let mut residency = WorldResidency::new(radius, 1);
+            let plan = residency.update(center, &HashSet::new(), &HashSet::new());
+            assert_eq!(residency.desired_column_count(), expected);
+            assert_eq!(plan.requests.len(), expected);
+            assert!(residency.is_desired(ChunkPos {
+                x: center.x + radius,
+                z: center.z + radius,
+            }));
+            assert!(!residency.is_desired(ChunkPos {
+                x: center.x + radius + 1,
+                z: center.z,
+            }));
+            assert!(residency.is_retained_by_radius(ChunkPos {
+                x: center.x + radius + 1,
+                z: center.z + radius + 1,
+            }));
+        }
+    }
+
+    #[test]
+    fn short_displacement_only_breaks_near_distance_ties() {
+        let mut residency = WorldResidency::new(2, 1);
+        let center = ChunkPos { x: -4, z: 7 };
+        let resident = HashSet::from([center]);
+        let plan =
+            residency.update_with_motion(center, &resident, &HashSet::new(), 0.0, -0.25, 0.05);
+        assert!(residency.motion_lookahead_columns() < 0.1);
+
+        let first_ring = plan
+            .requests
+            .iter()
+            .filter(|request| {
+                let dx = request.position.x - center.x;
+                let dz = request.position.z - center.z;
+                dx * dx + dz * dz == 1
+            })
+            .map(|request| request.position)
+            .collect::<Vec<_>>();
+        assert_eq!(first_ring[0], ChunkPos { x: -4, z: 6 });
+        assert_eq!(first_ring[1], ChunkPos { x: -5, z: 7 });
+        assert_eq!(first_ring[2], ChunkPos { x: -3, z: 7 });
+        assert_eq!(first_ring[3], ChunkPos { x: -4, z: 8 });
+    }
+
+    #[test]
+    fn sustained_motion_prioritizes_a_bounded_lead_ahead_of_the_player() {
+        let mut residency = WorldResidency::new(4, 1);
+        let center = ChunkPos { x: 3, z: -2 };
+        let resident = HashSet::from([center]);
+        let settled_area = (-4..=4)
+            .flat_map(|dz| (-4..=4).map(move |dx| (dx, dz)))
+            .filter(|(dx, dz)| dx * dx + dz * dz <= 16)
+            .map(|(dx, dz)| ChunkPos {
+                x: center.x + dx,
+                z: center.z + dz,
+            })
+            .collect::<HashSet<_>>();
+        for _ in 0..80 {
+            let _ = residency.update_with_motion(
+                center,
+                &settled_area,
+                &HashSet::new(),
+                0.7,
+                0.0,
+                0.05,
+            );
+        }
+        assert!(residency.motion_lookahead_columns() > 1.8);
+        assert!(residency.motion_lookahead_columns() <= 3.0);
+        let plan = residency.update_with_motion(center, &resident, &HashSet::new(), 0.0, 0.0, 0.05);
+        let first_prefetch = plan
+            .requests
+            .iter()
+            .find(|request| {
+                let dx = request.position.x - center.x;
+                let dz = request.position.z - center.z;
+                dx * dx + dz * dz > 2
+            })
+            .expect("the load radius includes a visible/prefetch ring");
+        assert_eq!(first_prefetch.position, ChunkPos { x: 5, z: -2 });
+        for request in &plan.requests {
+            residency.defer(*request);
+        }
+
+        let turned =
+            residency.update_with_motion(center, &resident, &HashSet::new(), 0.0, 0.7, 0.05);
+        assert!(residency.motion_lookahead_columns() < 0.1);
+        assert_eq!(turned.requests[0].position, ChunkPos { x: 3, z: -1 });
+        for request in &turned.requests {
+            residency.defer(*request);
+        }
+
+        let reversed =
+            residency.update_with_motion(center, &resident, &HashSet::new(), -0.7, 0.0, 0.05);
+        assert!(residency.motion_lookahead_columns() < 0.1);
+        assert_eq!(reversed.requests[0].position, ChunkPos { x: 2, z: -2 });
+
+        for _ in 0..120 {
+            let _ =
+                residency.update_with_motion(center, &resident, &HashSet::new(), 0.0, 0.0, 0.05);
+        }
+        assert!(residency.motion_lookahead_columns() < 0.1);
+    }
+
+    #[test]
+    fn urgency_classes_keep_required_and_visible_ahead_of_prefetch() {
+        let mut residency = WorldResidency::new(6, 1);
+        let center = ChunkPos { x: 0, z: 0 };
+        let resident = HashSet::from([center]);
+        for _ in 0..240 {
+            let _ =
+                residency.update_with_motion(center, &resident, &HashSet::new(), 1.6, 0.0, 0.05);
+        }
+        let required = residency.priority_key(ChunkPos { x: 1, z: 0 });
+        let visible = residency.priority_key(ChunkPos { x: 2, z: 0 });
+        let prefetch = residency.priority_key(ChunkPos { x: 5, z: 0 });
+        assert!(required < visible);
+        assert!(visible < prefetch);
+    }
+
+    #[test]
+    fn sustained_motion_blends_camera_view_without_losing_travel_priority() {
+        let center = ChunkPos { x: 0, z: 0 };
+        let resident = HashSet::new();
+        let mut residency = WorldResidency::new(4, 1);
+
+        for _ in 0..60 {
+            let plan = residency.update_with_motion_in_view(
+                center,
+                &resident,
+                &HashSet::new(),
+                ResidencyMotion {
+                    displacement: [0.0, 0.7],
+                    elapsed_seconds: 0.05,
+                    view_direction: [1.0, 0.0],
+                },
+            );
+            for request in plan.requests {
+                residency.defer(request);
+            }
+        }
+
+        let plan = residency.update_with_motion_in_view(
+            center,
+            &resident,
+            &HashSet::new(),
+            ResidencyMotion {
+                displacement: [0.0, 0.0],
+                elapsed_seconds: 0.05,
+                view_direction: [1.0, 0.0],
+            },
+        );
+        let east = plan
+            .requests
+            .iter()
+            .position(|request| request.position == ChunkPos { x: 1, z: 0 })
+            .unwrap();
+        let north = plan
+            .requests
+            .iter()
+            .position(|request| request.position == ChunkPos { x: 0, z: 1 })
+            .unwrap();
+        let west = plan
+            .requests
+            .iter()
+            .position(|request| request.position == ChunkPos { x: -1, z: 0 })
+            .unwrap();
+        let south = plan
+            .requests
+            .iter()
+            .position(|request| request.position == ChunkPos { x: 0, z: -1 })
+            .unwrap();
+        assert!(north < east, "travel direction remains the stronger signal");
+        assert!(
+            east < west && east < south,
+            "camera view still biases visible columns"
+        );
+    }
+
+    #[test]
+    fn update_without_direction_keeps_requests_deterministically_ordered() {
+        let center = ChunkPos { x: 0, z: 0 };
+        let resident = HashSet::from([center]);
+        let mut a = WorldResidency::new(2, 1);
+        let mut b = WorldResidency::new(2, 1);
+        let a = a.update(center, &resident, &HashSet::new());
+        let b = b.update(center, &resident, &HashSet::new());
+        assert_eq!(
+            a.requests.iter().map(|r| r.position).collect::<Vec<_>>(),
+            b.requests.iter().map(|r| r.position).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn teleport_invalidates_old_requests_and_rejects_late_results() {
+        let mut residency = WorldResidency::new(1, 1);
+        let old = residency.update(ChunkPos { x: 0, z: 0 }, &HashSet::new(), &HashSet::new());
+        let stale = old.requests[0];
+        let new = residency.update(
+            ChunkPos { x: 100, z: -100 },
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert!(!residency.is_current(stale));
+        assert!(new.cancelled.contains(&stale));
+        assert!(new.requests.iter().all(|request| {
+            (request.position.x - 100).abs() <= 1 && (request.position.z + 100).abs() <= 1
+        }));
+    }
+
+    #[test]
+    fn resident_columns_outside_retain_radius_are_eviction_candidates_unless_pinned() {
+        let mut residency = WorldResidency::new(2, 1);
+        let center = ChunkPos { x: 0, z: 0 };
+        let old = ChunkPos { x: -8, z: 0 };
+        let pinned = ChunkPos { x: 0, z: 8 };
+        let resident = HashSet::from([center, old, pinned]);
+        let plan = residency.update(center, &resident, &HashSet::from([pinned]));
+        assert!(plan.evict.contains(&old));
+        assert!(!plan.evict.contains(&center));
+        assert!(!plan.evict.contains(&pinned));
+    }
+
+    #[test]
+    fn long_path_keeps_desired_resident_area_bounded() {
+        let mut residency = WorldResidency::new(2, 1);
+        let mut resident = HashSet::new();
+        for x in -80..=80 {
+            let center = ChunkPos { x, z: -x / 2 };
+            let plan = residency.update(center, &resident, &HashSet::new());
+            resident.extend(plan.requests.iter().map(|request| request.position));
+            resident.retain(|position| {
+                (position.x - center.x).abs() <= residency.retain_radius()
+                    && (position.z - center.z).abs() <= residency.retain_radius()
+            });
+            assert!(
+                resident.len() <= 49,
+                "resident columns grew to {}",
+                resident.len()
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -487,6 +1353,14 @@ impl PersistenceDirtyTracker {
     }
     pub fn dirty_count(&self) -> usize {
         self.dirty.len()
+    }
+    #[must_use]
+    pub fn is_dirty(&self, position: ChunkPos) -> bool {
+        self.dirty.contains_key(&(position.x, position.z))
+    }
+    #[must_use]
+    pub fn is_saving(&self, position: ChunkPos) -> bool {
+        self.saving.contains(&(position.x, position.z))
     }
     pub fn queued(&self, limit: usize) -> Vec<ChunkPos> {
         self.dirty
@@ -568,7 +1442,7 @@ impl ChunkLifecycle {
 impl GenerationScheduler {
     pub fn new(worker_count: usize, queue_capacity_per_worker: usize) -> Self {
         let count = worker_count.max(1);
-        let (result_tx, results) = mpsc::channel();
+        let (result_tx, results) = mpsc::sync_channel(count * queue_capacity_per_worker.max(1));
         let pending = Arc::new(AtomicUsize::new(0));
         let in_flight = Arc::new(AtomicUsize::new(0));
         let completed = Arc::new(AtomicU64::new(0));
@@ -588,6 +1462,7 @@ impl GenerationScheduler {
                     while let Ok(job) = receiver.recv() {
                         flight_count.fetch_add(1, Ordering::Relaxed);
                         pending_count.fetch_sub(1, Ordering::Relaxed);
+                        let queue_wait_ms = job.queued_at.elapsed().as_secs_f64() * 1000.0;
                         let started = std::time::Instant::now();
                         let sections = job.generator.generate(job.seed, job.position);
                         let elapsed = started.elapsed();
@@ -601,6 +1476,7 @@ impl GenerationScheduler {
                             .send(GeneratedColumn {
                                 position: job.position,
                                 generation: job.generation,
+                                queue_wait_ms,
                                 generation_ms: elapsed.as_secs_f64() * 1000.0,
                                 sections,
                             })
@@ -619,7 +1495,7 @@ impl GenerationScheduler {
         drop(result_tx);
         Self {
             workers,
-            results,
+            results: Some(results),
             latest: HashMap::new(),
             outstanding: HashSet::new(),
             next_worker: 0,
@@ -659,6 +1535,7 @@ impl GenerationScheduler {
             seed,
             position,
             generation,
+            queued_at: std::time::Instant::now(),
         };
         self.pending.fetch_add(1, Ordering::Relaxed);
         match self.workers[worker_index]
@@ -690,8 +1567,16 @@ impl GenerationScheduler {
 
     /// Drain currently completed work, suppressing any result older than the authoritative token.
     pub fn take_ready(&mut self) -> Vec<GeneratedColumn> {
-        let mut ready = Vec::new();
-        while let Ok(result) = self.results.try_recv() {
+        self.take_ready_limit(usize::MAX)
+    }
+
+    /// Drain at most `limit` accepted results, leaving the rest queued for later publication.
+    pub fn take_ready_limit(&mut self, limit: usize) -> Vec<GeneratedColumn> {
+        let mut ready = Vec::with_capacity(limit.min(self.outstanding.len()));
+        while ready.len() < limit {
+            let Some(result) = self.results.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+                break;
+            };
             self.outstanding
                 .remove(&(result.position, result.generation));
             if self.latest.get(&result.position).copied() == Some(result.generation) {
@@ -721,6 +1606,7 @@ impl Drop for GenerationScheduler {
         for worker in &mut self.workers {
             worker.sender.take();
         }
+        self.results.take();
         for worker in &mut self.workers {
             if let Some(thread) = worker.thread.take() {
                 let _ = thread.join();
@@ -1071,7 +1957,7 @@ impl WorldStorage {
     pub fn load_runtime_chunk(
         &self,
         position: ChunkPos,
-        resolver: &impl SemanticBlockResolver,
+        resolver: &(impl SemanticBlockResolver + ?Sized),
     ) -> Result<Vec<(i32, Chunk)>, WorldError> {
         let stored = self.load_chunk(position)?;
         stored
@@ -1097,10 +1983,29 @@ impl WorldStorage {
             .collect()
     }
 
+    /// Load and resolve a stored column, returning `None` only for ordinary absence. Corruption,
+    /// inaccessible files and unknown semantic content remain explicit errors.
+    pub fn load_runtime_chunk_if_present(
+        &self,
+        position: ChunkPos,
+        resolver: &dyn SemanticBlockResolver,
+    ) -> Result<Option<Vec<(i32, Chunk)>>, WorldError> {
+        let path = self.chunk_path(position);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(WorldError::Io(error)),
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(WorldError::InvalidData("chunk path is not a regular file"));
+        }
+        self.load_runtime_chunk(position, resolver).map(Some)
+    }
+
     pub fn encode_runtime_chunk(
         position: ChunkPos,
         sections: impl IntoIterator<Item = (i32, Chunk)>,
-        resolver: &impl SemanticBlockResolver,
+        resolver: &(impl SemanticBlockResolver + ?Sized),
     ) -> Result<StoredChunk, WorldError> {
         let mut encoded = Vec::new();
         for (y, chunk) in sections {
@@ -1555,23 +2460,23 @@ fn durable_write_slot(path: &Path, data: &[u8]) -> Result<(f64, f64), WorldError
     if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return Err(WorldError::InvalidData("player checkpoint is a symlink"));
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
-    let write_started = std::time::Instant::now();
-    file.write_all(data)?;
-    let write_ms = write_started.elapsed().as_secs_f64() * 1000.0;
-    let sync_started = std::time::Instant::now();
-    file.sync_all()?;
-    drop(file);
+    let mut write_ms = 0.0;
+    let checkpoint_started = std::time::Instant::now();
+    atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+        .write(|file| {
+            let write_started = std::time::Instant::now();
+            file.write_all(data)?;
+            write_ms = write_started.elapsed().as_secs_f64() * 1000.0;
+            file.sync_all()?;
+            Ok(())
+        })
+        .map_err(|error| WorldError::Io(error.into()))?;
     if let Some(parent) = path.parent() {
         // Persist a newly created directory entry where directory sync is supported. Some
         // platforms reject opening directories; the checkpoint file itself is still synced.
         sync_directory(parent)?;
     }
-    let sync_ms = sync_started.elapsed().as_secs_f64() * 1000.0;
+    let sync_ms = (checkpoint_started.elapsed().as_secs_f64() * 1000.0 - write_ms).max(0.0);
     Ok((write_ms, sync_ms))
 }
 
@@ -1846,6 +2751,90 @@ mod tests {
         }
         assert_eq!(scheduler.metrics().stale_discarded, 1);
         assert_eq!(scheduler.metrics().completed, 2);
+    }
+
+    #[test]
+    fn generation_publication_budget_leaves_other_completed_results_queued() {
+        let mut scheduler = GenerationScheduler::new(2, 2);
+        let generator: Arc<dyn ChunkGenerator> = Arc::new(EmptyGenerator);
+        let positions = [
+            ChunkPos { x: -2, z: 0 },
+            ChunkPos { x: 0, z: 0 },
+            ChunkPos { x: 2, z: 0 },
+        ];
+        for (token, position) in positions.into_iter().enumerate() {
+            scheduler
+                .request(generator.clone(), 7, position, token as u64 + 1)
+                .unwrap();
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut published = Vec::new();
+        while published.len() < positions.len() && std::time::Instant::now() < deadline {
+            let next = scheduler.take_ready_limit(1);
+            assert!(next.len() <= 1, "publication budget was exceeded");
+            published.extend(next.into_iter().map(|result| result.position));
+            std::thread::yield_now();
+        }
+        assert_eq!(published.len(), positions.len());
+        assert!(
+            positions
+                .into_iter()
+                .all(|position| published.contains(&position))
+        );
+    }
+
+    #[test]
+    fn async_load_distinguishes_loaded_missing_and_corrupt_and_resolves_off_thread() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "stream").unwrap();
+        let resolver: Arc<dyn SemanticBlockResolver> = Arc::new(resolver(1, 2));
+        let loaded = ChunkPos { x: -2, z: 3 };
+        let missing = ChunkPos { x: 4, z: -5 };
+        let corrupt = ChunkPos { x: 7, z: 8 };
+        let states = vec![("sample:stone".to_owned(), 2); CHUNK_VOLUME];
+        storage
+            .store_chunk(&StoredChunk {
+                position: loaded,
+                sections: vec![StoredSection { y: 0, states }],
+            })
+            .unwrap();
+        fs::write(storage.chunk_path(corrupt), b"truncated").unwrap();
+        let mut scheduler = ChunkLoadScheduler::new(2, 2);
+        for (token, position) in [(1, loaded), (2, missing), (3, corrupt)] {
+            scheduler
+                .submit(
+                    storage.clone(),
+                    ResidencyRequest { position, token },
+                    resolver.clone(),
+                )
+                .unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut completed = Vec::new();
+        while std::time::Instant::now() < deadline && completed.len() < 3 {
+            completed.extend(scheduler.take_ready(3 - completed.len()));
+            std::thread::yield_now();
+        }
+        assert_eq!(completed.len(), 3);
+        assert!(completed.iter().any(|entry| {
+            entry.request.position == loaded
+                && entry.result.as_ref().is_ok_and(|loaded| {
+                    loaded
+                        .as_ref()
+                        .is_some_and(|sections| sections[0].1.get((0, 0, 0)) == BlockId(2))
+                })
+        }));
+        assert!(completed.iter().any(|entry| {
+            entry.request.position == missing && matches!(entry.result, Ok(None))
+        }));
+        assert!(
+            completed
+                .iter()
+                .any(|entry| { entry.request.position == corrupt && entry.result.is_err() })
+        );
+        drop(scheduler);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

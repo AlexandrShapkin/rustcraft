@@ -169,6 +169,11 @@ impl Default for RenderWorld {
 }
 
 impl RenderWorld {
+    #[must_use]
+    pub fn section(&self, position: ChunkPos, section_y: i32) -> Option<&RenderChunk> {
+        self.chunks.get(&(position, section_y))
+    }
+
     pub fn sync_sections(
         &mut self,
         world: &World,
@@ -962,6 +967,14 @@ pub struct RenderSubmissionStats {
     pub pipeline_switches: usize,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RendererColumnState {
+    pub resident_section_count: usize,
+    pub drawable_section_count: usize,
+    pub submitted_section_count: usize,
+    pub frustum_culled_section_count: usize,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct MeshUploadStats {
     pub logical_bytes: usize,
@@ -1613,6 +1626,26 @@ impl Renderer {
     }
     pub fn mesh_count(&self) -> usize {
         self.chunks.len()
+    }
+    #[must_use]
+    pub fn column_state(&self, position: ChunkPos, camera: Camera) -> RendererColumnState {
+        let frustum = Frustum::from_camera(camera);
+        let mut state = RendererColumnState::default();
+        for ((column, section_y), chunk) in &self.chunks {
+            if *column != position {
+                continue;
+            }
+            state.resident_section_count += 1;
+            if chunk.pages.iter().any(|page| page.index_count > 0) {
+                state.drawable_section_count += 1;
+                if frustum.intersects_section(*column, *section_y) {
+                    state.submitted_section_count += 1;
+                } else {
+                    state.frustum_culled_section_count += 1;
+                }
+            }
+        }
+        state
     }
     pub fn gpu_mesh_logical_bytes(&self) -> usize {
         self.chunks
@@ -2993,6 +3026,44 @@ mod tests {
             .unwrap();
         let mesh = build_chunk_mesh(&presentation, left, &Textures);
         assert_eq!(mesh.indices.len(), 5 * 6);
+    }
+
+    #[test]
+    fn arriving_neighbor_culls_both_shared_faces_in_all_horizontal_directions() {
+        for (center_block, neighbor_block) in [
+            (
+                BlockPos { x: 0, y: 0, z: 8 },
+                BlockPos { x: -1, y: 0, z: 8 },
+            ),
+            (
+                BlockPos { x: 15, y: 0, z: 8 },
+                BlockPos { x: 16, y: 0, z: 8 },
+            ),
+            (
+                BlockPos { x: 8, y: 0, z: 0 },
+                BlockPos { x: 8, y: 0, z: -1 },
+            ),
+            (
+                BlockPos { x: 8, y: 0, z: 15 },
+                BlockPos { x: 8, y: 0, z: 16 },
+            ),
+        ] {
+            let mut world = World::new(BlockId(0));
+            world.set(center_block, BlockId(1));
+            world.set(neighbor_block, BlockId(1));
+            let presentation = RenderWorld::from_world(&world);
+            for position in [center_block, neighbor_block].map(|block| ChunkPos {
+                x: block.x.div_euclid(16),
+                z: block.z.div_euclid(16),
+            }) {
+                let chunk = presentation
+                    .chunks()
+                    .find(|chunk| chunk.position == position && chunk.section_y == 0)
+                    .unwrap();
+                let mesh = build_chunk_mesh(&presentation, chunk, &Textures);
+                assert_eq!(mesh.indices.len(), 5 * 6, "shared edge at {position:?}");
+            }
+        }
     }
 
     #[test]

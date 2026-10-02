@@ -227,6 +227,7 @@ pub struct FixedStepClock {
 }
 #[derive(Debug)]
 pub struct StepBudget {
+    pub due_steps: u64,
     pub steps: u32,
     pub catch_up: bool,
     pub dropped_seconds: f64,
@@ -241,6 +242,7 @@ impl FixedStepClock {
         let steps = due.min(5.) as u32;
         self.remainder -= due * Self::DT;
         StepBudget {
+            due_steps: due.min(u64::MAX as f64) as u64,
             steps,
             catch_up: due > 1.,
             dropped_seconds: (due - f64::from(steps)) * Self::DT,

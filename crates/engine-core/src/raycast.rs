@@ -57,6 +57,15 @@ pub fn cast(
         y: c[1],
         z: c[2],
     };
+    let available = |c: [i32; 3]| {
+        world.column_available(crate::ChunkPos {
+            x: c[0].div_euclid(crate::CHUNK_SIZE),
+            z: c[2].div_euclid(crate::CHUNK_SIZE),
+        })
+    };
+    if !available(cell) {
+        return None;
+    }
     // Starting inside a target has no unambiguous placement face.
     if hit(world.get(pos(cell))) {
         return Some(RayHit {
@@ -81,6 +90,9 @@ pub fn cast(
         let adjacent = pos(cell);
         cell[a] += step[a];
         next[a] += delta[a];
+        if !available(cell) {
+            return None;
+        }
         if hit(world.get(pos(cell))) {
             let mut normal = [0; 3];
             normal[a] = -step[a];

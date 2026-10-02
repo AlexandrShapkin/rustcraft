@@ -4,7 +4,7 @@ use rustcraft_engine_core::{BlockId, Vec3};
 mod bench;
 mod debug;
 mod gpu_metrics;
-use rustcraft_minecraft_b173::blocks::BlocksModule;
+use rustcraft_minecraft_b173::blocks::{BlocksModule, STONE};
 use rustcraft_render::diagnostic::Stage;
 use rustcraft_render::{
     AtlasRegion, BlockTextureResolver, Camera, Face, RenderWorld, Renderer, RendererResources,
@@ -13,6 +13,7 @@ use rustcraft_render::{
 use rustcraft_render_profile::{CompiledTextureRegistry, CompiledVoxelRenderRegistry};
 use rustcraft_runtime::{RuntimeBootstrap, Simulation};
 use std::{
+    collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
@@ -330,7 +331,38 @@ struct ClientApp {
     renderer: Option<Renderer>,
     simulation: Option<Simulation>,
     presentation: Option<RenderWorld>,
+    startup_result: Option<std::sync::mpsc::Receiver<Result<WorldStartupPayload, String>>>,
+    startup_worker: Option<std::thread::JoinHandle<()>>,
+    startup_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    startup_started: Instant,
+    startup_ready_ms: f64,
+    startup_visible_core_ms: Option<f64>,
+    player_control_enabled: bool,
+    world_ready_at: Option<Instant>,
+    startup_metadata_player_ms: f64,
+    startup_chunk_load_ms: f64,
+    startup_generation_ms: f64,
+    startup_worker_total_ms: f64,
+    full_desired_ready_ms: Option<f64>,
+    light_converged_count: u64,
+    lighting_work_ms: f64,
+    eviction_count: u64,
+    eviction_blocked_dirty: u64,
+    eviction_blocked_lighting: u64,
+    resident_columns_peak: usize,
+    resident_sections_peak: usize,
     world_storage: Option<rustcraft_world::WorldStorage>,
+    residency: rustcraft_world::WorldResidency,
+    stream_load_radius: i32,
+    stream_lookahead_enabled: bool,
+    last_residency_position: Option<(f32, f32)>,
+    last_residency_update_at: Option<Instant>,
+    load_scheduler: rustcraft_world::ChunkLoadScheduler,
+    generation_scheduler: rustcraft_world::GenerationScheduler,
+    initial_lighting_scheduler: rustcraft_runtime::lighting::InitialLightingScheduler,
+    stream_generator: Option<std::sync::Arc<dyn rustcraft_world::ChunkGenerator>>,
+    world_seed: i64,
+    stream_generation_allowed: bool,
     persistence_dirty: rustcraft_world::PersistenceDirtyTracker,
     save_scheduler: rustcraft_world::SaveScheduler,
     world_name: String,
@@ -338,6 +370,8 @@ struct ClientApp {
     worldgen_metrics: rustcraft_world::GenerationMetrics,
     loaded_from_disk: usize,
     generated_chunks: usize,
+    load_results_applied: u64,
+    generation_results_applied: u64,
     controller: LocalHumanController,
     clock: rustcraft_runtime::metrics::FixedStepClock,
     last_frame: Instant,
@@ -345,10 +379,13 @@ struct ClientApp {
     diagnostic: Option<Stage>,
     capture: Option<PathBuf>,
     debug: bool,
+    debug_trace: bool,
     metrics: rustcraft_runtime::metrics::Metrics,
     process: rustcraft_runtime::metrics::ProcessSampler,
     last_render: Instant,
     debug_text: String,
+    debug_overlay_text: String,
+    last_debug_trace: Instant,
     last_snapshot: Instant,
     last_player_autosave: Instant,
     player_autosave_interval: std::time::Duration,
@@ -365,11 +402,27 @@ struct ClientApp {
     gpu_metrics: Option<gpu_metrics::Provider>,
     measure_seconds: Option<f64>,
     survival_start: bool,
+    stream_perf: bool,
+    stream_perf_motion_seconds: f32,
+    stream_route_completed: bool,
+    stream_route_started_at: Option<Instant>,
+    stream_visited_columns: std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+    stream_evicted_columns: std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+    stream_returned_to_origin: bool,
+    stream_final_report: Option<Result<String, String>>,
     inventory_open: bool,
     cursor_position: [f32; 2],
     mesh_scheduler: rustcraft_render::meshing::MeshScheduler,
+    mesh_worker_count: usize,
     mesh_upload_section_budget: usize,
     mesh_upload_byte_budget: usize,
+    lighting_work_budget: usize,
+    stream_main_budget: Duration,
+    stream_turn_started: Option<Instant>,
+    stream_stage_deadline: Option<Instant>,
+    snapshot_dirty_sections: HashSet<rustcraft_engine_core::SectionPos>,
+    mesh_dirty_sections: HashSet<rustcraft_engine_core::SectionPos>,
+    pending_evictions: HashSet<rustcraft_engine_core::ChunkPos>,
     mesh_uploads: u64,
     mesh_upload_bytes: u64,
     mesh_upload_submit_ms: f64,
@@ -382,8 +435,733 @@ struct ClientApp {
     camera_motion_mesh_baseline: u64,
     camera_motion_buffer_baseline: (u64, u64, u64),
     camera_motion_buffer_reuse_result: (u64, u64, u64, f64),
+    frame_phases: FramePhaseMetrics,
+    frame_phase_samples: FramePhaseSamples,
+    responsiveness: ResponsivenessMetrics,
+    stream_stage_fairness: [StreamStageFairness; 5],
+    request_started_at: HashMap<(rustcraft_engine_core::ChunkPos, u64), Instant>,
+    generation_started_at: HashMap<(rustcraft_engine_core::ChunkPos, u64), Instant>,
+    light_latency_started_at: HashMap<rustcraft_engine_core::ChunkPos, Instant>,
+    light_queue_started_at: HashMap<rustcraft_engine_core::ChunkPos, Instant>,
+    light_work_started_at: HashMap<rustcraft_engine_core::ChunkPos, Instant>,
+    light_cpu_accumulated_ms: HashMap<rustcraft_engine_core::ChunkPos, f64>,
+    visible_latency_started_at: HashMap<rustcraft_engine_core::ChunkPos, Instant>,
+    first_section_latency_started_at: HashMap<rustcraft_engine_core::ChunkPos, Instant>,
+    visible_expected_sections:
+        HashMap<rustcraft_engine_core::ChunkPos, std::collections::HashSet<i32>>,
+    render_ready_columns: std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+    travel_margin: TravelMarginStats,
+    voxel_ready_latency_ms: LatencyWindow,
+    light_ready_latency_ms: LatencyWindow,
+    render_visible_latency_ms: LatencyWindow,
+    first_section_latency_ms: LatencyWindow,
+    load_total_latency_ms: LatencyWindow,
+    load_worker_ms: LatencyWindow,
+    load_queue_wait_ms: LatencyWindow,
+    generation_total_latency_ms: LatencyWindow,
+    generation_worker_ms: LatencyWindow,
+    generation_queue_wait_ms: LatencyWindow,
+    publication_ms: LatencyWindow,
+    lighting_queue_wait_ms: LatencyWindow,
+    lighting_active_ms: LatencyWindow,
+    lighting_cpu_ms: LatencyWindow,
+    initial_light_queue_wait_ms: LatencyWindow,
+    initial_light_worker_ms: LatencyWindow,
+    initial_light_emitters: u64,
+    initial_light_direct_voxels: u64,
+    initial_light_propagation_nodes: u64,
+    mesh_queue_wait_ms: LatencyWindow,
+    mesh_execution_ms: LatencyWindow,
+    mesh_upload_wait_ms: LatencyWindow,
 }
+
+#[derive(Default)]
+struct FramePhaseMetrics {
+    fixed_step_ms: f64,
+    residency_ms: f64,
+    boundary_lighting_ms: f64,
+    render_world_sync_ms: f64,
+    mesh_schedule_ms: f64,
+    mesh_poll_upload_ms: f64,
+    debug_hud_ms: f64,
+    render_present_ms: f64,
+}
+
+struct TravelMarginStats {
+    current: [f32; 5],
+    minimum: [f32; 5],
+    sum: [f64; 5],
+    samples: u64,
+    history: VecDeque<[f32; 5]>,
+}
+
+impl Default for TravelMarginStats {
+    fn default() -> Self {
+        Self {
+            current: [0.0; 5],
+            minimum: [f32::INFINITY; 5],
+            sum: [0.0; 5],
+            samples: 0,
+            history: VecDeque::with_capacity(4_096),
+        }
+    }
+}
+
+impl TravelMarginStats {
+    fn sample(
+        &mut self,
+        safe: &std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+        visible: &std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+        position: Vec3,
+        movement: [f32; 2],
+        view: [f32; 2],
+    ) {
+        let direction = normalize_horizontal(movement)
+            .unwrap_or_else(|| normalize_horizontal(view).unwrap_or([0.0, 1.0]));
+        let forward_safe = visible_line_margin(safe, position, direction);
+        let forward_visible = visible_line_margin(visible, position, direction);
+        let lateral_safe = visible_line_margin(safe, position, [-direction[1], direction[0]]).min(
+            visible_line_margin(safe, position, [direction[1], -direction[0]]),
+        );
+        let lateral_visible =
+            visible_line_margin(visible, position, [-direction[1], direction[0]]).min(
+                visible_line_margin(visible, position, [direction[1], -direction[0]]),
+            );
+        let rear_visible = visible_line_margin(visible, position, [-direction[0], -direction[1]]);
+        self.current = [
+            forward_safe,
+            forward_visible,
+            lateral_safe,
+            lateral_visible,
+            rear_visible,
+        ];
+        for (index, value) in self.current.into_iter().enumerate() {
+            self.minimum[index] = self.minimum[index].min(value);
+            self.sum[index] += f64::from(value);
+        }
+        self.samples += 1;
+        if self.history.len() == 4_096 {
+            self.history.pop_front();
+        }
+        self.history.push_back(self.current);
+    }
+
+    fn mean(&self) -> [f32; 5] {
+        if self.samples == 0 {
+            return [0.0; 5];
+        }
+        self.sum.map(|value| (value / self.samples as f64) as f32)
+    }
+
+    fn p05(&self) -> [f32; 5] {
+        if self.history.is_empty() {
+            return [0.0; 5];
+        }
+        std::array::from_fn(|index| {
+            let mut values = self
+                .history
+                .iter()
+                .map(|sample| sample[index])
+                .collect::<Vec<_>>();
+            values.sort_by(f32::total_cmp);
+            values[((values.len() - 1) as f32 * 0.05).round() as usize]
+        })
+    }
+}
+
+fn normalize_horizontal(value: [f32; 2]) -> Option<[f32; 2]> {
+    let length = value[0].hypot(value[1]);
+    (length > 0.001 && length.is_finite()).then_some([value[0] / length, value[1] / length])
+}
+
+/// Seven 24-second legs at the production movement cap (4 blocks/s). The route crosses more than
+/// thirty chunk boundaries, exercises look/motion disagreement, backward travel, a diagonal,
+/// negative X/Z, a 180-degree reversal, and finally steers back through the origin corridor.
+fn stream_route_sample(elapsed: f32, leg_seconds: f32, position: Vec3) -> (f32, MoveIntent, bool) {
+    let leg = (elapsed / leg_seconds).floor() as usize;
+    let (yaw, movement) = match leg {
+        // Move +X while looking +Z (strafe), proving velocity dominates camera lookahead.
+        0 => (
+            0.0,
+            MoveIntent {
+                forward: 0.0,
+                strafe: -1.0,
+            },
+        ),
+        1 => (
+            0.0,
+            MoveIntent {
+                forward: 1.0,
+                strafe: 0.0,
+            },
+        ),
+        // Move -X while looking +X (walking backward).
+        2 => (
+            std::f32::consts::FRAC_PI_2,
+            MoveIntent {
+                forward: -1.0,
+                strafe: 0.0,
+            },
+        ),
+        3 => (
+            -3.0 * std::f32::consts::FRAC_PI_4,
+            MoveIntent {
+                forward: 1.0,
+                strafe: 0.0,
+            },
+        ),
+        4 => (
+            std::f32::consts::PI,
+            MoveIntent {
+                forward: 1.0,
+                strafe: 0.0,
+            },
+        ),
+        // Exact 180-degree reversal from the prior leg.
+        5 => (
+            0.0,
+            MoveIntent {
+                forward: 1.0,
+                strafe: 0.0,
+            },
+        ),
+        _ => {
+            let home = [-position.x, -position.z];
+            if home[0].hypot(home[1]) < 1.0 {
+                (0.0, MoveIntent::default())
+            } else {
+                (
+                    home[0].atan2(home[1]),
+                    MoveIntent {
+                        forward: 1.0,
+                        strafe: 0.0,
+                    },
+                )
+            }
+        }
+    };
+    (yaw, movement, true)
+}
+
+fn stream_route_label(elapsed: f32, leg_seconds: f32) -> &'static str {
+    match (elapsed / leg_seconds).floor() as usize {
+        0 => "+X strafe/look north",
+        1 => "+Z turn",
+        2 => "-X backward",
+        3 => "diagonal -X/-Z",
+        4 => "-Z negative quadrant",
+        5 => "+Z reversal",
+        _ => "return origin/revisit",
+    }
+}
+
+fn visible_line_margin(
+    ready: &std::collections::HashSet<rustcraft_engine_core::ChunkPos>,
+    position: Vec3,
+    direction: [f32; 2],
+) -> f32 {
+    let mut margin = 0.0;
+    for step in 1..=24 {
+        let distance = step as f32 * 0.5;
+        let column = rustcraft_engine_core::ChunkPos {
+            x: ((position.x + direction[0] * distance * 16.0).floor() as i32).div_euclid(16),
+            z: ((position.z + direction[1] * distance * 16.0).floor() as i32).div_euclid(16),
+        };
+        if !ready.contains(&column) {
+            break;
+        }
+        margin = distance;
+    }
+    margin
+}
+
+#[derive(Default)]
+struct FramePhaseSamples {
+    fixed_step: LatencyWindow,
+    residency: LatencyWindow,
+    boundary_lighting: LatencyWindow,
+    render_world_sync: LatencyWindow,
+    mesh_schedule: LatencyWindow,
+    mesh_poll_upload: LatencyWindow,
+    debug_hud: LatencyWindow,
+    render_present: LatencyWindow,
+}
+
+#[derive(Default)]
+struct ResponsivenessMetrics {
+    frame_interval: LatencyWindow,
+    event_dispatch: LatencyWindow,
+    input_processing: LatencyWindow,
+    event_loop_gap: LatencyWindow,
+    fixed_tick_gap: LatencyWindow,
+    input_to_simulation: LatencyWindow,
+    input_to_render: LatencyWindow,
+    last_about_to_wait: Option<Instant>,
+    last_fixed_tick: Option<Instant>,
+    pending_input_at: Option<Instant>,
+    input_consumed_at: Option<Instant>,
+    due_ticks: u64,
+    executed_ticks: u64,
+    dropped_ticks: u64,
+    dropped_seconds: f64,
+    long_task_counts: [u64; 4],
+    long_tasks: VecDeque<(String, f64, usize)>,
+    longest_task: Option<(String, f64, usize)>,
+}
+
+#[derive(Default)]
+struct StreamStageFairness {
+    skipped_due_to_budget: u64,
+    blocked_dependency_turns: u64,
+    turns_without_service: u32,
+    max_turns_without_service: u32,
+    pending_since: Option<Instant>,
+    oldest_age_ms: f64,
+    max_oldest_age_ms: f64,
+}
+
+impl StreamStageFairness {
+    fn observe(
+        &mut self,
+        pending: bool,
+        serviced: bool,
+        had_budget: bool,
+        blocked_dependency: bool,
+        now: Instant,
+    ) {
+        if !pending {
+            self.pending_since = None;
+            self.oldest_age_ms = 0.0;
+            self.turns_without_service = 0;
+            return;
+        }
+        let since = *self.pending_since.get_or_insert(now);
+        self.oldest_age_ms = now.duration_since(since).as_secs_f64() * 1000.0;
+        self.max_oldest_age_ms = self.max_oldest_age_ms.max(self.oldest_age_ms);
+        if !had_budget {
+            self.skipped_due_to_budget = self.skipped_due_to_budget.saturating_add(1);
+        }
+        if blocked_dependency {
+            self.blocked_dependency_turns = self.blocked_dependency_turns.saturating_add(1);
+            self.turns_without_service = 0;
+        } else if serviced {
+            self.turns_without_service = 0;
+        } else {
+            self.turns_without_service = self.turns_without_service.saturating_add(1);
+            self.max_turns_without_service = self
+                .max_turns_without_service
+                .max(self.turns_without_service);
+        }
+    }
+}
+
+impl ResponsivenessMetrics {
+    fn record_long_task(&mut self, subsystem: &str, elapsed: Duration, work_items: usize) {
+        let ms = elapsed.as_secs_f64() * 1000.0;
+        for (index, threshold) in [4.0, 8.0, 16.0, 33.0].into_iter().enumerate() {
+            if ms >= threshold {
+                self.long_task_counts[index] += 1;
+            }
+        }
+        if ms >= 4.0 {
+            if self
+                .longest_task
+                .as_ref()
+                .is_none_or(|(_, longest_ms, _)| ms > *longest_ms)
+            {
+                self.longest_task = Some((subsystem.to_owned(), ms, work_items));
+            }
+            self.long_tasks
+                .push_back((subsystem.to_owned(), ms, work_items));
+            if self.long_tasks.len() > 64 {
+                self.long_tasks.pop_front();
+            }
+        }
+    }
+}
+
+fn pop_before_deadline<T: Copy + Eq + std::hash::Hash>(
+    pending: &mut HashSet<T>,
+    deadline: Instant,
+) -> Option<T> {
+    (Instant::now() < deadline)
+        .then(|| pending.iter().next().copied())
+        .flatten()
+        .inspect(|item| {
+            pending.remove(item);
+        })
+}
+
+fn pop_urgent_before_deadline<T, K>(
+    pending: &mut HashSet<T>,
+    deadline: Instant,
+    mut key: impl FnMut(T) -> K,
+) -> Option<T>
+where
+    T: Copy + Eq + std::hash::Hash,
+    K: Ord,
+{
+    if Instant::now() >= deadline {
+        return None;
+    }
+    let item = pending.iter().copied().min_by_key(|item| key(*item))?;
+    pending.remove(&item).then_some(item)
+}
+
+#[derive(Default)]
+struct LatencyWindow {
+    samples_ms: VecDeque<f64>,
+}
+
+impl LatencyWindow {
+    fn record(&mut self, elapsed: Duration) {
+        self.samples_ms.push_back(elapsed.as_secs_f64() * 1000.0);
+        if self.samples_ms.len() > 256 {
+            self.samples_ms.pop_front();
+        }
+    }
+
+    fn record_ms(&mut self, milliseconds: f64) {
+        if milliseconds.is_finite() && milliseconds >= 0.0 {
+            self.record(Duration::from_secs_f64(milliseconds / 1000.0));
+        }
+    }
+
+    fn summary(&self) -> Option<[f64; 5]> {
+        if self.samples_ms.is_empty() {
+            return None;
+        }
+        let mut samples = self.samples_ms.iter().copied().collect::<Vec<_>>();
+        samples.sort_by(f64::total_cmp);
+        let quantile = |q: f64| samples[((samples.len() - 1) as f64 * q).round() as usize];
+        Some([
+            quantile(0.50),
+            quantile(0.90),
+            quantile(0.95),
+            quantile(0.99),
+            samples[samples.len() - 1],
+        ])
+    }
+}
+
+struct WorldStartupPayload {
+    simulation: Simulation,
+    presentation: RenderWorld,
+    world_storage: Option<rustcraft_world::WorldStorage>,
+    worldgen_metrics: rustcraft_world::GenerationMetrics,
+    loaded_from_disk: usize,
+    generated_chunks: usize,
+    last_player_autosave: Instant,
+    player_components: Option<Vec<rustcraft_world::PlayerComponent>>,
+    unknown_player_components: Vec<rustcraft_world::PlayerComponent>,
+    player_revision: u64,
+    player_persisted_revision: u64,
+    player_dirty: bool,
+    latest_player_record: Option<rustcraft_world::PlayerRecord>,
+    player_encode_ms_last: f64,
+    player_checkpoint_ms_last: f64,
+    stream_generator: Option<std::sync::Arc<dyn rustcraft_world::ChunkGenerator>>,
+    world_seed: i64,
+    stream_generation_allowed: bool,
+    metadata_player_ms: f64,
+    chunk_load_ms: f64,
+    generation_ms: f64,
+    worker_total_ms: f64,
+}
+
 impl ClientApp {
+    fn autonomous_stream_report(&self) -> Result<String, String> {
+        let mut failures = Vec::new();
+        if !self.stream_route_completed {
+            failures.push("scripted route did not complete".to_owned());
+        }
+        if self.startup_visible_core_ms.is_none() || !self.player_control_enabled {
+            failures.push("complete startup 3x3 SAFE+VISIBLE core was not released".to_owned());
+        }
+        if self.stream_visited_columns.len() < 20 {
+            failures.push(format!(
+                "route crossed only {} distinct columns (need at least 20)",
+                self.stream_visited_columns.len()
+            ));
+        }
+        if !self
+            .stream_visited_columns
+            .iter()
+            .any(|position| position.x < 0 && position.z < 0)
+        {
+            failures.push("route did not reach negative X/Z".to_owned());
+        }
+        if !self.stream_returned_to_origin {
+            failures.push("route did not return through the origin corridor".to_owned());
+        }
+        if self.travel_margin.samples == 0
+            || self.travel_margin.minimum[0] <= 0.0
+            || self.travel_margin.minimum[1] <= 0.0
+        {
+            failures.push(format!(
+                "terrain-ahead margin reached zero: minimum={:?}",
+                self.travel_margin.minimum
+            ));
+        }
+        if let Some(simulation) = self.simulation.as_ref() {
+            let unsafe_visible = simulation
+                .world
+                .safe_column_positions()
+                .find(|position| !self.render_ready_columns.contains(position));
+            if let Some(position) = unsafe_visible {
+                failures.push(format!(
+                    "SAFE=>VISIBLE violated at ({},{})",
+                    position.x, position.z
+                ));
+            }
+        }
+        let event_loop = self.responsiveness.event_loop_gap.summary();
+        let software_present_wait = self.renderer.as_ref().is_some_and(|renderer| {
+            renderer
+                .adapter_info
+                .name
+                .to_ascii_lowercase()
+                .contains("llvmpipe")
+                && self
+                    .responsiveness
+                    .longest_task
+                    .as_ref()
+                    .is_some_and(|(stage, _, _)| stage == "render_present")
+                && [
+                    &self.frame_phase_samples.fixed_step,
+                    &self.frame_phase_samples.residency,
+                    &self.frame_phase_samples.boundary_lighting,
+                    &self.frame_phase_samples.render_world_sync,
+                    &self.frame_phase_samples.mesh_schedule,
+                    &self.frame_phase_samples.mesh_poll_upload,
+                    &self.frame_phase_samples.debug_hud,
+                ]
+                .into_iter()
+                .all(|samples| samples.summary().is_none_or(|summary| summary[4] < 100.0))
+        });
+        if !software_present_wait && event_loop.is_some_and(|summary| summary[4] > 100.0) {
+            failures.push(format!("event-loop gap exceeded 100 ms: {event_loop:?}"));
+        }
+        let input_to_sim = self.responsiveness.input_to_simulation.summary();
+        let input_to_render = self.responsiveness.input_to_render.summary();
+        if input_to_sim.is_none_or(|summary| !software_present_wait && summary[4] > 100.0) {
+            failures.push(format!(
+                "intent-to-simulation latency missing or exceeded 100 ms: {input_to_sim:?}"
+            ));
+        }
+        if input_to_render.is_none_or(|summary| !software_present_wait && summary[4] > 100.0) {
+            failures.push(format!(
+                "intent-to-render latency missing or exceeded 100 ms: {input_to_render:?}"
+            ));
+        }
+        let visible = self.render_visible_latency_ms.summary();
+        if visible.is_none_or(|summary| summary[2] > 9_000.0) {
+            failures.push(format!(
+                "request-to-visible p95 missing or not single-digit seconds: {visible:?}"
+            ));
+        }
+        if self.responsiveness.dropped_seconds > 0.1 {
+            failures.push(format!(
+                "dropped fixed-step time exceeded 0.1 s: {:.3}",
+                self.responsiveness.dropped_seconds
+            ));
+        }
+        let renderer = self.renderer.as_ref();
+        let adapter = renderer
+            .map(|renderer| {
+                format!(
+                    "{} / {:?}",
+                    renderer.adapter_info.name, renderer.adapter_info.backend
+                )
+            })
+            .unwrap_or_else(|| "unavailable".to_owned());
+        let snapshot_bytes = self
+            .presentation
+            .as_ref()
+            .map_or(0, RenderWorld::snapshot_bytes);
+        let report = format!(
+            "CLIENT_STREAM_AUTO result={} adapter={} present_wait={} radius={} retain={} startup_safe_visible_ms={:?} visited_columns={} returned_origin={} margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} request_visible_ms={:?} oldest_critical_queue_age_max_ms={:.3} event_loop_gap_ms={:?} frame_ms={:?} tps={:?} dropped_s={:.3} input_to_sim_ms={:?} input_to_render_ms={:?} resident_columns_peak={} resident_sections_peak={} authoritative_voxel_light_bytes_est={} snapshot_bytes={} mesh_logical_bytes={} mesh_capacity_bytes={} worldgen_hash=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6 streaming_sample_hash=384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
+            if failures.is_empty() { "PASS" } else { "FAIL" },
+            adapter,
+            if software_present_wait {
+                "external-software-renderer"
+            } else {
+                "within-threshold"
+            },
+            self.residency.load_radius(),
+            self.residency.retain_radius(),
+            self.startup_visible_core_ms,
+            self.stream_visited_columns.len(),
+            self.stream_returned_to_origin,
+            self.travel_margin.current,
+            self.travel_margin.minimum,
+            self.travel_margin.p05(),
+            self.travel_margin.mean(),
+            visible,
+            [0, 2, 3, 4]
+                .into_iter()
+                .map(|index| &self.stream_stage_fairness[index])
+                .map(|stage| stage.max_oldest_age_ms)
+                .fold(0.0, f64::max),
+            event_loop,
+            self.responsiveness.frame_interval.summary(),
+            self.metrics.tps,
+            self.responsiveness.dropped_seconds,
+            input_to_sim,
+            input_to_render,
+            self.resident_columns_peak,
+            self.resident_sections_peak,
+            self.resident_sections_peak.saturating_mul(36 * 1024),
+            snapshot_bytes,
+            renderer.map_or(0, Renderer::gpu_mesh_logical_bytes),
+            renderer.map_or(0, |renderer| renderer.gpu_mesh_allocated_bytes()),
+        );
+        if failures.is_empty() {
+            Ok(report)
+        } else {
+            Err(format!("{report}\nfailures: {}", failures.join("; ")))
+        }
+    }
+
+    fn take_startup_payload(&mut self) -> WorldStartupPayload {
+        WorldStartupPayload {
+            simulation: self.simulation.take().expect("startup simulation ready"),
+            presentation: self
+                .presentation
+                .take()
+                .expect("startup render snapshot ready"),
+            world_storage: self.world_storage.take(),
+            worldgen_metrics: self.worldgen_metrics,
+            loaded_from_disk: self.loaded_from_disk,
+            generated_chunks: self.generated_chunks,
+            last_player_autosave: self.last_player_autosave,
+            player_components: self.player_components.take(),
+            unknown_player_components: std::mem::take(&mut self.unknown_player_components),
+            player_revision: self.player_revision,
+            player_persisted_revision: self.player_persisted_revision,
+            player_dirty: self.player_dirty,
+            latest_player_record: self.latest_player_record.take(),
+            player_encode_ms_last: self.player_encode_ms_last,
+            player_checkpoint_ms_last: self.player_checkpoint_ms_last,
+            stream_generator: self.stream_generator.take(),
+            world_seed: self.world_seed,
+            stream_generation_allowed: self.stream_generation_allowed,
+            metadata_player_ms: self.startup_metadata_player_ms,
+            chunk_load_ms: self.startup_chunk_load_ms,
+            generation_ms: self.startup_generation_ms,
+            worker_total_ms: self.startup_worker_total_ms,
+        }
+    }
+}
+
+impl ClientApp {
+    fn begin_world_startup(&mut self) {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let world_name = self.world_name.clone();
+        let saves_directory = self.saves_directory.clone();
+        let survival_start = self.survival_start;
+        let cancellation = self.startup_cancel.clone();
+        self.startup_cancel
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.startup_result = Some(receiver);
+        self.startup_started = Instant::now();
+        self.startup_worker = Some(
+            std::thread::Builder::new()
+                .name("client-world-startup".into())
+                .spawn(move || {
+                    let mut worker = ClientApp::new(None, None);
+                    worker.world_name = world_name;
+                    worker.saves_directory = saves_directory;
+                    worker.survival_start = survival_start;
+                    worker.startup_cancel = cancellation;
+                    let worker_started = Instant::now();
+                    let result = worker.start_world().map(|()| {
+                        worker.startup_worker_total_ms =
+                            worker_started.elapsed().as_secs_f64() * 1000.0;
+                        worker.take_startup_payload()
+                    });
+                    let _ = sender.send(result);
+                })
+                .expect("world startup worker thread creation failed"),
+        );
+    }
+
+    fn poll_world_startup(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(receiver) = self.startup_result.as_ref() else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("world startup worker stopped without a result".to_owned())
+            }
+        };
+        self.startup_result.take();
+        if let Some(worker) = self.startup_worker.take() {
+            let _ = worker.join();
+        }
+        match result {
+            Ok(payload) => {
+                self.simulation = Some(payload.simulation);
+                self.presentation = Some(payload.presentation);
+                if let Some(simulation) = self.simulation.as_mut() {
+                    let resident = simulation.world.column_positions().collect::<Vec<_>>();
+                    for position in resident {
+                        let _ = simulation.world.set_column_safe(position, false);
+                    }
+                }
+                self.player_control_enabled = false;
+                self.world_storage = payload.world_storage;
+                self.worldgen_metrics = payload.worldgen_metrics;
+                self.loaded_from_disk = payload.loaded_from_disk;
+                self.generated_chunks = payload.generated_chunks;
+                self.last_player_autosave = payload.last_player_autosave;
+                self.player_components = payload.player_components;
+                self.unknown_player_components = payload.unknown_player_components;
+                self.player_revision = payload.player_revision;
+                self.player_persisted_revision = payload.player_persisted_revision;
+                self.player_dirty = payload.player_dirty;
+                self.latest_player_record = payload.latest_player_record;
+                self.player_encode_ms_last = payload.player_encode_ms_last;
+                self.player_checkpoint_ms_last = payload.player_checkpoint_ms_last;
+                self.stream_generator = payload.stream_generator;
+                self.world_seed = payload.world_seed;
+                self.stream_generation_allowed = payload.stream_generation_allowed;
+                self.startup_metadata_player_ms = payload.metadata_player_ms;
+                self.startup_chunk_load_ms = payload.chunk_load_ms;
+                self.startup_generation_ms = payload.generation_ms;
+                self.startup_worker_total_ms = payload.worker_total_ms;
+                self.startup_ready_ms = payload.worker_total_ms;
+                self.world_ready_at = Some(Instant::now());
+                eprintln!(
+                    "world startup ready: metadata_player_ms={:.2} async_chunk_load_ms={:.2} generation_wait_ms={:.2} worker_total_ms={:.2}",
+                    payload.metadata_player_ms,
+                    payload.chunk_load_ms,
+                    payload.generation_ms,
+                    payload.worker_total_ms,
+                );
+                if let Some(window) = &self.window {
+                    window.set_title("RustCraft");
+                }
+                self.rebuild_meshes();
+            }
+            Err(error) => {
+                eprintln!("unable to initialize local world: {error}");
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn cancel_startup_and_join(&mut self) {
+        self.startup_cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(worker) = self.startup_worker.take() {
+            let _ = worker.join();
+        }
+        self.startup_result.take();
+    }
+
     fn new(diagnostic: Option<Stage>, capture: Option<PathBuf>) -> Self {
         let mesh_workers = std::env::var("RUSTCRAFT_MESH_WORKERS")
             .ok()
@@ -391,16 +1169,66 @@ impl ClientApp {
             .unwrap_or_else(|| {
                 std::thread::available_parallelism()
                     .map_or(1, usize::from)
-                    .saturating_sub(1)
-                    .clamp(1, 8)
+                    // Streaming also owns one load and one generation worker, while save and
+                    // player checkpoints have their own mostly-I/O workers. Reserve capacity for
+                    // the event/simulation threads instead of giving meshing N-1 CPUs alone.
+                    .saturating_sub(5)
+                    .clamp(1, 3)
             })
             .clamp(1, 32);
+        let initial_light_workers = std::env::var("RUSTCRAFT_LIGHT_WORKERS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 4);
+        let stream_load_radius = std::env::var("RUSTCRAFT_STREAM_RADIUS")
+            .ok()
+            .and_then(|value| value.parse::<i32>().ok())
+            .unwrap_or(4)
+            .clamp(3, 12);
+        let stream_lookahead_enabled = std::env::var("RUSTCRAFT_STREAM_LOOKAHEAD")
+            .map(|value| !matches!(value.as_str(), "0" | "false" | "off"))
+            .unwrap_or(false);
         Self {
             window: None,
             renderer: None,
             simulation: None,
             presentation: None,
+            startup_result: None,
+            startup_worker: None,
+            startup_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            startup_started: Instant::now(),
+            startup_ready_ms: 0.0,
+            startup_visible_core_ms: None,
+            player_control_enabled: cfg!(test),
+            world_ready_at: None,
+            startup_metadata_player_ms: 0.0,
+            startup_chunk_load_ms: 0.0,
+            startup_generation_ms: 0.0,
+            startup_worker_total_ms: 0.0,
+            full_desired_ready_ms: None,
+            light_converged_count: 0,
+            lighting_work_ms: 0.0,
+            eviction_count: 0,
+            eviction_blocked_dirty: 0,
+            eviction_blocked_lighting: 0,
+            resident_columns_peak: 0,
+            resident_sections_peak: 0,
             world_storage: None,
+            residency: rustcraft_world::WorldResidency::new(stream_load_radius, 1),
+            stream_load_radius,
+            stream_lookahead_enabled,
+            last_residency_position: None,
+            last_residency_update_at: None,
+            load_scheduler: rustcraft_world::ChunkLoadScheduler::new(1, 4),
+            generation_scheduler: rustcraft_world::GenerationScheduler::new(1, 4),
+            initial_lighting_scheduler: rustcraft_runtime::lighting::InitialLightingScheduler::new(
+                initial_light_workers,
+                8,
+            ),
+            stream_generator: None,
+            world_seed: 731_173,
+            stream_generation_allowed: true,
             persistence_dirty: Default::default(),
             save_scheduler: rustcraft_world::SaveScheduler::new(1, 8),
             world_name: "default".to_owned(),
@@ -410,6 +1238,8 @@ impl ClientApp {
             worldgen_metrics: Default::default(),
             loaded_from_disk: 0,
             generated_chunks: 0,
+            load_results_applied: 0,
+            generation_results_applied: 0,
             controller: LocalHumanController::default(),
             clock: Default::default(),
             last_frame: Instant::now(),
@@ -417,10 +1247,13 @@ impl ClientApp {
             diagnostic,
             capture,
             debug: std::env::var_os("RUSTCRAFT_F3").is_some(),
+            debug_trace: std::env::var_os("RUSTCRAFT_F3_TRACE").is_some(),
             metrics: Default::default(),
             process: Default::default(),
             last_render: Instant::now(),
             debug_text: String::new(),
+            debug_overlay_text: String::new(),
+            last_debug_trace: Instant::now(),
             last_snapshot: Instant::now() - std::time::Duration::from_secs(1),
             last_player_autosave: Instant::now(),
             player_autosave_interval: Duration::from_secs(
@@ -445,6 +1278,19 @@ impl ClientApp {
                 .ok()
                 .and_then(|s| s.parse().ok()),
             survival_start: false,
+            stream_perf: false,
+            stream_perf_motion_seconds: std::env::var("RUSTCRAFT_STREAM_PERF_SECONDS")
+                .ok()
+                .and_then(|value| value.parse::<f32>().ok())
+                .filter(|value| value.is_finite())
+                .unwrap_or(168.0)
+                .clamp(10.0, 600.0),
+            stream_route_completed: false,
+            stream_route_started_at: None,
+            stream_visited_columns: std::collections::HashSet::new(),
+            stream_evicted_columns: std::collections::HashSet::new(),
+            stream_returned_to_origin: false,
+            stream_final_report: None,
             inventory_open: false,
             cursor_position: [0.; 2],
             mesh_scheduler: rustcraft_render::meshing::MeshScheduler::new(
@@ -452,6 +1298,7 @@ impl ClientApp {
                 mesh_workers * 2,
                 FirstPartyTextures,
             ),
+            mesh_worker_count: mesh_workers,
             mesh_upload_section_budget: std::env::var("RUSTCRAFT_MESH_UPLOAD_SECTIONS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -460,6 +1307,25 @@ impl ClientApp {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(8 * 1024 * 1024),
+            lighting_work_budget: std::env::var("RUSTCRAFT_LIGHTING_WORK_BUDGET")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(32)
+                .clamp(1, 256),
+            stream_main_budget: Duration::from_secs_f64(
+                std::env::var("RUSTCRAFT_STREAM_MAIN_BUDGET_MS")
+                    .ok()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(2.0)
+                    .clamp(0.25, 8.0)
+                    / 1000.0,
+            ),
+            stream_turn_started: None,
+            stream_stage_deadline: None,
+            snapshot_dirty_sections: HashSet::new(),
+            mesh_dirty_sections: HashSet::new(),
+            pending_evictions: HashSet::new(),
             mesh_uploads: 0,
             mesh_upload_bytes: 0,
             mesh_upload_submit_ms: 0.0,
@@ -472,6 +1338,43 @@ impl ClientApp {
             camera_motion_mesh_baseline: 0,
             camera_motion_buffer_baseline: (0, 0, 0),
             camera_motion_buffer_reuse_result: (0, 0, 0, 0.0),
+            frame_phases: FramePhaseMetrics::default(),
+            frame_phase_samples: FramePhaseSamples::default(),
+            responsiveness: ResponsivenessMetrics::default(),
+            stream_stage_fairness: std::array::from_fn(|_| StreamStageFairness::default()),
+            request_started_at: HashMap::new(),
+            generation_started_at: HashMap::new(),
+            light_latency_started_at: HashMap::new(),
+            light_queue_started_at: HashMap::new(),
+            light_work_started_at: HashMap::new(),
+            light_cpu_accumulated_ms: HashMap::new(),
+            visible_latency_started_at: HashMap::new(),
+            first_section_latency_started_at: HashMap::new(),
+            visible_expected_sections: HashMap::new(),
+            render_ready_columns: std::collections::HashSet::new(),
+            travel_margin: TravelMarginStats::default(),
+            voxel_ready_latency_ms: LatencyWindow::default(),
+            light_ready_latency_ms: LatencyWindow::default(),
+            render_visible_latency_ms: LatencyWindow::default(),
+            first_section_latency_ms: LatencyWindow::default(),
+            load_total_latency_ms: LatencyWindow::default(),
+            load_worker_ms: LatencyWindow::default(),
+            load_queue_wait_ms: LatencyWindow::default(),
+            generation_total_latency_ms: LatencyWindow::default(),
+            generation_worker_ms: LatencyWindow::default(),
+            generation_queue_wait_ms: LatencyWindow::default(),
+            publication_ms: LatencyWindow::default(),
+            lighting_queue_wait_ms: LatencyWindow::default(),
+            lighting_active_ms: LatencyWindow::default(),
+            lighting_cpu_ms: LatencyWindow::default(),
+            initial_light_queue_wait_ms: LatencyWindow::default(),
+            initial_light_worker_ms: LatencyWindow::default(),
+            initial_light_emitters: 0,
+            initial_light_direct_voxels: 0,
+            initial_light_propagation_nodes: 0,
+            mesh_queue_wait_ms: LatencyWindow::default(),
+            mesh_execution_ms: LatencyWindow::default(),
+            mesh_upload_wait_ms: LatencyWindow::default(),
         }
     }
     fn start_world(&mut self) -> Result<(), String> {
@@ -561,6 +1464,7 @@ impl ClientApp {
             sync::Arc,
             time::{Duration, Instant},
         };
+        let metadata_player_started = Instant::now();
         let generator: Arc<dyn ChunkGenerator> =
             Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld());
         let storage = WorldStorage::open(&self.saves_directory, &self.world_name)
@@ -643,6 +1547,7 @@ impl ClientApp {
             );
         }
         let restored = decoded.map(|(state, _)| state);
+        self.startup_metadata_player_ms = metadata_player_started.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "player persistence read: revision={} components={} bytes={} read_ms={player_read_ms:.3} decode_ms={:.3}",
             player_record.as_ref().map_or(0, |record| record.revision),
@@ -679,30 +1584,62 @@ impl ClientApp {
                 )
             })?;
         }
-        let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
+        let resolver: std::sync::Arc<dyn rustcraft_world::SemanticBlockResolver> =
+            std::sync::Arc::new(rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver);
+        let chunk_load_started = Instant::now();
         let mut missing = Vec::new();
         let mut loaded_from_disk = 0;
-        for position in positions.iter().copied() {
-            if storage.chunk_exists(position) {
-                let sections =
-                    storage
-                        .load_runtime_chunk(position, &resolver)
-                        .map_err(|error| {
-                            format!(
-                                "load chunk ({},{}) in world {}: {error}",
-                                position.x,
-                                position.z,
-                                storage.root().display()
-                            )
-                        })?;
-                world
-                    .publish_column(position, sections)
-                    .map_err(str::to_owned)?;
-                loaded_from_disk += 1;
-            } else {
-                missing.push(position);
+        let mut load_scheduler = rustcraft_world::ChunkLoadScheduler::new(2, 8);
+        for (index, position) in positions.iter().copied().enumerate() {
+            load_scheduler
+                .submit(
+                    storage.clone(),
+                    rustcraft_world::ResidencyRequest {
+                        position,
+                        token: index as u64 + 1,
+                    },
+                    resolver.clone(),
+                )
+                .map_err(|error| format!("queue initial chunk load: {error}"))?;
+        }
+        let load_deadline = Instant::now() + Duration::from_secs(60);
+        let mut completed_loads = 0;
+        while completed_loads < positions.len() {
+            for completion in load_scheduler.take_ready(positions.len()) {
+                completed_loads += 1;
+                match completion.result {
+                    Ok(Some(sections)) => {
+                        world
+                            .publish_column(completion.request.position, sections)
+                            .map_err(str::to_owned)?;
+                        loaded_from_disk += 1;
+                    }
+                    Ok(None) => missing.push(completion.request.position),
+                    Err(error) => {
+                        return Err(format!(
+                            "load chunk ({},{}) in world {}: {error}",
+                            completion.request.position.x,
+                            completion.request.position.z,
+                            storage.root().display()
+                        ));
+                    }
+                }
+            }
+            if completed_loads < positions.len() {
+                if self
+                    .startup_cancel
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    return Err("world startup cancelled".into());
+                }
+                if Instant::now() >= load_deadline {
+                    return Err("initial chunk loading timed out".into());
+                }
+                std::thread::yield_now();
             }
         }
+        drop(load_scheduler);
+        self.startup_chunk_load_ms = chunk_load_started.elapsed().as_secs_f64() * 1000.0;
 
         if let Some(found) = &saved {
             validate_world_compatibility(found, &expected, !missing.is_empty()).map_err(|error| {
@@ -715,7 +1652,14 @@ impl ClientApp {
         let generation_seed = saved
             .as_ref()
             .map_or(expected.seed, |metadata| metadata.seed);
+        self.stream_generator = Some(generator.clone());
+        self.world_seed = generation_seed;
+        self.stream_generation_allowed = saved.as_ref().is_none_or(|metadata| {
+            metadata.generator_id == generator.id()
+                && metadata.generator_version == generator.version()
+        });
         let mut scheduler = GenerationScheduler::new(2, 8);
+        let generation_started = Instant::now();
         for (index, position) in missing.iter().copied().enumerate() {
             scheduler
                 .request(
@@ -729,6 +1673,12 @@ impl ClientApp {
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut generated = 0;
         while generated < missing.len() {
+            if self
+                .startup_cancel
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                return Err("world startup cancelled".into());
+            }
             for result in scheduler.take_ready() {
                 let sections = result
                     .sections
@@ -746,6 +1696,8 @@ impl ClientApp {
             }
             std::thread::yield_now();
         }
+        world.enforce_column_availability(true);
+        self.startup_generation_ms = generation_started.elapsed().as_secs_f64() * 1000.0;
         self.loaded_from_disk = loaded_from_disk;
         self.generated_chunks = generated;
         self.worldgen_metrics = scheduler.metrics();
@@ -761,7 +1713,7 @@ impl ClientApp {
                 .filter(|(p, _)| *p == position)
                 .filter_map(|(_, y)| world.section(position, y).cloned().map(|chunk| (y, chunk)))
                 .collect::<Vec<_>>();
-            let stored = WorldStorage::encode_runtime_chunk(position, sections, &resolver)
+            let stored = WorldStorage::encode_runtime_chunk(position, sections, resolver.as_ref())
                 .map_err(|error| error.to_string())?;
             storage.store_chunk(&stored).map_err(|error| {
                 format!(
@@ -872,13 +1824,63 @@ impl ClientApp {
         }
         true
     }
+    fn stream_budget_available(&self) -> bool {
+        let deadline = self.stream_stage_deadline.or_else(|| {
+            self.stream_turn_started
+                .map(|started| started + self.stream_main_budget)
+        });
+        deadline.is_none_or(|deadline| Instant::now() < deadline)
+    }
     fn fixed_step(&mut self) {
         let tick_started = Instant::now();
+        if let Some(previous) = self.responsiveness.last_fixed_tick.replace(tick_started) {
+            self.responsiveness
+                .fixed_tick_gap
+                .record(tick_started.duration_since(previous));
+        }
+        if !self.player_control_enabled {
+            self.frame_phases.fixed_step_ms = tick_started.elapsed().as_secs_f64() * 1000.0;
+            self.frame_phase_samples
+                .fixed_step
+                .record_ms(self.frame_phases.fixed_step_ms);
+            self.metrics.tick(tick_started.elapsed().as_secs_f64());
+            return;
+        }
+        let pending_input = self.responsiveness.pending_input_at.take();
+        let simulation_started = Instant::now();
+        let player_yaw = self
+            .simulation
+            .as_ref()
+            .map_or(0.0, |simulation| simulation.player.yaw);
+        let travel_elapsed = self
+            .stream_route_started_at
+            .unwrap_or_else(Instant::now)
+            .elapsed()
+            .as_secs_f32();
+        let stream_perf_enabled = self.stream_perf;
+        let stream_perf = stream_perf_enabled && travel_elapsed < self.stream_perf_motion_seconds;
         let (persistence_dirty, dirty) = {
             let Some(simulation) = self.simulation.as_mut() else {
                 return;
             };
-            let intent = if self.inventory_open {
+            let intent = if stream_perf {
+                let (target_yaw, movement, jump) = stream_route_sample(
+                    travel_elapsed,
+                    self.stream_perf_motion_seconds / 7.0,
+                    simulation.player.position,
+                );
+                let yaw_delta = (target_yaw - player_yaw + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI;
+                let issued = Instant::now();
+                self.responsiveness.pending_input_at = Some(issued);
+                AgentIntent {
+                    movement,
+                    look_delta: Vec3::new(-yaw_delta / 0.002, 0.0, 0.0),
+                    jump,
+                    ..Default::default()
+                }
+            } else if stream_perf_enabled || self.inventory_open {
                 rustcraft_agent_api::AgentIntent::default()
             } else {
                 self.controller.next_intent()
@@ -889,15 +1891,1163 @@ impl ClientApp {
                 simulation.take_dirty_sections(),
             )
         };
+        if stream_perf_enabled && !stream_perf {
+            self.stream_route_completed = true;
+        }
+        let simulation_elapsed = simulation_started.elapsed();
+        self.responsiveness
+            .record_long_task("simulation_step", simulation_elapsed, 1);
+        if let Some(input_at) = pending_input {
+            self.responsiveness
+                .input_to_simulation
+                .record(Instant::now().duration_since(input_at));
+            self.responsiveness.input_consumed_at = Some(input_at);
+        }
+        self.frame_phases.fixed_step_ms = tick_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .fixed_step
+            .record_ms(self.frame_phases.fixed_step_ms);
         self.metrics.tick(tick_started.elapsed().as_secs_f64());
+        if let Some(simulation) = self.simulation.as_ref() {
+            self.resident_columns_peak = self
+                .resident_columns_peak
+                .max(simulation.world.chunk_count());
+            self.resident_sections_peak = self
+                .resident_sections_peak
+                .max(simulation.world.section_count());
+            let current_column = rustcraft_engine_core::ChunkPos {
+                x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+                z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+            };
+            if stream_perf_enabled {
+                self.stream_visited_columns.insert(current_column);
+                if travel_elapsed >= self.stream_perf_motion_seconds * (6.0 / 7.0)
+                    && current_column.x.abs() <= 1
+                    && current_column.z.abs() <= 1
+                {
+                    self.stream_returned_to_origin = true;
+                }
+            }
+            let safe = simulation
+                .world
+                .safe_column_positions()
+                .collect::<std::collections::HashSet<_>>();
+            self.travel_margin.sample(
+                &safe,
+                &self.render_ready_columns,
+                simulation.player.position,
+                [simulation.player.velocity.x, simulation.player.velocity.z],
+                [simulation.player.yaw.sin(), simulation.player.yaw.cos()],
+            );
+        }
         self.service_world_saves(persistence_dirty);
         self.service_player_autosave();
-        if let (Some(presentation), Some(simulation)) =
-            (self.presentation.as_mut(), self.simulation.as_ref())
-        {
-            presentation.sync_sections(&simulation.world, dirty.iter().copied());
+        self.snapshot_dirty_sections.extend(dirty);
+        self.responsiveness
+            .record_long_task("fixed_step", tick_started.elapsed(), 1);
+    }
+
+    fn stream_stage_deadline(&self, budget_fraction: f64) -> Instant {
+        Instant::now() + self.stream_main_budget.mul_f64(budget_fraction)
+    }
+
+    fn observe_stream_stage(
+        &mut self,
+        index: usize,
+        pending: bool,
+        serviced: bool,
+        had_budget: bool,
+        blocked_dependency: bool,
+    ) {
+        self.stream_stage_fairness[index].observe(
+            pending,
+            serviced,
+            had_budget,
+            blocked_dependency,
+            Instant::now(),
+        );
+    }
+
+    /// Independent reserved windows prevent a perpetually busy early stage from consuming the
+    /// entire turn. Work is visited on every event-loop turn, not only at the 20 Hz fixed tick.
+    fn service_streaming_turn(&mut self) {
+        if self.simulation.is_none() {
+            return;
         }
-        self.rebuild_dirty_meshes(dirty);
+
+        let critical_deadline = self.stream_stage_deadline(0.30);
+        self.stream_stage_deadline = Some(critical_deadline);
+        let load_stats = self.load_scheduler.metrics();
+        let generation_stats = self.generation_scheduler.metrics();
+        let light_capacity = self.simulation.as_ref().map_or(0, |simulation| {
+            simulation.lighting.integration_capacity_remaining()
+        });
+        let initial_results_waiting = self.initial_lighting_scheduler.outstanding()
+            > self.initial_lighting_scheduler.pending()
+                + self.initial_lighting_scheduler.in_flight();
+        let load_results_waiting = (load_stats.completed + load_stats.missing + load_stats.failed)
+            > self.load_results_applied;
+        let generation_results_waiting =
+            generation_stats.completed > self.generation_results_applied;
+        let initial_worker_capacity = self.initial_lighting_scheduler.capacity_remaining() > 0;
+        let critical_pending = (initial_results_waiting && light_capacity > 0)
+            || ((load_results_waiting || generation_results_waiting) && initial_worker_capacity);
+        let critical_blocked = (initial_results_waiting && light_capacity == 0)
+            || ((load_results_waiting || generation_results_waiting) && !initial_worker_capacity);
+        let critical_had_budget = Instant::now() < critical_deadline;
+        let before_loaded = (
+            self.generated_chunks,
+            self.loaded_from_disk,
+            self.load_results_applied,
+            self.generation_results_applied,
+        );
+        let residency_started = Instant::now();
+        let critical_dirty = if Instant::now() < critical_deadline {
+            self.service_world_residency()
+        } else {
+            Vec::new()
+        };
+        self.snapshot_dirty_sections
+            .extend(critical_dirty.iter().copied());
+        self.frame_phases.residency_ms = residency_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .residency
+            .record_ms(self.frame_phases.residency_ms);
+        self.observe_stream_stage(
+            0,
+            critical_pending || critical_blocked,
+            !critical_dirty.is_empty()
+                || before_loaded
+                    != (
+                        self.generated_chunks,
+                        self.loaded_from_disk,
+                        self.load_results_applied,
+                        self.generation_results_applied,
+                    ),
+            critical_had_budget,
+            critical_blocked,
+        );
+
+        if let Some(simulation) = self.simulation.as_mut() {
+            simulation
+                .lighting
+                .reprioritize_pending_columns(|position| self.residency.priority_key(position));
+        }
+        let boundary_deadline = self.stream_stage_deadline(0.30);
+        self.stream_stage_deadline = Some(boundary_deadline);
+        let boundary_pending = self
+            .simulation
+            .as_ref()
+            .is_some_and(|simulation| !simulation.lighting.integration_columns().is_empty());
+        let boundary_had_budget = Instant::now() < boundary_deadline;
+        let boundary_started = Instant::now();
+        let (boundary_dirty, boundary_work) = if Instant::now() < boundary_deadline {
+            self.advance_boundary_lighting_for_turn()
+        } else {
+            (Vec::new(), 0)
+        };
+        self.snapshot_dirty_sections.extend(boundary_dirty);
+        self.frame_phases.boundary_lighting_ms = boundary_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .boundary_lighting
+            .record_ms(self.frame_phases.boundary_lighting_ms);
+        self.observe_stream_stage(
+            1,
+            boundary_pending,
+            boundary_work > 0,
+            boundary_had_budget,
+            false,
+        );
+
+        let snapshot_deadline = self.stream_stage_deadline(0.25);
+        self.stream_stage_deadline = Some(snapshot_deadline);
+        let snapshot_pending = !self.snapshot_dirty_sections.is_empty();
+        let snapshot_had_budget = Instant::now() < snapshot_deadline;
+        let snapshot_started = Instant::now();
+        let mut snapshots_built = 0usize;
+        let player_section = self.player_section_position();
+        let residency = &self.residency;
+        while Instant::now() < snapshot_deadline {
+            let Some(section) = pop_urgent_before_deadline(
+                &mut self.snapshot_dirty_sections,
+                snapshot_deadline,
+                |section| Self::section_priority(residency, player_section, section),
+            ) else {
+                break;
+            };
+            let Some((presentation, simulation)) =
+                self.presentation.as_mut().zip(self.simulation.as_ref())
+            else {
+                self.snapshot_dirty_sections.insert(section);
+                break;
+            };
+            presentation.sync_sections(&simulation.world, [section]);
+            self.mesh_dirty_sections.insert(section);
+            snapshots_built += 1;
+        }
+        self.frame_phases.render_world_sync_ms = snapshot_started.elapsed().as_secs_f64() * 1000.0;
+        self.responsiveness.record_long_task(
+            "render_world_sync",
+            snapshot_started.elapsed(),
+            snapshots_built,
+        );
+        self.frame_phase_samples
+            .render_world_sync
+            .record_ms(self.frame_phases.render_world_sync_ms);
+        self.observe_stream_stage(
+            2,
+            snapshot_pending,
+            snapshots_built > 0,
+            snapshot_had_budget,
+            false,
+        );
+
+        let mesh_deadline = self.stream_stage_deadline(0.15);
+        self.stream_stage_deadline = Some(mesh_deadline);
+        let mesh_pending = !self.mesh_dirty_sections.is_empty();
+        let mesh_had_budget = Instant::now() < mesh_deadline;
+        let mesh_started = Instant::now();
+        let mut mesh_scheduled = 0usize;
+        let player_section = self.player_section_position();
+        let mut prioritized_mesh = self.mesh_dirty_sections.drain().collect::<Vec<_>>();
+        prioritized_mesh.sort_by_key(|section| {
+            Self::section_priority(&self.residency, player_section, *section)
+        });
+        let mut remaining_mesh = prioritized_mesh.into_iter();
+        while Instant::now() < mesh_deadline {
+            let Some(section) = remaining_mesh.next() else {
+                break;
+            };
+            self.rebuild_dirty_meshes([section]);
+            mesh_scheduled += 1;
+        }
+        self.mesh_dirty_sections.extend(remaining_mesh);
+        self.frame_phases.mesh_schedule_ms = mesh_started.elapsed().as_secs_f64() * 1000.0;
+        self.responsiveness.record_long_task(
+            "mesh_schedule",
+            mesh_started.elapsed(),
+            mesh_scheduled,
+        );
+        self.frame_phase_samples
+            .mesh_schedule
+            .record_ms(self.frame_phases.mesh_schedule_ms);
+        self.observe_stream_stage(3, mesh_pending, mesh_scheduled > 0, mesh_had_budget, false);
+        self.stream_stage_deadline = None;
+    }
+
+    fn player_section_position(&self) -> (rustcraft_engine_core::ChunkPos, i32) {
+        self.simulation.as_ref().map_or(
+            (rustcraft_engine_core::ChunkPos { x: 0, z: 0 }, 0),
+            |simulation| {
+                (
+                    rustcraft_engine_core::ChunkPos {
+                        x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+                        z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+                    },
+                    (simulation.player.position.y.floor() as i32).div_euclid(16),
+                )
+            },
+        )
+    }
+
+    /// Release only complete 3x3 locally authoritative and render-ready cores. Successive cores
+    /// overlap, so travel grows a contiguous safe corridor rather than exposing lifecycle holes.
+    fn release_render_ready_safe_core(&mut self) {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return;
+        };
+        let center = rustcraft_engine_core::ChunkPos {
+            x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+            z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+        };
+        let core = (-1..=1)
+            .flat_map(|dz| {
+                (-1..=1).map(move |dx| rustcraft_engine_core::ChunkPos {
+                    x: center.x + dx,
+                    z: center.z + dz,
+                })
+            })
+            .collect::<Vec<_>>();
+        let complete = core.iter().all(|position| {
+            self.render_ready_columns.contains(position)
+                && simulation.world.column_positions().any(|p| p == *position)
+        });
+        if !complete {
+            return;
+        }
+        let simulation = self
+            .simulation
+            .as_mut()
+            .expect("checked running simulation");
+        for position in core {
+            let released = simulation.world.set_column_safe(position, true);
+            debug_assert!(released, "safe-core column must be authoritative");
+        }
+        if !self.player_control_enabled {
+            self.player_control_enabled = true;
+            self.stream_route_started_at = Some(Instant::now());
+            self.responsiveness.pending_input_at = None;
+            self.responsiveness.input_consumed_at = None;
+            self.responsiveness.input_to_simulation = LatencyWindow::default();
+            self.responsiveness.input_to_render = LatencyWindow::default();
+            let ready_ms = self
+                .world_ready_at
+                .unwrap_or(self.startup_started)
+                .elapsed()
+                .as_secs_f64()
+                * 1000.0;
+            self.startup_visible_core_ms = Some(ready_ms);
+            eprintln!(
+                "startup control enabled: complete 3x3 SAFE+VISIBLE core ready in {ready_ms:.2} ms"
+            );
+        }
+    }
+
+    fn section_priority(
+        residency: &rustcraft_world::WorldResidency,
+        player: (rustcraft_engine_core::ChunkPos, i32),
+        section: rustcraft_engine_core::SectionPos,
+    ) -> ((u8, i64, i64, i32, i32), i32) {
+        let column = section.0;
+        let dx = i64::from(column.x) - i64::from(player.0.x);
+        let dz = i64::from(column.z) - i64::from(player.0.z);
+        let distance = dx.abs().max(dz.abs());
+        let urgency = residency.urgency(column) as u8;
+        (
+            (
+                urgency,
+                residency.priority_key(column).0,
+                distance,
+                column.x,
+                column.z,
+            ),
+            section.1.abs_diff(player.1) as i32,
+        )
+    }
+
+    fn frontier_summary(&self) -> String {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return "unavailable".to_owned();
+        };
+        let center = rustcraft_engine_core::ChunkPos {
+            x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+            z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+        };
+        let direction =
+            normalize_horizontal([simulation.player.yaw.sin(), simulation.player.yaw.cos()])
+                .unwrap_or([0.0, 1.0]);
+        for distance in 1..=3 {
+            let position = rustcraft_engine_core::ChunkPos {
+                x: center.x + (direction[0] * distance as f32).round() as i32,
+                z: center.z + (direction[1] * distance as f32).round() as i32,
+            };
+            if position == center || self.render_ready_columns.contains(&position) {
+                continue;
+            }
+            let resident = simulation.world.column_positions().any(|p| p == position);
+            let boundary = simulation
+                .lighting
+                .integration_columns()
+                .contains(&position);
+            let phase = match self.residency.phase(position) {
+                Some(rustcraft_world::ResidencyPhase::Requested) => "requested",
+                Some(rustcraft_world::ResidencyPhase::Loading) => "loading",
+                Some(rustcraft_world::ResidencyPhase::Generating) => "generating",
+                Some(rustcraft_world::ResidencyPhase::InitialLighting) if boundary => {
+                    "boundary-lighting"
+                }
+                Some(rustcraft_world::ResidencyPhase::InitialLighting) => "initial-lighting",
+                Some(rustcraft_world::ResidencyPhase::Ready) if boundary => "boundary-lighting",
+                Some(rustcraft_world::ResidencyPhase::Ready)
+                    if self.snapshot_dirty_sections.iter().any(|s| s.0 == position) =>
+                {
+                    "snapshot-pending"
+                }
+                Some(rustcraft_world::ResidencyPhase::Ready)
+                    if self.mesh_dirty_sections.iter().any(|s| s.0 == position) =>
+                {
+                    "mesh-pending"
+                }
+                Some(rustcraft_world::ResidencyPhase::Ready)
+                    if self
+                        .visible_expected_sections
+                        .get(&position)
+                        .is_some_and(|sections| !sections.is_empty())
+                        && self.mesh_scheduler.stats().ready > 0 =>
+                {
+                    "upload-pending"
+                }
+                Some(rustcraft_world::ResidencyPhase::Ready)
+                    if self
+                        .visible_expected_sections
+                        .get(&position)
+                        .is_some_and(|sections| !sections.is_empty()) =>
+                {
+                    "mesh-pending"
+                }
+                Some(rustcraft_world::ResidencyPhase::Ready) => "render-visible",
+                Some(rustcraft_world::ResidencyPhase::Failed) => "failed",
+                Some(rustcraft_world::ResidencyPhase::Saving) => "saving",
+                None if !resident => "not-requested",
+                None => "resident-untracked",
+            };
+            let age = self
+                .request_started_at
+                .iter()
+                .find_map(|((candidate, _), start)| {
+                    (*candidate == position).then_some(start.elapsed())
+                })
+                .or_else(|| {
+                    self.visible_latency_started_at
+                        .get(&position)
+                        .map(Instant::elapsed)
+                })
+                .unwrap_or_default()
+                .as_millis();
+            let urgency = if distance == 1 { "REQUIRED" } else { "VISIBLE" };
+            let authoritative = resident;
+            let snapshot = self
+                .presentation
+                .as_ref()
+                .is_some_and(|world| world.chunks().any(|section| section.position == position));
+            let renderer = self
+                .renderer
+                .as_ref()
+                .map(|renderer| renderer.column_state(position, camera_for(simulation, 16.0 / 9.0)))
+                .unwrap_or_default();
+            return format!(
+                "chunk=({}, {}) state={} age={}ms priority={} authoritative={} snapshot={} mesh_sections={} drawable={} submitted={} frustum_culled={}",
+                position.x,
+                position.z,
+                phase,
+                age,
+                urgency,
+                authoritative,
+                snapshot,
+                renderer.resident_section_count,
+                renderer.drawable_section_count,
+                renderer.submitted_section_count,
+                renderer.frustum_culled_section_count,
+            );
+        }
+        "none-within-3".to_owned()
+    }
+
+    fn column_area_state(&self, position: rustcraft_engine_core::ChunkPos) -> (char, &'static str) {
+        use rustcraft_render::meshing::ColumnMeshStage;
+        use rustcraft_world::ResidencyPhase;
+        let Some(simulation) = self.simulation.as_ref() else {
+            return ('N', "not-desired");
+        };
+        let pinned = simulation.items.iter().any(|item| {
+            (item.position.x.floor() as i32).div_euclid(16) == position.x
+                && (item.position.z.floor() as i32).div_euclid(16) == position.z
+        });
+        if pinned {
+            return ('P', "pinned");
+        }
+        if self.pending_evictions.contains(&position) {
+            return ('E', "eviction-pending");
+        }
+        if matches!(self.residency.phase(position), Some(ResidencyPhase::Failed)) {
+            return ('!', "error");
+        }
+        if simulation.world.column_available(position) {
+            return ('S', "safe-for-simulation");
+        }
+        if self.render_ready_columns.contains(&position) {
+            return ('V', "render-visible");
+        }
+        if self
+            .snapshot_dirty_sections
+            .iter()
+            .any(|section| section.0 == position)
+        {
+            return ('s', "snapshot-pending");
+        }
+        if self
+            .mesh_dirty_sections
+            .iter()
+            .any(|section| section.0 == position)
+        {
+            return ('m', "mesh-pending");
+        }
+        if let Some(stage) = self.mesh_scheduler.column_stage(position) {
+            return match stage {
+                ColumnMeshStage::Pending | ColumnMeshStage::InFlight => ('m', "mesh-pending"),
+                ColumnMeshStage::UploadPending => ('u', "upload-pending"),
+            };
+        }
+        let boundary = simulation
+            .lighting
+            .integration_columns()
+            .contains(&position);
+        match self.residency.phase(position) {
+            Some(ResidencyPhase::Requested) => ('q', "requested"),
+            Some(ResidencyPhase::Loading) => ('l', "loading"),
+            Some(ResidencyPhase::Generating) => ('g', "generating"),
+            Some(ResidencyPhase::InitialLighting) => ('i', "initial-light"),
+            Some(ResidencyPhase::Ready) if boundary => ('b', "boundary-light"),
+            Some(ResidencyPhase::Ready) => ('v', "voxel-ready"),
+            Some(ResidencyPhase::Saving) => ('e', "saving"),
+            Some(ResidencyPhase::Failed) => ('!', "error"),
+            None if self.residency.is_desired(position) => ('d', "desired"),
+            None if self.residency.is_retained_by_radius(position) => ('r', "retained"),
+            None => ('N', "not-desired"),
+        }
+    }
+
+    fn area_state_grid(&self) -> String {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return "AREA unavailable".to_owned();
+        };
+        let center = rustcraft_engine_core::ChunkPos {
+            x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+            z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+        };
+        let radius = self.residency.retain_radius();
+        let mut output = format!(
+            "AREA center=({}, {}) radius={} metric=Chebyshev (+Z rows first)\n",
+            center.x, center.z, radius
+        );
+        for dz in (-radius..=radius).rev() {
+            for dx in -radius..=radius {
+                let position = rustcraft_engine_core::ChunkPos {
+                    x: center.x + dx,
+                    z: center.z + dz,
+                };
+                output.push(self.column_area_state(position).0);
+                if dx != radius {
+                    output.push(' ');
+                }
+            }
+            output.push('\n');
+        }
+        output.push_str(
+            "LEGEND N=NOT_DESIRED d=DESIRED q=REQUESTED l=LOADING g=GENERATING i=INITIAL_LIGHT v=VOXEL_READY b=BOUNDARY_LIGHT s=SNAPSHOT_PENDING m=MESH_PENDING u=UPLOAD_PENDING V=RENDER_VISIBLE S=SAFE E=EVICTION_PENDING r=RETAINED P=PINNED !=ERROR",
+        );
+        output
+    }
+
+    fn blocked_adjacent_reasons(&self) -> String {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return "none".to_owned();
+        };
+        let center = rustcraft_engine_core::ChunkPos {
+            x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+            z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+        };
+        let missing_core = (-1..=1).find_map(|dz| {
+            (-1..=1).find_map(|dx| {
+                let position = rustcraft_engine_core::ChunkPos {
+                    x: center.x + dx,
+                    z: center.z + dz,
+                };
+                (!self.render_ready_columns.contains(&position)).then_some(position)
+            })
+        });
+        let mut reasons = Vec::new();
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dz == 0 {
+                    continue;
+                }
+                let position = rustcraft_engine_core::ChunkPos {
+                    x: center.x + dx,
+                    z: center.z + dz,
+                };
+                if simulation.world.column_available(position) {
+                    continue;
+                }
+                let (_, state) = self.column_area_state(position);
+                if state == "render-visible"
+                    && let Some(dependency) = missing_core
+                {
+                    reasons.push(format!(
+                        "({},{}): blocked: safe-core dependency ({},{})",
+                        position.x, position.z, dependency.x, dependency.z
+                    ));
+                } else {
+                    reasons.push(format!(
+                        "({},{}): blocked: {}",
+                        position.x, position.z, state
+                    ));
+                }
+            }
+        }
+        if reasons.is_empty() {
+            "none".to_owned()
+        } else {
+            reasons.join("; ")
+        }
+    }
+
+    fn mark_column_voxel_ready(
+        &mut self,
+        position: rustcraft_engine_core::ChunkPos,
+        token: u64,
+        section_ys: Vec<i32>,
+    ) {
+        let started = self
+            .request_started_at
+            .remove(&(position, token))
+            .unwrap_or_else(Instant::now);
+        self.voxel_ready_latency_ms.record(started.elapsed());
+        self.light_latency_started_at.insert(position, started);
+        self.light_queue_started_at.insert(position, Instant::now());
+        self.visible_latency_started_at.insert(position, started);
+        self.first_section_latency_started_at
+            .insert(position, started);
+        self.visible_expected_sections
+            .insert(position, section_ys.into_iter().collect());
+    }
+
+    fn queue_initial_lighting(
+        &mut self,
+        request: rustcraft_world::ResidencyRequest,
+        sections: Vec<(i32, rustcraft_engine_core::Chunk)>,
+        persist_new: bool,
+    ) -> Result<(), Vec<(i32, rustcraft_engine_core::Chunk)>> {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return Err(sections);
+        };
+        let default_block = simulation.world.empty_block();
+        let registry = std::sync::Arc::new(simulation.registry.clone());
+        self.initial_lighting_scheduler.submit(
+            rustcraft_runtime::lighting::InitialLightingRequest {
+                position: request.position,
+                token: request.token,
+                priority: self.residency.priority_key(request.position),
+                default_block,
+                sections,
+                registry,
+                persist_new,
+            },
+        )?;
+        let _ = self
+            .residency
+            .set_phase(request, rustcraft_world::ResidencyPhase::InitialLighting);
+        Ok(())
+    }
+
+    fn advance_boundary_lighting_for_turn(
+        &mut self,
+    ) -> (Vec<rustcraft_engine_core::SectionPos>, usize) {
+        let mut dirty = Vec::new();
+        let mut work_units = 0usize;
+        let turn_started = self.stream_turn_started.unwrap_or_else(Instant::now);
+        let deadline = self
+            .stream_stage_deadline
+            .unwrap_or(turn_started + self.stream_main_budget);
+        while Instant::now() < deadline && self.stream_budget_available() {
+            let Some(column) = self
+                .simulation
+                .as_ref()
+                .and_then(|simulation| simulation.lighting.integrating_column())
+            else {
+                break;
+            };
+            if !self.light_work_started_at.contains_key(&column) {
+                if let Some(queued_at) = self.light_queue_started_at.remove(&column) {
+                    self.lighting_queue_wait_ms.record(queued_at.elapsed());
+                }
+                self.light_work_started_at.insert(column, Instant::now());
+            }
+            let lighting_started = Instant::now();
+            // A seed is one full vertical x/z ray (the minimum atomic unit in the lighting
+            // implementation). Repeated small quanta are serviced on event-loop turns rather
+            // than one quantum per 20 Hz simulation tick.
+            let boundary_only = self
+                .simulation
+                .as_ref()
+                .is_some_and(|simulation| simulation.lighting.integrating_boundary_only());
+            let work_budget = if boundary_only {
+                self.lighting_work_budget.clamp(256, 512)
+            } else {
+                self.lighting_work_budget.min(32)
+            };
+            let completed_column = self
+                .simulation
+                .as_mut()
+                .and_then(|simulation| simulation.advance_column_lighting(work_budget));
+            work_units = work_units.saturating_add(work_budget);
+            let elapsed = lighting_started.elapsed();
+            let slice_ms = elapsed.as_secs_f64() * 1000.0;
+            self.responsiveness
+                .record_long_task("boundary_lighting_slice", elapsed, work_budget);
+            *self.light_cpu_accumulated_ms.entry(column).or_default() += slice_ms;
+            self.lighting_work_ms += slice_ms;
+            if let Some(completed) = completed_column {
+                self.light_converged_count += 1;
+                if let Some(active_started) = self.light_work_started_at.remove(&completed) {
+                    self.lighting_active_ms.record(active_started.elapsed());
+                }
+                if let Some(cpu_ms) = self.light_cpu_accumulated_ms.remove(&completed) {
+                    self.lighting_cpu_ms
+                        .record(Duration::from_secs_f64(cpu_ms / 1000.0));
+                }
+                if let Some(started) = self.light_latency_started_at.remove(&completed) {
+                    self.light_ready_latency_ms.record(started.elapsed());
+                }
+                dirty.extend(
+                    self.simulation
+                        .as_mut()
+                        .expect("completed lighting requires a running simulation")
+                        .take_dirty_sections(),
+                );
+            }
+        }
+        (dirty, work_units)
+    }
+
+    fn service_world_residency(&mut self) -> Vec<rustcraft_engine_core::SectionPos> {
+        use rustcraft_world::{ResidencyPhase, SemanticBlockResolver};
+        let mut dirty = Vec::new();
+        let mut publications = 0usize;
+        const PUBLICATION_BUDGET: usize = 1;
+
+        if !self.stream_budget_available() {
+            return dirty;
+        }
+
+        self.initial_lighting_scheduler
+            .reprioritize(|position| self.residency.priority_key(position));
+        let boundary_capacity = self.simulation.as_ref().map_or(0, |simulation| {
+            simulation.lighting.integration_capacity_remaining()
+        });
+        let mut initial_lit = self.initial_lighting_scheduler.take_ready(
+            PUBLICATION_BUDGET
+                .min(boundary_capacity)
+                .min(usize::from(self.stream_budget_available())),
+        );
+        initial_lit.sort_by_key(|result| self.residency.priority_key(result.position));
+        for result in initial_lit {
+            let request = rustcraft_world::ResidencyRequest {
+                position: result.position,
+                token: result.token,
+            };
+            self.initial_light_queue_wait_ms
+                .record(Duration::from_secs_f64(
+                    result.queue_wait_ms.max(0.0) / 1000.0,
+                ));
+            self.initial_light_worker_ms.record(Duration::from_secs_f64(
+                result.worker_elapsed_ms.max(0.0) / 1000.0,
+            ));
+            self.initial_light_emitters += result.work_counters.emitters_found;
+            self.initial_light_direct_voxels += result.work_counters.direct_voxels_scanned;
+            self.initial_light_propagation_nodes += result.work_counters.propagation_queue_pops;
+            if !self.residency.is_current(request) {
+                self.request_started_at
+                    .remove(&(request.position, request.token));
+                continue;
+            }
+            if let Some(error) = result.error {
+                let _ = self.residency.set_phase(request, ResidencyPhase::Failed);
+                self.request_started_at
+                    .remove(&(request.position, request.token));
+                eprintln!(
+                    "initial lighting failed for column ({},{}): {error}",
+                    request.position.x, request.position.z
+                );
+                continue;
+            }
+            let sections = result.sections.iter().map(|(y, _)| *y).collect::<Vec<_>>();
+            let publication_started = Instant::now();
+            let persist_new = result.persist_new;
+            let result = self
+                .simulation
+                .as_mut()
+                .expect("running world")
+                .publish_initial_lit_column(result, persist_new);
+            self.publication_ms.record(publication_started.elapsed());
+            self.responsiveness.record_long_task(
+                "initial_column_apply",
+                publication_started.elapsed(),
+                sections.len(),
+            );
+            if let Err(error) = result {
+                let _ = self.residency.set_phase(request, ResidencyPhase::Failed);
+                eprintln!(
+                    "publish initially lit column ({},{}): {error}",
+                    request.position.x, request.position.z
+                );
+                continue;
+            }
+            self.residency.published(request.position, request.token);
+            self.mark_column_voxel_ready(request.position, request.token, sections);
+            if persist_new {
+                self.persistence_dirty.mark_dirty(request.position);
+                self.generated_chunks += 1;
+            } else {
+                self.loaded_from_disk += 1;
+            }
+        }
+
+        let load_poll_started = Instant::now();
+        let load_limit =
+            PUBLICATION_BUDGET.min(self.initial_lighting_scheduler.capacity_remaining());
+        let mut load_completions = self
+            .load_scheduler
+            .take_ready(load_limit.min(usize::from(self.stream_budget_available())));
+        let load_completion_count = load_completions.len();
+        self.load_results_applied = self
+            .load_results_applied
+            .saturating_add(load_completion_count as u64);
+        load_completions
+            .sort_by_key(|completion| self.residency.priority_key(completion.request.position));
+        for completion in load_completions {
+            self.load_worker_ms.record(Duration::from_secs_f64(
+                completion.load_ms.max(0.0) / 1000.0,
+            ));
+            if let Some(started) = self
+                .request_started_at
+                .get(&(completion.request.position, completion.request.token))
+                .copied()
+            {
+                let elapsed = started.elapsed();
+                self.load_total_latency_ms.record(elapsed);
+                self.load_queue_wait_ms.record(Duration::from_secs_f64(
+                    completion.queue_wait_ms.max(0.0) / 1000.0,
+                ));
+            }
+            if !self.residency.is_current(completion.request) {
+                self.request_started_at
+                    .remove(&(completion.request.position, completion.request.token));
+                continue;
+            }
+            match completion.result {
+                Ok(Some(sections)) => {
+                    match self.queue_initial_lighting(completion.request, sections, false) {
+                        Ok(()) => publications += 1,
+                        Err(sections) => {
+                            let _ = sections;
+                            self.residency.defer(completion.request);
+                            self.request_started_at
+                                .remove(&(completion.request.position, completion.request.token));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    if !self.stream_generation_allowed {
+                        let _ = self
+                            .residency
+                            .set_phase(completion.request, ResidencyPhase::Failed);
+                        eprintln!(
+                            "cannot generate missing column ({},{}): saved world generator is incompatible with the active generator",
+                            completion.request.position.x, completion.request.position.z
+                        );
+                        continue;
+                    }
+                    let Some(generator) = self.stream_generator.clone() else {
+                        let _ = self
+                            .residency
+                            .set_phase(completion.request, ResidencyPhase::Failed);
+                        continue;
+                    };
+                    let _ = self
+                        .residency
+                        .set_phase(completion.request, ResidencyPhase::Generating);
+                    self.generation_started_at.insert(
+                        (completion.request.position, completion.request.token),
+                        Instant::now(),
+                    );
+                    if let Err(error) = self.generation_scheduler.request(
+                        generator,
+                        self.world_seed,
+                        completion.request.position,
+                        completion.request.token,
+                    ) {
+                        self.generation_started_at
+                            .remove(&(completion.request.position, completion.request.token));
+                        self.residency.defer(completion.request);
+                        if !error.to_string().contains("queue full") {
+                            eprintln!(
+                                "queue generation for column ({},{}): {error}",
+                                completion.request.position.x, completion.request.position.z
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.request_started_at
+                        .remove(&(completion.request.position, completion.request.token));
+                    let _ = self
+                        .residency
+                        .set_phase(completion.request, ResidencyPhase::Failed);
+                    eprintln!(
+                        "cannot load column ({},{}): {error}; it will not be regenerated",
+                        completion.request.position.x, completion.request.position.z
+                    );
+                }
+            }
+        }
+        self.responsiveness.record_long_task(
+            "load_result_poll_apply",
+            load_poll_started.elapsed(),
+            load_completion_count,
+        );
+
+        let generation_limit = self
+            .initial_lighting_scheduler
+            .capacity_remaining()
+            .min(PUBLICATION_BUDGET.saturating_sub(publications))
+            .min(usize::from(self.stream_budget_available()));
+        if generation_limit > 0 {
+            let generation_poll_started = Instant::now();
+            let mut results = self.generation_scheduler.take_ready_limit(generation_limit);
+            let generation_result_count = results.len();
+            self.generation_results_applied = self
+                .generation_results_applied
+                .saturating_add(generation_result_count as u64);
+            results.sort_by_key(|result| self.residency.priority_key(result.position));
+            for result in results {
+                let request = rustcraft_world::ResidencyRequest {
+                    position: result.position,
+                    token: result.generation,
+                };
+                self.generation_worker_ms.record(Duration::from_secs_f64(
+                    result.generation_ms.max(0.0) / 1000.0,
+                ));
+                if let Some(started) = self
+                    .generation_started_at
+                    .remove(&(request.position, request.token))
+                {
+                    let elapsed = started.elapsed();
+                    self.generation_total_latency_ms.record(elapsed);
+                    self.generation_queue_wait_ms
+                        .record(Duration::from_secs_f64(
+                            result.queue_wait_ms.max(0.0) / 1000.0,
+                        ));
+                }
+                if !self.residency.is_current(request) {
+                    self.request_started_at
+                        .remove(&(request.position, request.token));
+                    continue;
+                }
+                match result.sections {
+                    Ok(sections) => match self.queue_initial_lighting(request, sections, true) {
+                        Ok(()) => {}
+                        Err(sections) => {
+                            let _ = sections;
+                            self.residency.defer(request);
+                            self.request_started_at
+                                .remove(&(request.position, request.token));
+                        }
+                    },
+                    Err(error) => {
+                        self.request_started_at
+                            .remove(&(request.position, request.token));
+                        let _ = self.residency.set_phase(request, ResidencyPhase::Failed);
+                        eprintln!(
+                            "generator failed for column ({},{}): {error}",
+                            result.position.x, result.position.z
+                        );
+                    }
+                }
+            }
+            self.responsiveness.record_long_task(
+                "generation_result_poll_apply",
+                generation_poll_started.elapsed(),
+                generation_result_count,
+            );
+        }
+
+        if !self.stream_budget_available() {
+            return dirty;
+        }
+        let Some(simulation) = self.simulation.as_ref() else {
+            return dirty;
+        };
+        let center = rustcraft_engine_core::ChunkPos {
+            x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+            z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+        };
+        let player_position = (simulation.player.position.x, simulation.player.position.z);
+        let resident = simulation
+            .world
+            .column_positions()
+            .collect::<std::collections::HashSet<_>>();
+        let mut pinned = simulation
+            .items
+            .iter()
+            .map(|item| rustcraft_engine_core::ChunkPos {
+                x: (item.position.x.floor() as i32).div_euclid(16),
+                z: (item.position.z.floor() as i32).div_euclid(16),
+            })
+            .collect::<std::collections::HashSet<_>>();
+        if let Some(active_boundary) = simulation.lighting.integrating_column() {
+            pinned.insert(active_boundary);
+        }
+        let displacement = self.last_residency_position.map_or((0.0, 0.0), |previous| {
+            (
+                player_position.0 - previous.0,
+                player_position.1 - previous.1,
+            )
+        });
+        self.last_residency_position = Some(player_position);
+        let now = Instant::now();
+        let residency_elapsed = self
+            .last_residency_update_at
+            .replace(now)
+            .map_or(0.05, |previous| now.duration_since(previous).as_secs_f32());
+        let view_x = simulation.player.yaw.sin();
+        let view_z = simulation.player.yaw.cos();
+        let plan = self.residency.update_with_motion_in_view(
+            center,
+            &resident,
+            &pinned,
+            rustcraft_world::ResidencyMotion {
+                displacement: if self.stream_lookahead_enabled {
+                    [displacement.0, displacement.1]
+                } else {
+                    [0.0, 0.0]
+                },
+                elapsed_seconds: if self.stream_lookahead_enabled {
+                    residency_elapsed
+                } else {
+                    0.0
+                },
+                view_direction: [view_x, view_z],
+            },
+        );
+        if let Some(simulation) = self.simulation.as_mut() {
+            let residency = &self.residency;
+            simulation
+                .lighting
+                .reprioritize_pending_columns(|position| residency.priority_key(position));
+        }
+        for cancelled in &plan.cancelled {
+            self.request_started_at
+                .remove(&(cancelled.position, cancelled.token));
+        }
+        if self.full_desired_ready_ms.is_none() {
+            let ready = self
+                .render_ready_columns
+                .iter()
+                .filter(|position| self.residency.is_desired(**position))
+                .count();
+            let mesh_stats = self.mesh_scheduler.stats();
+            if ready >= self.residency.desired_column_count()
+                && mesh_stats.pending == 0
+                && mesh_stats.in_flight == 0
+                && mesh_stats.ready == 0
+            {
+                self.full_desired_ready_ms = Some(
+                    self.world_ready_at
+                        .unwrap_or(self.startup_started)
+                        .elapsed()
+                        .as_secs_f64()
+                        * 1000.0,
+                );
+            }
+        }
+
+        for (index, request) in plan.requests.into_iter().enumerate() {
+            if index >= 1 || !self.stream_budget_available() {
+                self.residency.defer(request);
+                continue;
+            }
+            let _ = self.residency.set_phase(request, ResidencyPhase::Loading);
+            let Some(storage) = self.world_storage.clone() else {
+                self.residency.defer(request);
+                continue;
+            };
+            let resolver: std::sync::Arc<dyn SemanticBlockResolver> = std::sync::Arc::new(
+                rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver,
+            );
+            self.request_started_at
+                .entry((request.position, request.token))
+                .or_insert_with(Instant::now);
+            if let Err(error) = self.load_scheduler.submit(storage, request, resolver) {
+                self.residency.defer(request);
+                if !error.to_string().contains("queue full") {
+                    eprintln!(
+                        "queue load for column ({},{}): {error}",
+                        request.position.x, request.position.z
+                    );
+                }
+            }
+        }
+
+        self.pending_evictions.extend(plan.evict);
+        while self.stream_budget_available() {
+            let Some(position) = pop_before_deadline(
+                &mut self.pending_evictions,
+                self.stream_turn_started.unwrap_or_else(Instant::now) + self.stream_main_budget,
+            ) else {
+                break;
+            };
+            let retain_radius = self.residency.retain_radius();
+            let Some(simulation) = self.simulation.as_ref() else {
+                continue;
+            };
+            let center = rustcraft_engine_core::ChunkPos {
+                x: (simulation.player.position.x.floor() as i32).div_euclid(16),
+                z: (simulation.player.position.z.floor() as i32).div_euclid(16),
+            };
+            let dx = i64::from(position.x) - i64::from(center.x);
+            let dz = i64::from(position.z) - i64::from(center.z);
+            let still_near = dx.abs().max(dz.abs()) <= i64::from(retain_radius);
+            let pinned_now = simulation.items.iter().any(|item| {
+                (item.position.x.floor() as i32).div_euclid(16) == position.x
+                    && (item.position.z.floor() as i32).div_euclid(16) == position.z
+            }) || simulation.lighting.integrating_column() == Some(position);
+            if still_near || pinned_now {
+                continue;
+            }
+            if self.persistence_dirty.is_dirty(position)
+                || self.persistence_dirty.is_saving(position)
+            {
+                self.eviction_blocked_dirty += 1;
+                continue;
+            }
+            self.simulation
+                .as_mut()
+                .unwrap()
+                .lighting
+                .cancel_queued_for_eviction(position);
+            let removed = match self
+                .simulation
+                .as_mut()
+                .unwrap()
+                .remove_column_incremental_lighting(position)
+            {
+                Ok(removed) => removed,
+                Err(_) => {
+                    self.eviction_blocked_lighting += 1;
+                    continue;
+                }
+            };
+            if removed.is_empty() {
+                // Empty persisted/generated columns are still resident and must be evictable.
+                self.simulation
+                    .as_mut()
+                    .unwrap()
+                    .world
+                    .remove_column(position);
+            }
+            self.residency.evicted(position);
+            self.eviction_count += 1;
+            if self.stream_perf {
+                self.stream_evicted_columns.insert(position);
+            }
+            self.light_latency_started_at.remove(&position);
+            self.light_queue_started_at.remove(&position);
+            self.light_work_started_at.remove(&position);
+            self.light_cpu_accumulated_ms.remove(&position);
+            self.visible_latency_started_at.remove(&position);
+            self.first_section_latency_started_at.remove(&position);
+            self.visible_expected_sections.remove(&position);
+            self.render_ready_columns.remove(&position);
+            for (section_y, _) in removed {
+                self.mesh_scheduler.remove_section((position, section_y));
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.remove_section(position, section_y);
+                }
+            }
+            dirty.extend(self.simulation.as_mut().unwrap().take_dirty_sections());
+        }
+        dirty
     }
 
     fn service_world_saves(&mut self, dirty: Vec<rustcraft_engine_core::ChunkPos>) {
@@ -1074,8 +3224,29 @@ impl ClientApp {
             return;
         };
         let started = Instant::now();
+        let player_section = self.player_section_position();
         let mut snapshots = presentation.chunks().cloned().collect::<Vec<_>>();
-        snapshots.sort_by_key(|chunk| (chunk.position.x, chunk.position.z, chunk.section_y));
+        snapshots.sort_by_key(|chunk| {
+            Self::section_priority(
+                &self.residency,
+                player_section,
+                (chunk.position, chunk.section_y),
+            )
+        });
+        let started_at = Instant::now();
+        for snapshot in &snapshots {
+            self.visible_expected_sections
+                .entry(snapshot.position)
+                .or_default()
+                .insert(snapshot.section_y);
+            self.visible_latency_started_at
+                .entry(snapshot.position)
+                .or_insert(started_at);
+            self.first_section_latency_started_at
+                .entry(snapshot.position)
+                .or_insert(started_at);
+            self.render_ready_columns.remove(&snapshot.position);
+        }
         for snapshot in snapshots {
             self.mesh_scheduler.mark_dirty(snapshot);
         }
@@ -1100,11 +3271,7 @@ impl ClientApp {
         let mut dirty = dirty.into_iter().collect::<Vec<_>>();
         dirty.sort_by_key(|(position, section_y)| (position.x, position.z, *section_y));
         for (position, section_y) in dirty {
-            if let Some(snapshot) = presentation
-                .chunks()
-                .find(|chunk| chunk.position == position && chunk.section_y == section_y)
-                .cloned()
-            {
+            if let Some(snapshot) = presentation.section(position, section_y).cloned() {
                 self.mesh_scheduler.mark_dirty(snapshot);
             } else {
                 self.mesh_scheduler.remove_section((position, section_y));
@@ -1119,38 +3286,98 @@ impl ClientApp {
         self.mesh_uploads_this_frame = 0;
         self.mesh_upload_bytes_this_frame = 0;
         self.mesh_scheduler.poll();
+        let upload_pending = self.mesh_scheduler.stats().ready > 0;
         let camera = self
             .simulation
             .as_ref()
             .map_or(Vec3::ZERO, |simulation| simulation.player.position);
+        let view_forward = self.simulation.as_ref().map_or(Vec3::ZERO, |simulation| {
+            Vec3::new(
+                simulation.player.yaw.sin(),
+                0.0,
+                simulation.player.yaw.cos(),
+            )
+        });
         let completed = self.mesh_scheduler.take_ready(
             camera,
+            view_forward,
             self.mesh_upload_section_budget,
             self.mesh_upload_byte_budget,
         );
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
-        };
+        let completed_count = completed.len();
         for result in completed {
             self.metrics.mesh(result.mesh_ms / 1000.0);
-            let upload =
-                renderer.upload_chunk_pages(result.section.0, result.section.1, &result.pages);
+            self.mesh_queue_wait_ms.record(Duration::from_secs_f64(
+                result.queue_wait_ms.max(0.0) / 1000.0,
+            ));
+            self.mesh_execution_ms
+                .record(Duration::from_secs_f64(result.mesh_ms.max(0.0) / 1000.0));
+            self.mesh_upload_wait_ms
+                .record(result.completed_at.elapsed());
+            let upload = if let Some(renderer) = self.renderer.as_mut() {
+                let upload_started = Instant::now();
+                let upload =
+                    renderer.upload_chunk_pages(result.section.0, result.section.1, &result.pages);
+                self.responsiveness.record_long_task(
+                    "gpu_mesh_upload_submit",
+                    upload_started.elapsed(),
+                    upload.logical_bytes,
+                );
+                upload
+            } else {
+                rustcraft_render::MeshUploadStats {
+                    logical_bytes: result.logical_bytes(),
+                    ..Default::default()
+                }
+            };
             self.mesh_uploads += 1;
             self.mesh_upload_bytes += upload.logical_bytes as u64;
             self.mesh_upload_submit_ms += upload.submit_ms;
             self.mesh_uploads_this_frame += 1;
             self.mesh_upload_bytes_this_frame += upload.logical_bytes;
+            if let Some(expected) = self.visible_expected_sections.get_mut(&result.section.0) {
+                expected.remove(&result.section.1);
+                if let Some(started) = self
+                    .first_section_latency_started_at
+                    .remove(&result.section.0)
+                {
+                    self.first_section_latency_ms.record(started.elapsed());
+                }
+                if expected.is_empty() {
+                    self.visible_expected_sections.remove(&result.section.0);
+                    self.render_ready_columns.insert(result.section.0);
+                    if let Some(started) = self.visible_latency_started_at.remove(&result.section.0)
+                    {
+                        self.render_visible_latency_ms.record(started.elapsed());
+                    }
+                }
+            }
         }
+        self.release_render_ready_safe_core();
+        self.observe_stream_stage(4, upload_pending, completed_count > 0, true, false);
     }
     fn render(&mut self, event_loop: &ActiveEventLoop) {
-        self.metrics
-            .frames
-            .push(self.last_render.elapsed().as_secs_f64());
+        if let Some(input_at) = self.responsiveness.input_consumed_at.take() {
+            self.responsiveness
+                .input_to_render
+                .record(Instant::now().duration_since(input_at));
+        }
+        let frame_interval = self.last_render.elapsed();
+        self.responsiveness.frame_interval.record(frame_interval);
+        self.metrics.frames.push(frame_interval.as_secs_f64());
         self.last_render = Instant::now();
         self.metrics.update();
+        let mesh_poll_started = Instant::now();
         self.process_mesh_jobs();
+        self.frame_phases.mesh_poll_upload_ms = mesh_poll_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .mesh_poll_upload
+            .record_ms(self.frame_phases.mesh_poll_upload_ms);
         let mesh_stats = self.mesh_scheduler.stats();
         let mesh_idle = self.mesh_scheduler.is_idle();
+        let frontier_summary = self.frontier_summary();
+        let blocked_adjacent = self.blocked_adjacent_reasons();
+        let area_state_grid = self.area_state_grid();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -1246,10 +3473,11 @@ impl ClientApp {
         } else {
             None
         };
+        let debug_hud_started = Instant::now();
         if self.diagnostic.is_none()
             && let Some(sim) = self.simulation.as_ref()
         {
-            if self.debug && self.last_snapshot.elapsed().as_millis() >= 250 {
+            if self.debug && self.last_snapshot.elapsed().as_millis() >= 1_000 {
                 self.process.sample();
                 self.last_snapshot = Instant::now();
                 self.debug_text = debug::DebugMetricsSnapshot::collect(
@@ -1273,25 +3501,157 @@ impl ClientApp {
                 let persistence = self.persistence_dirty.metrics();
                 let saves = self.save_scheduler.metrics();
                 let player_saves = self.player_save_scheduler.metrics();
+                let loads = self.load_scheduler.metrics();
+                let stream_gen = self.generation_scheduler.metrics();
+                let center = rustcraft_engine_core::ChunkPos {
+                    x: (sim.player.position.x.floor() as i32).div_euclid(16),
+                    z: (sim.player.position.z.floor() as i32).div_euclid(16),
+                };
+                let light_jobs = sim.lighting.integration_columns();
+                let light_active = usize::from(sim.lighting.integrating_column().is_some());
+                let light_work = sim.lighting.work_counters();
+                let voxel_latency = self.voxel_ready_latency_ms.summary();
+                let light_latency = self.light_ready_latency_ms.summary();
+                let visible_latency = self.render_visible_latency_ms.summary();
                 self.debug_text.push_str(&format!(
-                    "\nWORLD {} SEED {} RESIDENT CHUNKS {} SECTIONS {} GENERATED {} LOADED {}\nGEN PENDING {} INFLIGHT {} COMPLETE {} STALE {} COALESCED {} TOTAL {} MS\nSAVE DIRTY {} QUEUED {} INFLIGHT {} SAVED {} FAILED {}\nPLAYER SAVE revision={} persisted={} dirty={} requests={} coalesced={} pending={} inflight={} successes={} failures={} encode_ms={:.3} checkpoint_ms={:.3}",
+                    "\nWORLD {} SEED {} RESIDENT CHUNKS {} SECTIONS {} GENERATED {} LOADED {}\nGEN PENDING {} INFLIGHT {} COMPLETE {} STALE {} COALESCED {} TOTAL {} MS\nSTREAM center=({}, {}) radius={} retain={} lookahead={} motion_lead={:.2}col desired={} pending={} load_q/i={}/{} hits={} misses={} failures={} load_ms={:.3} gen_q/i={}/{} light_converged={} lighting_work_ms={:.3} evicted={} save_blocked={} light_blocked={} startup_safe_ms={:.1} full_radius_ms={:?}\nLATENCY ms p50/p90/p95/p99/max request->voxel={:?} request->light={:?} first-section-upload={:?} all-section-upload={:?}\nSTAGES ms p50/p90/p95/p99/max load-total/worker/worker-queue={:?}/{:?}/{:?} gen-total/worker/worker-queue={:?}/{:?}/{:?} publish-cpu={:?} light-queue/active-wall/cpu={:?}/{:?}/{:?} mesh-queue/exec/upload-wait={:?}/{:?}/{:?}\nLIGHTING active={} queued={} capacity_remaining={} budget={} voxels={} boundary={} qpush/pop={}/{} writes={} dirty_sections={} started/completed={}/{} mesh_workers={} override=RUSTCRAFT_MESH_WORKERS\nSTREAM_MAIN budget_ms={:.2} pending_snapshot={} pending_mesh={} pending_evict={}\nCPU_PHASE_MS fixed={} residency={} boundary_light={} snapshot_sync={} mesh_schedule={} mesh_poll_upload={} debug_hud={} render_present={} (render_present includes surface present/vsync)\nCPU_PHASE_P50/P90/P95/P99/MAX_MS fixed/residency/boundary/snapshot/mesh-schedule/mesh-poll/hud/present={:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{:?}\nSAVE DIRTY {} QUEUED {} INFLIGHT {} SAVED {} FAILED {}\nPLAYER SAVE revision={} persisted={} dirty={} requests={} coalesced={} pending={} inflight={} successes={} failures={} encode_ms={:.3} checkpoint_ms={:.3}",
                     self.world_name,
                     std::env::var("RUSTCRAFT_WORLD_SEED").unwrap_or_else(|_| "731173".to_owned()),
                     sim.world.chunk_count(), sim.world.section_count(), self.generated_chunks, self.loaded_from_disk,
                     self.worldgen_metrics.pending, self.worldgen_metrics.in_flight, self.worldgen_metrics.completed,
                     self.worldgen_metrics.stale_discarded, self.worldgen_metrics.coalesced, self.worldgen_metrics.generation_total_ms,
+                    center.x, center.z, self.stream_load_radius, self.residency.retain_radius(), if self.stream_lookahead_enabled { "on" } else { "off" }, self.residency.motion_lookahead_columns(), self.residency.desired_column_count(), self.residency.pending_column_count(),
+                    loads.queued, loads.in_flight, loads.completed, loads.missing, loads.failed, loads.total_load_ms,
+                    stream_gen.pending, stream_gen.in_flight, self.light_converged_count, self.lighting_work_ms,
+                    self.eviction_count, self.eviction_blocked_dirty, self.eviction_blocked_lighting, self.startup_ready_ms, self.full_desired_ready_ms,
+                    voxel_latency, light_latency,
+                    self.first_section_latency_ms.summary(), visible_latency,
+                    self.load_total_latency_ms.summary(), self.load_worker_ms.summary(), self.load_queue_wait_ms.summary(),
+                    self.generation_total_latency_ms.summary(), self.generation_worker_ms.summary(), self.generation_queue_wait_ms.summary(),
+                    self.publication_ms.summary(), self.lighting_queue_wait_ms.summary(), self.lighting_active_ms.summary(),
+                    self.lighting_cpu_ms.summary(),
+                    self.mesh_queue_wait_ms.summary(), self.mesh_execution_ms.summary(), self.mesh_upload_wait_ms.summary(),
+                    light_active, light_jobs.len().saturating_sub(light_active), sim.lighting.integration_capacity_remaining(),
+                    self.lighting_work_budget,
+                    light_work.direct_voxels_scanned, light_work.boundary_voxels_inspected,
+                    light_work.propagation_queue_pushes, light_work.propagation_queue_pops,
+                    light_work.light_writes, light_work.dirty_section_insertions,
+                    light_work.columns_started, light_work.columns_completed,
+                    self.mesh_worker_count,
+                    self.stream_main_budget.as_secs_f64() * 1000.0,
+                    self.snapshot_dirty_sections.len(), self.mesh_dirty_sections.len(),
+                    self.pending_evictions.len(),
+                    self.frame_phases.fixed_step_ms, self.frame_phases.residency_ms,
+                    self.frame_phases.boundary_lighting_ms,
+                    self.frame_phases.render_world_sync_ms, self.frame_phases.mesh_schedule_ms,
+                    self.frame_phases.mesh_poll_upload_ms, self.frame_phases.debug_hud_ms,
+                    self.frame_phases.render_present_ms,
+                    self.frame_phase_samples.fixed_step.summary(),
+                    self.frame_phase_samples.residency.summary(),
+                    self.frame_phase_samples.boundary_lighting.summary(),
+                    self.frame_phase_samples.render_world_sync.summary(),
+                    self.frame_phase_samples.mesh_schedule.summary(),
+                    self.frame_phase_samples.mesh_poll_upload.summary(),
+                    self.frame_phase_samples.debug_hud.summary(),
+                    self.frame_phase_samples.render_present.summary(),
                     persistence.dirty_chunks, saves.queued, saves.in_flight, persistence.saved, persistence.failed,
                     self.player_revision, self.player_persisted_revision, self.player_dirty,
                     player_saves.requests, player_saves.coalesced, player_saves.pending,
                     player_saves.in_flight, player_saves.successes, player_saves.failures,
                     self.player_encode_ms_last, self.player_checkpoint_ms_last,
                 ));
+                self.debug_text.push_str(&format!(
+                    "\nLIGHT_INIT queued={} in_flight={} outstanding={} completed={} stale={} coalesced={} columns_per_sec={:.2} queue_ms={:?} worker_elapsed_ms={:?} direct_voxels={} emitters={} propagation_nodes={}",
+                    self.initial_lighting_scheduler.pending(),
+                    self.initial_lighting_scheduler.in_flight(),
+                    self.initial_lighting_scheduler.outstanding(),
+                    self.initial_lighting_scheduler.completed,
+                    self.initial_lighting_scheduler.stale,
+                    self.initial_lighting_scheduler.coalesced,
+                    self.initial_lighting_scheduler.columns_per_second(),
+                    self.initial_light_queue_wait_ms.summary(),
+                    self.initial_light_worker_ms.summary(),
+                    self.initial_light_direct_voxels,
+                    self.initial_light_emitters,
+                    self.initial_light_propagation_nodes,
+                ));
+                let stage = &self.stream_stage_fairness;
+                self.debug_text.push_str(&format!(
+                    "\nSTREAM_FAIR skip c/b/s/m/u={}/{}/{}/{}/{} blocked_turns={}/{}/{}/{}/{} starve_now={}/{}/{}/{}/{} starve_max={}/{}/{}/{}/{} oldest_ms={:.0}/{:.0}/{:.0}/{:.0}/{:.0}",
+                    stage[0].skipped_due_to_budget, stage[1].skipped_due_to_budget,
+                    stage[2].skipped_due_to_budget, stage[3].skipped_due_to_budget,
+                    stage[4].skipped_due_to_budget,
+                    stage[0].blocked_dependency_turns, stage[1].blocked_dependency_turns,
+                    stage[2].blocked_dependency_turns, stage[3].blocked_dependency_turns,
+                    stage[4].blocked_dependency_turns,
+                    stage[0].turns_without_service, stage[1].turns_without_service,
+                    stage[2].turns_without_service, stage[3].turns_without_service,
+                    stage[4].turns_without_service,
+                    stage[0].max_turns_without_service, stage[1].max_turns_without_service,
+                    stage[2].max_turns_without_service, stage[3].max_turns_without_service,
+                    stage[4].max_turns_without_service,
+                    stage[0].oldest_age_ms, stage[1].oldest_age_ms,
+                    stage[2].oldest_age_ms, stage[3].oldest_age_ms,
+                    stage[4].oldest_age_ms,
+                ));
+                self.debug_text
+                    .push_str(&format!("\nFRONTIER {frontier_summary}"));
+                self.debug_text.push_str(&format!(
+                    "\nMARGINS [forward_safe,forward_visible,lateral_safe,lateral_visible,rear_visible] current={:?} min={:?} p05={:?} mean={:?}\nBLOCKED_ADJACENT {}\n{}",
+                    self.travel_margin.current,
+                    self.travel_margin.minimum,
+                    self.travel_margin.p05(),
+                    self.travel_margin.mean(),
+                    blocked_adjacent,
+                    area_state_grid,
+                ));
+                self.debug_text.push_str(&format!(
+                    "\nRESP frame_ms[p50/p90/p95/p99/max]={:?} event_loop_gap={:?} fixed_tick_gap={:?} event_dispatch={:?} input_callback={:?} input_to_sim={:?} input_to_render={:?} ticks due/run/drop={}/{}/{} dropped_s={:.3} long_tasks[4/8/16/33ms]={:?} worst={:?}",
+                    self.responsiveness.frame_interval.summary(),
+                    self.responsiveness.event_loop_gap.summary(),
+                    self.responsiveness.fixed_tick_gap.summary(),
+                    self.responsiveness.event_dispatch.summary(),
+                    self.responsiveness.input_processing.summary(),
+                    self.responsiveness.input_to_simulation.summary(),
+                    self.responsiveness.input_to_render.summary(),
+                    self.responsiveness.due_ticks,
+                    self.responsiveness.executed_ticks,
+                    self.responsiveness.dropped_ticks,
+                    self.responsiveness.dropped_seconds,
+                    self.responsiveness.long_task_counts,
+                    self.responsiveness.longest_task,
+                ));
+                if self.stream_perf {
+                    let elapsed = self
+                        .stream_route_started_at
+                        .map_or(0.0, |started| started.elapsed().as_secs_f32());
+                    let phase = if elapsed < self.stream_perf_motion_seconds {
+                        stream_route_label(elapsed, self.stream_perf_motion_seconds / 7.0)
+                    } else {
+                        "converging"
+                    };
+                    self.debug_text.push_str(&format!(
+                        "\nSTREAM_PROFILE phase={phase} elapsed={elapsed:.1}s active_seconds={:.1} leg_seconds={:.1} speed=4blocks/s lookahead={}",
+                        self.stream_perf_motion_seconds,
+                        self.stream_perf_motion_seconds / 7.0,
+                        if self.stream_lookahead_enabled { "on" } else { "off" },
+                    ));
+                }
+                let trace_interval = if self.stream_perf { 10 } else { 1 };
+                if self.debug_trace
+                    && self.last_debug_trace.elapsed() >= Duration::from_secs(trace_interval)
+                {
+                    eprintln!("F3 {}", self.debug_text.replace('\n', " | "));
+                    self.last_debug_trace = Instant::now();
+                }
+                self.debug_overlay_text = compact_debug_overlay(&self.debug_text);
                 if self.inventory_open {
                     self.debug_text = format!(
                         "INVENTORY (E closes)\n{}\n{}",
                         inventory_text(sim),
                         self.debug_text
                     );
+                    self.debug_overlay_text = compact_debug_overlay(&self.debug_text);
                 }
             }
             let slots = std::array::from_fn(|i| {
@@ -1385,7 +3745,11 @@ impl ClientApp {
                     slots,
                     selected: sim.inventory.selected(),
                     target: sim.target().map(|h| h.block),
-                    text: if self.debug { &self.debug_text } else { "" },
+                    text: if self.debug {
+                        &self.debug_overlay_text
+                    } else {
+                        ""
+                    },
                     items: &[],
                     mining_progress: sim.mining.map(|m| m.progress),
                     inventory_open: self.inventory_open,
@@ -1398,15 +3762,34 @@ impl ClientApp {
                 camera,
             );
         }
+        self.frame_phases.debug_hud_ms = debug_hud_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .debug_hud
+            .record_ms(self.frame_phases.debug_hud_ms);
+        let load_metrics = self.load_scheduler.metrics();
+        let generation_metrics = self.generation_scheduler.metrics();
+        let streaming_idle = self.full_desired_ready_ms.is_some()
+            && self.residency.pending_column_count() == 0
+            && load_metrics.queued == 0
+            && load_metrics.in_flight == 0
+            && generation_metrics.pending == 0
+            && generation_metrics.in_flight == 0
+            && (self.stream_perf
+                || self
+                    .simulation
+                    .as_ref()
+                    .is_none_or(|simulation| !simulation.lighting.has_integration_work()));
         let finished = self
             .measure_seconds
             .is_some_and(|s| self.metrics.uptime.elapsed().as_secs_f64() >= s)
-            && mesh_idle;
+            && mesh_idle
+            && streaming_idle;
         let capture = if mesh_idle && (self.measure_seconds.is_none() || finished) {
             self.capture.as_deref()
         } else {
             None
         };
+        let render_present_started = Instant::now();
         match renderer.render_capture(camera, capture) {
             Ok(()) => {
                 if let Some(phase) = camera_motion_phase {
@@ -1495,6 +3878,101 @@ impl ClientApp {
                         renderer.mesh_buffer_reallocations(),
                         renderer.mesh_buffer_reuses(),
                     );
+                    if self.stream_perf {
+                        let simulation = self.simulation.as_ref().expect("running world");
+                        let light = simulation.lighting.work_counters();
+                        eprintln!(
+                            "STREAM_RESULT radius={} retain={} lookahead={} desired={} resident={} generated={} loaded={} evicted={} fps={:?} frame_ms={:?} low={:?} tps={:?} gpu_ms={:?} request_voxel={:?} request_light={:?} first_upload={:?} all_upload={:?} load_total/worker/worker_queue={:?}/{:?}/{:?} generation_total/worker/worker_queue={:?}/{:?}/{:?} publication_cpu={:?} boundary_light_queue/active_wall/cpu={:?}/{:?}/{:?} initial_light_queue/worker_elapsed={:?}/{:?} initial_light_jobs queued/inflight/completed/stale/coalesced={}/{}/{}/{}/{} columns_per_sec={:.2} mesh_queue/execution/upload_wait={:?}/{:?}/{:?} lighting_ops voxels={} boundary={} pushes/pops={}/{} dirty_sections={} emitters={} lighting_backlog={} mesh submitted/completed/stale/coalesced={}/{}/{}/{} margins[forward_safe,forward_visible,lateral_safe,lateral_visible,rear_visible] current/min/p05/mean={:?}/{:?}/{:?}/{:?} frame_cpu_p95 fixed/residency/snapshot/mesh_schedule/mesh_poll/hud/present={:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{:?}",
+                            self.stream_load_radius,
+                            self.residency.retain_radius(),
+                            self.stream_lookahead_enabled,
+                            self.residency.desired_column_count(),
+                            simulation.world.chunk_count(),
+                            self.generated_chunks,
+                            self.loaded_from_disk,
+                            self.eviction_count,
+                            self.metrics.frames.fps(),
+                            self.metrics.frames.mean().map(|v| v * 1000.0),
+                            self.metrics.frames.low(),
+                            self.metrics.tps,
+                            renderer.gpu_ms(),
+                            self.voxel_ready_latency_ms.summary(),
+                            self.light_ready_latency_ms.summary(),
+                            self.first_section_latency_ms.summary(),
+                            self.render_visible_latency_ms.summary(),
+                            self.load_total_latency_ms.summary(),
+                            self.load_worker_ms.summary(),
+                            self.load_queue_wait_ms.summary(),
+                            self.generation_total_latency_ms.summary(),
+                            self.generation_worker_ms.summary(),
+                            self.generation_queue_wait_ms.summary(),
+                            self.publication_ms.summary(),
+                            self.lighting_queue_wait_ms.summary(),
+                            self.lighting_active_ms.summary(),
+                            self.lighting_cpu_ms.summary(),
+                            self.initial_light_queue_wait_ms.summary(),
+                            self.initial_light_worker_ms.summary(),
+                            self.initial_lighting_scheduler.pending(),
+                            self.initial_lighting_scheduler.in_flight(),
+                            self.initial_lighting_scheduler.completed,
+                            self.initial_lighting_scheduler.stale,
+                            self.initial_lighting_scheduler.coalesced,
+                            self.initial_lighting_scheduler.columns_per_second(),
+                            self.mesh_queue_wait_ms.summary(),
+                            self.mesh_execution_ms.summary(),
+                            self.mesh_upload_wait_ms.summary(),
+                            light.direct_voxels_scanned,
+                            light.boundary_voxels_inspected,
+                            light.propagation_queue_pushes,
+                            light.propagation_queue_pops,
+                            light.dirty_section_insertions,
+                            light.emitters_found,
+                            simulation.lighting.integration_columns().len(),
+                            mesh_stats.mesh_jobs_submitted,
+                            mesh_stats.mesh_jobs_completed,
+                            mesh_stats.mesh_jobs_discarded_stale,
+                            mesh_stats.mesh_jobs_coalesced,
+                            self.travel_margin.current,
+                            self.travel_margin.minimum,
+                            self.travel_margin.p05(),
+                            self.travel_margin.mean(),
+                            self.frame_phase_samples.fixed_step.summary().map(|v| v[2]),
+                            self.frame_phase_samples.residency.summary().map(|v| v[2]),
+                            self.frame_phase_samples
+                                .render_world_sync
+                                .summary()
+                                .map(|v| v[2]),
+                            self.frame_phase_samples
+                                .mesh_schedule
+                                .summary()
+                                .map(|v| v[2]),
+                            self.frame_phase_samples
+                                .mesh_poll_upload
+                                .summary()
+                                .map(|v| v[2]),
+                            self.frame_phase_samples.debug_hud.summary().map(|v| v[2]),
+                            self.frame_phase_samples
+                                .render_present
+                                .summary()
+                                .map(|v| v[2]),
+                        );
+                        eprintln!(
+                            "RESPONSIVENESS frame_ms[p50/p90/p95/p99/max]={:?} event_loop_gap={:?} fixed_tick_gap={:?} event_dispatch={:?} input_callback={:?} input_to_sim={:?} input_to_render={:?} ticks due/run/drop={}/{}/{} dropped_s={:.3} long_tasks[4/8/16/33ms]={:?} worst={:?}",
+                            self.responsiveness.frame_interval.summary(),
+                            self.responsiveness.event_loop_gap.summary(),
+                            self.responsiveness.fixed_tick_gap.summary(),
+                            self.responsiveness.event_dispatch.summary(),
+                            self.responsiveness.input_processing.summary(),
+                            self.responsiveness.input_to_simulation.summary(),
+                            self.responsiveness.input_to_render.summary(),
+                            self.responsiveness.due_ticks,
+                            self.responsiveness.executed_ticks,
+                            self.responsiveness.dropped_ticks,
+                            self.responsiveness.dropped_seconds,
+                            self.responsiveness.long_task_counts,
+                            self.responsiveness.longest_task,
+                        );
+                    }
                 }
                 if capture.is_some() || finished {
                     event_loop.exit();
@@ -1507,6 +3985,16 @@ impl ClientApp {
             Err(wgpu::SurfaceError::OutOfMemory) => std::process::exit(1),
             Err(_) => {}
         }
+        self.frame_phases.render_present_ms =
+            render_present_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_phase_samples
+            .render_present
+            .record_ms(self.frame_phases.render_present_ms);
+        self.responsiveness.record_long_task(
+            "render_present",
+            render_present_started.elapsed(),
+            self.mesh_uploads_this_frame,
+        );
     }
 }
 
@@ -1585,6 +4073,115 @@ impl ClientApp {
         }
     }
 }
+fn compact_debug_overlay(text: &str) -> String {
+    const MAX_LINE_CHARS: usize = 150;
+    const MAX_LINES: usize = 13;
+    let mut output = String::new();
+    for line in text
+        .lines()
+        .filter(|line| {
+            line.starts_with("WORLD ")
+                || line.starts_with("STREAM ")
+                || line.starts_with("STREAM_FAIR ")
+                || line.starts_with("FRONTIER ")
+                || line.starts_with("LATENCY ")
+                || line.starts_with("STAGES ")
+                || line.starts_with("LIGHTING ")
+                || line.starts_with("CPU_PHASE_MS ")
+                || line.starts_with("SAVE DIRTY ")
+                || line.starts_with("PLAYER SAVE ")
+        })
+        .take(MAX_LINES)
+    {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        let mut chars = line.chars();
+        output.extend(chars.by_ref().take(MAX_LINE_CHARS));
+        if chars.next().is_some() {
+            output.push('…');
+        }
+    }
+    output
+}
+
+#[cfg(test)]
+mod debug_overlay_tests {
+    use super::{
+        StreamStageFairness, compact_debug_overlay, pop_before_deadline, pop_urgent_before_deadline,
+    };
+    use std::{
+        collections::HashSet,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn compact_debug_overlay_is_bounded_and_keeps_stream_summary_lines() {
+        let input = format!(
+            "WORLD {}\nSTREAM {}\nLATENCY {}\nSTAGES {}\nLIGHTING {}\nCPU_PHASE_MS {}\nSAVE DIRTY {}\nPLAYER SAVE {}\nignored {}",
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+            "x".repeat(500),
+        );
+        let compact = compact_debug_overlay(&input);
+        assert!(compact.chars().count() <= 8 * 151 + 7);
+        assert!(!compact.contains("ignored"));
+        assert!(compact.contains("WORLD "));
+        assert!(compact.contains("PLAYER SAVE "));
+    }
+
+    #[test]
+    fn stream_backlog_yields_at_deadline_so_next_event_turn_can_run() {
+        let mut pending = (0..100).collect::<HashSet<_>>();
+        let deadline = Instant::now() + Duration::from_millis(4);
+        let mut processed = 0;
+        while let Some(_item) = pop_before_deadline(&mut pending, deadline) {
+            processed += 1;
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        // Model the next winit turn/input callback immediately after streaming yields.
+        let next_event_turn = Instant::now();
+        assert!(
+            processed < 100,
+            "stream backlog must remain for later turns"
+        );
+        assert!(!pending.is_empty());
+        assert!(next_event_turn < deadline + Duration::from_millis(30));
+    }
+
+    #[test]
+    fn urgent_presentation_work_is_selected_before_far_prefetch() {
+        let now = Instant::now();
+        let mut pending = HashSet::from([(8, 0), (1, 0), (3, 0)]);
+        let selected =
+            pop_urgent_before_deadline(&mut pending, now + Duration::from_secs(1), |p| p.0);
+        assert_eq!(selected, Some((1, 0)));
+        assert_eq!(pending.len(), 2);
+    }
+
+    #[test]
+    fn stage_metrics_count_skips_and_prove_service_resets_starvation() {
+        let now = Instant::now();
+        let mut stage = StreamStageFairness::default();
+        stage.observe(true, false, false, false, now);
+        stage.observe(true, false, true, true, now + Duration::from_millis(10));
+        assert_eq!(stage.skipped_due_to_budget, 1);
+        assert_eq!(stage.blocked_dependency_turns, 1);
+        assert_eq!(stage.turns_without_service, 0);
+        stage.observe(true, true, true, false, now + Duration::from_millis(20));
+        assert_eq!(stage.turns_without_service, 0);
+        assert_eq!(stage.max_turns_without_service, 1);
+    }
+}
+
 fn inventory_text(sim: &Simulation) -> String {
     sim.inventory
         .slots()
@@ -1609,7 +4206,11 @@ impl ApplicationHandler for ClientApp {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         // Surface/EGL teardown needs the Wayland connection still alive.
         // run_app consumes/drops the event loop before returning to main.
+        self.cancel_startup_and_join();
         self.finish_world_saves();
+        if self.stream_perf {
+            self.stream_final_report = Some(self.autonomous_stream_report());
+        }
         self.renderer.take();
         self.window.take();
     }
@@ -1630,12 +4231,10 @@ impl ApplicationHandler for ClientApp {
                 )
                 .expect("create window"),
         );
-        if self.diagnostic.is_none_or(Stage::normal_world)
-            && let Err(error) = self.start_world()
-        {
-            eprintln!("unable to initialize local world: {error}");
-            event_loop.exit();
-            return;
+        self.window = Some(window.clone());
+        if self.diagnostic.is_none_or(Stage::normal_world) {
+            window.set_title("RustCraft — Loading world…");
+            self.begin_world_startup();
         }
         let resources = match self.resources.as_ref() {
             Ok(resources) => resources,
@@ -1670,7 +4269,6 @@ impl ApplicationHandler for ClientApp {
                 std::process::exit(1);
             }
         };
-        self.window = Some(window);
         self.gpu_metrics = Some(gpu_metrics::Provider::new(
             renderer.adapter_info.vendor,
             renderer.adapter_info.device,
@@ -1702,6 +4300,21 @@ impl ApplicationHandler for ClientApp {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        let dispatch_started = Instant::now();
+        let is_input = matches!(
+            &event,
+            WindowEvent::CursorMoved { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Focused(_)
+                | WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseInput { .. }
+        );
+        let is_redraw = matches!(&event, WindowEvent::RedrawRequested);
+        if is_input {
+            self.responsiveness
+                .pending_input_at
+                .get_or_insert(dispatch_started);
+        }
         let Some(window) = self.window.clone() else {
             return;
         };
@@ -1774,21 +4387,32 @@ impl ApplicationHandler for ClientApp {
                             button == MouseButton::Right,
                         );
                     }
-                    return;
-                }
-                if state == ElementState::Released && button == MouseButton::Left {
-                    self.controller.break_held = false;
-                } else if state == ElementState::Released && button == MouseButton::Right {
-                    self.controller.place_pressed = false;
-                } else if !self.controller.captured {
-                    self.controller.capture(&window);
-                } else if button == MouseButton::Left {
-                    self.controller.break_held = state == ElementState::Pressed;
-                } else if button == MouseButton::Right {
-                    self.controller.place_pressed = state == ElementState::Pressed;
+                } else {
+                    if state == ElementState::Released && button == MouseButton::Left {
+                        self.controller.break_held = false;
+                    } else if state == ElementState::Released && button == MouseButton::Right {
+                        self.controller.place_pressed = false;
+                    } else if !self.controller.captured {
+                        self.controller.capture(&window);
+                    } else if button == MouseButton::Left {
+                        self.controller.break_held = state == ElementState::Pressed;
+                    } else if button == MouseButton::Right {
+                        self.controller.place_pressed = state == ElementState::Pressed;
+                    }
                 }
             }
             _ => {}
+        }
+        let elapsed = dispatch_started.elapsed();
+        if !is_redraw {
+            self.responsiveness.event_dispatch.record(elapsed);
+            self.responsiveness
+                .record_long_task("window_event_dispatch", elapsed, 1);
+        }
+        if is_input {
+            self.responsiveness.input_processing.record(elapsed);
+            self.responsiveness
+                .record_long_task("input_event_processing", elapsed, 1);
         }
     }
     fn device_event(
@@ -1797,23 +4421,59 @@ impl ApplicationHandler for ClientApp {
         _device_id: winit::event::DeviceId,
         event: DeviceEvent,
     ) {
+        let event_started = Instant::now();
+        let is_input = matches!(&event, DeviceEvent::MouseMotion { .. });
+        if is_input {
+            self.responsiveness
+                .pending_input_at
+                .get_or_insert(event_started);
+        }
         if self.controller.captured
             && let DeviceEvent::MouseMotion { delta } = event
         {
             self.controller.look.x += delta.0 as f32;
             self.controller.look.y += delta.1 as f32;
         }
+        if is_input {
+            let elapsed = event_started.elapsed();
+            self.responsiveness.input_processing.record(elapsed);
+            self.responsiveness
+                .record_long_task("device_input_processing", elapsed, 1);
+        }
     }
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        let callback_started = Instant::now();
+        self.stream_turn_started = Some(callback_started);
+        if let Some(previous) = self
+            .responsiveness
+            .last_about_to_wait
+            .replace(callback_started)
+        {
+            let gap = callback_started.duration_since(previous);
+            self.responsiveness.event_loop_gap.record(gap);
+        }
+        let startup_poll_started = Instant::now();
+        self.poll_world_startup(_event_loop);
+        self.responsiveness.record_long_task(
+            "startup_result_poll",
+            startup_poll_started.elapsed(),
+            1,
+        );
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_frame).as_secs_f64();
         self.last_frame = now;
         let budget = self.clock.advance(elapsed);
+        self.responsiveness.due_ticks += budget.due_steps;
+        self.responsiveness.executed_ticks += u64::from(budget.steps);
+        self.responsiveness.dropped_ticks +=
+            budget.due_steps.saturating_sub(u64::from(budget.steps));
+        self.responsiveness.dropped_seconds += budget.dropped_seconds;
         self.metrics.steps = budget.steps;
         self.metrics.catch_up = budget.catch_up;
         for _ in 0..budget.steps {
             self.fixed_step();
         }
+        self.service_streaming_turn();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -1995,6 +4655,191 @@ fn camera_is_underwater(simulation: &Simulation) -> bool {
     render.material == rustcraft_game_api::MaterialClass::Liquid
         && (eye.y - eye.y.floor()) < render.liquid_surface_height.unwrap_or(1.0) - 0.005
 }
+
+fn run_headless_stream_phase(app: &mut ClientApp, end_route_seconds: f32, route_offset: f32) {
+    let deadline = Instant::now() + Duration::from_secs(240);
+    let mut next_tick = Instant::now();
+    let mut next_mesh = Instant::now();
+    let mut offset_applied = route_offset == 0.0;
+    loop {
+        let now = Instant::now();
+        assert!(now < deadline, "headless world travel phase timed out");
+        app.stream_turn_started = Some(now);
+        app.service_streaming_turn();
+        if now >= next_mesh {
+            app.process_mesh_jobs();
+            next_mesh += Duration::from_millis(16);
+        }
+        if app.player_control_enabled && !offset_applied {
+            app.stream_route_started_at = Some(now - Duration::from_secs_f32(route_offset));
+            offset_applied = true;
+        }
+        if now >= next_tick {
+            app.fixed_step();
+            next_tick += Duration::from_millis(50);
+        }
+        let route_elapsed = app
+            .stream_route_started_at
+            .map_or(0.0, |started| started.elapsed().as_secs_f32());
+        if route_elapsed >= end_route_seconds
+            && app.mesh_scheduler.is_idle()
+            && app.residency.pending_column_count() == 0
+            && app
+                .simulation
+                .as_ref()
+                .is_some_and(|simulation| !simulation.lighting.has_integration_work())
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn prepare_headless_stream_app(root: &std::path::Path) -> ClientApp {
+    let mut app = ClientApp::new(None, None);
+    app.world_name = "world-travel-test".to_owned();
+    app.saves_directory = root.to_path_buf();
+    app.stream_perf = true;
+    // Slightly longer than the surface-client profile so collision/terrain variance still moves
+    // the edited origin strictly outside the final retain radius of five columns.
+    app.stream_perf_motion_seconds = 196.0;
+    app.start_world().expect("initialize headless travel world");
+    app.world_ready_at = Some(Instant::now());
+    if let Some(simulation) = app.simulation.as_mut() {
+        let resident = simulation.world.column_positions().collect::<Vec<_>>();
+        for position in resident {
+            assert!(simulation.world.set_column_safe(position, false));
+        }
+    }
+    app.player_control_enabled = false;
+    app.rebuild_meshes();
+    app
+}
+
+fn run_world_travel_test() {
+    let root = PathBuf::from("target").join(format!("world-travel-test-{}", std::process::id()));
+    if root.exists() {
+        std::fs::remove_dir_all(&root).expect("remove disposable prior world-travel-test world");
+    }
+    let mut first = prepare_headless_stream_app(&root);
+    let origin = rustcraft_engine_core::ChunkPos { x: 0, z: 0 };
+    let mut edit = None;
+    let mutation_deadline = Instant::now() + Duration::from_secs(30);
+    while !first.player_control_enabled {
+        assert!(
+            Instant::now() < mutation_deadline,
+            "startup SAFE+VISIBLE core timed out"
+        );
+        first.stream_turn_started = Some(Instant::now());
+        first.service_streaming_turn();
+        first.process_mesh_jobs();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    if let Some(simulation) = first.simulation.as_mut() {
+        let position = rustcraft_engine_core::BlockPos {
+            x: 1,
+            y: simulation.player.position.y.floor() as i32 - 2,
+            z: 1,
+        };
+        simulation.world.set_state(
+            position,
+            rustcraft_engine_core::BlockState {
+                block: STONE.id,
+                variant: 77,
+            },
+        );
+        first.persistence_dirty.mark_dirty(origin);
+        edit = Some(position);
+    }
+    run_headless_stream_phase(&mut first, 168.0, 0.0);
+    let origin_evicted = first.stream_evicted_columns.contains(&origin);
+    assert!(
+        origin_evicted,
+        "origin did not evict during long travel: player={:?} visited={} evictions={} dirty={} saving={} lighting_pinned={}",
+        first.simulation.as_ref().unwrap().player.position,
+        first.stream_visited_columns.len(),
+        first.eviction_count,
+        first.persistence_dirty.is_dirty(origin),
+        first.persistence_dirty.is_saving(origin),
+        first
+            .simulation
+            .as_ref()
+            .unwrap()
+            .lighting
+            .integration_columns()
+            .contains(&origin),
+    );
+    assert!(first.stream_visited_columns.len() >= 20);
+    assert!(
+        first
+            .stream_visited_columns
+            .iter()
+            .any(|position| position.x < 0 && position.z < 0)
+    );
+    assert!(first.travel_margin.minimum[0] > 0.0);
+    assert!(first.travel_margin.minimum[1] > 0.0);
+    let distant_position = first.simulation.as_ref().unwrap().player.position;
+    let fresh_visited = first.stream_visited_columns.len();
+    let fresh_margins = (
+        first.travel_margin.minimum,
+        first.travel_margin.p05(),
+        first.travel_margin.mean(),
+    );
+    let fresh_visible_latency = first.render_visible_latency_ms.summary();
+    let fresh_resident_peak = first.resident_columns_peak;
+    let fresh_section_peak = first.resident_sections_peak;
+    first.finish_world_saves();
+    drop(first);
+
+    let mut reopened = prepare_headless_stream_app(&root);
+    let restored = reopened.simulation.as_ref().unwrap().player.position;
+    assert!((restored.x - distant_position.x).abs() < 0.25);
+    assert!((restored.z - distant_position.z).abs() < 0.25);
+    run_headless_stream_phase(&mut reopened, 196.0, 168.0);
+    assert!(reopened.stream_returned_to_origin);
+    let edit = edit.expect("travel edit created");
+    assert_eq!(
+        reopened.simulation.as_ref().unwrap().world.state(edit),
+        rustcraft_engine_core::BlockState {
+            block: STONE.id,
+            variant: 77,
+        },
+        "persisted edit did not survive eviction and disk reload"
+    );
+    let safe_visible = reopened
+        .simulation
+        .as_ref()
+        .unwrap()
+        .world
+        .safe_column_positions()
+        .all(|position| reopened.render_ready_columns.contains(&position));
+    assert!(safe_visible, "SAFE=>VISIBLE invariant failed");
+    reopened.finish_world_saves();
+    println!(
+        "WORLD_TRAVEL_TEST result=PASS radius={} retain={} fresh_visited_columns={} reused_visited_columns={} returned_origin={} negative_coordinates=ok fresh_margins_min/p05/mean={:?}/{:?}/{:?} reused_margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} fresh_request_visible_ms={:?} reused_request_visible_ms={:?} fresh_resident_columns/sections_peak={}/{} reused_resident_columns/sections_peak={}/{} edit_evict_reload=ok reopen_distant_player=ok hashes=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6/384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
+        reopened.residency.load_radius(),
+        reopened.residency.retain_radius(),
+        fresh_visited,
+        reopened.stream_visited_columns.len(),
+        reopened.stream_returned_to_origin,
+        fresh_margins.0,
+        fresh_margins.1,
+        fresh_margins.2,
+        reopened.travel_margin.current,
+        reopened.travel_margin.minimum,
+        reopened.travel_margin.p05(),
+        reopened.travel_margin.mean(),
+        fresh_visible_latency,
+        reopened.render_visible_latency_ms.summary(),
+        fresh_resident_peak,
+        fresh_section_peak,
+        reopened.resident_columns_peak,
+        reopened.resident_sections_peak,
+    );
+    drop(reopened);
+    std::fs::remove_dir_all(&root).expect("remove disposable world-travel-test world");
+}
+
 fn main() {
     if std::env::args().any(|argument| argument == "--version") {
         println!("{}", rustcraft_build_info::identity());
@@ -2031,6 +4876,10 @@ fn main() {
         bench::run_render_scale();
         return;
     }
+    if std::env::args().any(|a| a == "--world-travel-test") {
+        run_world_travel_test();
+        return;
+    }
     let mut args = std::env::args().skip(1);
     let mut diagnostic = None;
     let mut capture = None;
@@ -2039,6 +4888,8 @@ fn main() {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--survival" => {}
+            "--stream-perf" => {}
+            "--world-travel-test" => {}
             "--fidelity-m3" => {}
             "--world" => {
                 let Some(name) = args.next() else {
@@ -2055,7 +4906,7 @@ fn main() {
                     }))
                 } else {
                     eprintln!(
-                        "usage: rustcraft-client [--world NAME] [--survival] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
+                        "usage: rustcraft-client [--world NAME] [--survival] [--stream-perf] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
                     );
                     std::process::exit(2);
                 }
@@ -2066,14 +4917,14 @@ fn main() {
                     capture = Some(PathBuf::from(path));
                 } else {
                     eprintln!(
-                        "usage: rustcraft-client [--world NAME] [--survival] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
+                        "usage: rustcraft-client [--world NAME] [--survival] [--stream-perf] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
                     );
                     std::process::exit(2);
                 }
             }
             _ => {
                 eprintln!(
-                    "usage: rustcraft-client [--world NAME] [--survival] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
+                    "usage: rustcraft-client [--world NAME] [--survival] [--stream-perf] [--fidelity-m3] [--diag STAGE] [--capture NEW.png]"
                 );
                 std::process::exit(2);
             }
@@ -2083,8 +4934,29 @@ fn main() {
     let mut app = ClientApp::new(diagnostic, capture);
     app.world_name = world_name;
     app.survival_start = std::env::args().any(|a| a == "--survival");
+    app.stream_perf = std::env::args().any(|a| a == "--stream-perf");
+    if app.stream_perf {
+        app.debug = true;
+        app.debug_trace = true;
+    }
     app.camera_motion = std::env::args().any(|a| a == "--camera-motion");
-    let _ = event_loop.run_app(&mut app);
+    if let Err(error) = event_loop.run_app(&mut app) {
+        eprintln!("client event loop failed: {error}");
+        std::process::exit(1);
+    }
+    if app.stream_perf {
+        match app.stream_final_report.take() {
+            Some(Ok(report)) => println!("{report}"),
+            Some(Err(report)) => {
+                eprintln!("{report}");
+                std::process::exit(1);
+            }
+            None => {
+                eprintln!("client-stream-auto ended without an acceptance report");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

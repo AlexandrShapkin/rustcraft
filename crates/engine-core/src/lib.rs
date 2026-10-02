@@ -196,6 +196,9 @@ impl ChunkBuilder {
 #[derive(Debug, Clone)]
 pub struct World {
     sections: HashMap<(ChunkPos, i32), Chunk>,
+    resident_columns: std::collections::HashSet<ChunkPos>,
+    safe_columns: std::collections::HashSet<ChunkPos>,
+    enforce_column_availability: bool,
     default_block: BlockId,
     lights: HashMap<SectionPos, Vec<VoxelLight>>,
 }
@@ -205,28 +208,59 @@ impl World {
     pub fn new(default_block: BlockId) -> Self {
         Self {
             sections: HashMap::new(),
+            resident_columns: std::collections::HashSet::new(),
+            safe_columns: std::collections::HashSet::new(),
+            enforce_column_availability: false,
             default_block,
             lights: HashMap::new(),
         }
     }
     #[must_use]
     pub fn chunk_count(&self) -> usize {
-        self.sections
-            .keys()
-            .map(|(position, _)| *position)
-            .collect::<std::collections::HashSet<_>>()
-            .len()
+        self.resident_columns.len()
     }
     #[must_use]
     pub fn chunk(&self, position: ChunkPos) -> Option<&Chunk> {
         self.sections.get(&(position, 0))
     }
     pub fn chunk_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
-        self.sections
-            .keys()
-            .map(|(position, _)| *position)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+        self.resident_columns.iter().copied()
+    }
+    /// Enable an explicit unavailable-column boundary for streamed worlds. Standalone authored
+    /// worlds retain their historical implicit-default behavior until opting in.
+    pub fn enforce_column_availability(&mut self, enforce: bool) {
+        self.enforce_column_availability = enforce;
+        if enforce && self.safe_columns.is_empty() {
+            self.safe_columns.clone_from(&self.resident_columns);
+        }
+    }
+    #[must_use]
+    pub fn column_available(&self, position: ChunkPos) -> bool {
+        !self.enforce_column_availability || self.safe_columns.contains(&position)
+    }
+    /// Release or revoke a resident column at the simulation/interaction frontier. Presentation
+    /// owners use this after a current renderable mesh exists, keeping authoritative residency
+    /// separate from player-observable safety.
+    pub fn set_column_safe(&mut self, position: ChunkPos, safe: bool) -> bool {
+        if safe && !self.resident_columns.contains(&position) {
+            return false;
+        }
+        if safe {
+            self.safe_columns.insert(position);
+        } else {
+            self.safe_columns.remove(&position);
+        }
+        true
+    }
+    pub fn safe_column_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.safe_columns.iter().copied()
+    }
+    #[must_use]
+    pub fn residency_enforced(&self) -> bool {
+        self.enforce_column_availability
+    }
+    pub fn column_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.resident_columns.iter().copied()
     }
     pub fn section_positions(&self) -> impl Iterator<Item = (ChunkPos, i32)> + '_ {
         self.sections.keys().copied()
@@ -237,6 +271,10 @@ impl World {
     }
     /// Publish a fully constructed section. Callers must not expose the builder before finish.
     pub fn publish_section(&mut self, position: ChunkPos, section_y: i32, section: Chunk) {
+        self.resident_columns.insert(position);
+        if !self.enforce_column_availability {
+            self.safe_columns.insert(position);
+        }
         self.sections.insert((position, section_y), section);
     }
     /// Atomically replace a column's sections after generation or disk loading has completed.
@@ -250,6 +288,10 @@ impl World {
             return Err("duplicate section in column publication");
         }
         self.remove_column(position);
+        self.resident_columns.insert(position);
+        if !self.enforce_column_availability {
+            self.safe_columns.insert(position);
+        }
         for (section_y, section) in sections {
             self.sections.insert((position, section_y), section);
         }
@@ -260,6 +302,10 @@ impl World {
         self.sections.remove(&(position, section_y))
     }
     pub fn remove_column(&mut self, position: ChunkPos) -> Vec<(i32, Chunk)> {
+        self.resident_columns.remove(&position);
+        self.safe_columns.remove(&position);
+        self.lights
+            .retain(|(candidate, _), _| *candidate != position);
         let section_ys = self
             .sections
             .keys()
@@ -268,7 +314,6 @@ impl World {
         section_ys
             .into_iter()
             .filter_map(|section_y| {
-                self.lights.remove(&(position, section_y));
                 self.sections
                     .remove(&(position, section_y))
                     .map(|chunk| (section_y, chunk))
@@ -286,6 +331,21 @@ impl World {
     pub fn section_lights(&self, position: ChunkPos, section_y: i32) -> Option<&[VoxelLight]> {
         self.lights.get(&(position, section_y)).map(Vec::as_slice)
     }
+    /// Install a completely constructed section-light array at an ownership boundary.
+    /// Callers must provide exactly one value per voxel so streamed initial lighting can be
+    /// applied by moving storage instead of replaying per-voxel updates on the simulation thread.
+    pub fn replace_section_lights(
+        &mut self,
+        position: ChunkPos,
+        section_y: i32,
+        lights: Vec<VoxelLight>,
+    ) -> Result<(), Vec<VoxelLight>> {
+        if lights.len() != CHUNK_VOLUME {
+            return Err(lights);
+        }
+        self.lights.insert((position, section_y), lights);
+        Ok(())
+    }
     pub fn set_light(&mut self, p: BlockPos, light: VoxelLight) {
         let (c, local) = split_block(p);
         self.lights
@@ -298,6 +358,7 @@ impl World {
         self.sections.get(&(position, section_y))
     }
     fn ensure_section(&mut self, position: ChunkPos, section_y: i32) -> &mut Chunk {
+        self.resident_columns.insert(position);
         self.sections
             .entry((position, section_y))
             .or_insert_with(|| Chunk::new(self.default_block))
@@ -359,6 +420,15 @@ impl World {
             y: (bounds.max.y - f32::EPSILON).floor() as i32,
             z: (bounds.max.z - f32::EPSILON).floor() as i32,
         };
+        if self.enforce_column_availability {
+            for z in min.z.div_euclid(CHUNK_SIZE)..=max.z.div_euclid(CHUNK_SIZE) {
+                for x in min.x.div_euclid(CHUNK_SIZE)..=max.x.div_euclid(CHUNK_SIZE) {
+                    if !self.column_available(ChunkPos { x, z }) {
+                        return true;
+                    }
+                }
+            }
+        }
         for y in min.y..=max.y {
             for z in min.z..=max.z {
                 for x in min.x..=max.x {
@@ -464,6 +534,78 @@ mod tests {
         world.set(BlockPos { x: 16, y: 2, z: 16 }, BlockId(5));
         assert_eq!(world.get(BlockPos { x: -1, y: 2, z: 16 }), BlockId(4));
         assert_eq!(world.chunk_count(), 2);
+    }
+    #[test]
+    fn unavailable_columns_block_motion_and_are_removed_from_ray_queries() {
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 0, y: 0, z: 0 }, BlockId(1));
+        world.enforce_column_availability(true);
+        let (bounds, moved) = world.move_and_collide(
+            Aabb::new(Vec3::new(0.2, 1.0, 0.2), Vec3::new(0.8, 2.0, 0.8)),
+            Vec3::new(16.0, 0.0, 0.0),
+            |_| false,
+        );
+        assert!(moved.x < 15.3);
+        assert!(bounds.max.x <= 16.0);
+        assert!(
+            raycast::cast(
+                &world,
+                Vec3::new(0.5, 1.5, 0.5),
+                Vec3::new(1.0, 0.0, 0.0),
+                32.0,
+                |block| block != BlockId(0)
+            )
+            .is_none()
+        );
+        world
+            .publish_column(ChunkPos { x: 0, z: 0 }, Vec::new())
+            .unwrap();
+        world
+            .publish_column(ChunkPos { x: 1, z: 0 }, Vec::new())
+            .unwrap();
+        assert!(!world.column_available(ChunkPos { x: 1, z: 0 }));
+        assert!(world.set_column_safe(ChunkPos { x: 0, z: 0 }, true));
+        assert!(world.set_column_safe(ChunkPos { x: 1, z: 0 }, true));
+        let (_, moved) = world.move_and_collide(
+            Aabb::new(Vec3::new(0.2, 1.0, 0.2), Vec3::new(0.8, 2.0, 0.8)),
+            Vec3::new(16.0, 0.0, 0.0),
+            |_| false,
+        );
+        assert!(moved.x > 15.0);
+    }
+    #[test]
+    fn removing_a_column_also_releases_light_only_vertical_sections() {
+        let mut world = World::new(BlockId(0));
+        let column = ChunkPos { x: -2, z: 3 };
+        world.publish_column(column, Vec::new()).unwrap();
+        world.enforce_column_availability(true);
+        for y in [-1, 0, 8, 9] {
+            world.set_light(
+                BlockPos {
+                    x: -32,
+                    y: y * 16,
+                    z: 48,
+                },
+                VoxelLight::new(15, 7),
+            );
+        }
+        assert_eq!(
+            world.section_lights(column, -1).unwrap().len(),
+            CHUNK_VOLUME
+        );
+        world.remove_column(column);
+        for y in [-1, 0, 8, 9] {
+            assert!(world.section_lights(column, y).is_none());
+            assert_eq!(
+                world.light(BlockPos {
+                    x: -32,
+                    y: y * 16,
+                    z: 48
+                }),
+                VoxelLight::default()
+            );
+        }
+        assert!(!world.column_available(column));
     }
 }
 

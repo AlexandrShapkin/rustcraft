@@ -254,9 +254,79 @@ claiming success. Missing player records in older worlds remain first-time-playe
 startup 3x3 neighborhood is centered on the restored player chunk. Position/orientation, mode,
 inventory/crafting/cursor are durable; velocity and grounded/contact state reset, bounds/camera
 are derived, and mining/input/UI/render state is transient. Lighting is recomputed; dropped
-entities and world time remain unpersisted. Initial client loading still has a synchronous startup
-barrier while worker results and local file reads are assembled; moving that barrier into a loading
-state remains outstanding.
+entities and world time remain unpersisted. Local chunk availability is managed by generic
+`WorldResidency`: an interest center maps to signed chunk coordinates, a configurable load radius
+(default 4, `RUSTCRAFT_STREAM_RADIUS=3..12`) and a retain radius one column larger (default 5).
+Both use Chebyshev distance, so their boundaries are complete predictable squares rather than
+lattice circles whose cardinal and diagonal reach differ.
+Requests are distance-first, then biased by a bounded speed × sustained-travel-time horizon toward
+a normalized 70% movement / 30% horizontal camera-direction blend. Movement controls bias magnitude;
+looking around alone does not increase it or erase priority along actual travel.
+The horizon is bounded to 12 seconds/three columns, per-tick displacement is clamped to 8 blocks,
+and a heading change resets the duration so a short nudge cannot reprioritize the whole area.
+Bounded load/generation workers return immutable results with request tokens. A bounded
+`InitialLightingScheduler` builds full initial light arrays from owned voxel columns before their
+atomic voxel/light publication; the simulation thread validates current interest and applies at
+most one completed column in a callback under its shared wall-time budget. Only resident-neighbor
+boundary reconciliation, eviction cleanup and incremental edits use the separate lighting queue.
+Worker-built local lighting is immediately sufficient for first presentation; boundary
+reconciliation remains authoritative and later dirties only sections whose light actually changed.
+Thus a column does not wait behind unrelated boundary jobs before its first mesh can be built. The
+bounded integration queue holds up to 256 columns (enough for the supported radius-6 sweep plus
+transitions); queued work is reprioritized by current residency urgency while active work finishes.
+Obsolete queued lighting work is cancelled at eviction and does not pin residency. Active
+work finishes rather than leaving a partial authoritative update.
+Initial-light jobs prioritize distance/forward bias with aging before worker start, coalesce stale
+results by request token and do not preempt active work. One worker is the default, coordinated
+with mesh/load/generation workers under a six-compute-heavy-worker client budget on an
+eight-logical-CPU host; persistence workers are separate and I/O-oriented. Direct skylight is built by vertical scans; only shaded cells and actual emitters seed
+relaxation. Initial local-light presentation is published once; completed boundary correction
+invalidates only sections whose light changed, rather than rebuilding the whole column.
+Missing storage is eligible for generation, while corrupt/incompatible data remains an explicit failure.
+Unavailable columns are not treated as walkable air by collision or ray queries. Resident columns
+outside the retain radius become eviction candidates on each fixed tick. Dirty columns stay resident
+until the matching persistence generation is saved; non-persisted dropped-item columns are pinned.
+Eviction removes world/light state, render snapshots, and renderer/mesher residency. Initial
+world assembly happens on a cancellable bootstrap worker after window creation, with a minimum safe
+neighborhood centered on restored player position. After startup, input/event dispatch precedes
+optional streaming work. The client retains a 2 ms default wall-clock streaming budget per event
+turn (`RUSTCRAFT_STREAM_MAIN_BUDGET_MS`, clamped 0.25–8 ms), but reserves separate ordered windows
+for critical completed-result application, boundary lighting, snapshot synchronization and mesh
+scheduling. Streaming service runs after fixed-step/input processing on every event-loop turn,
+rather than only on 20 Hz simulation ticks. Each expensive stage checks its own deadline, so a busy
+earlier queue cannot consume every later stage's allowance. Urgency is end-to-end: the 3x3
+REQUIRED safety core outranks the VISIBLE inner ring, which outranks PREFETCH; lookahead orders work
+within a class but cannot promote distant prefetch above nearby terrain. Dirty section sets and
+initial resident mesh scheduling are coalesced and drained by current urgency/distance; completed
+mesh uploads prefer camera-forward sections within the same urgency ring. Boundary-lighting advances
+in resumable 32-unit quanta; one
+vertical-ray scan may remain indivisible. F3 exposes stage budget skips, consecutive turns without
+service, dependency-block turns, backlog age and the nearest forward frontier lifecycle. These are soft budgets: one
+indivisible operation can exceed its window and still requires profiling. The F3 summary is rebuilt
+once per second. Radius 3 is a temporary diagnostic default, not a final view-distance decision.
+This is local single-player residency, not a network interest protocol or general multiplayer
+streaming system.
+
+The four horizontal area sets are deliberately distinct:
+
+- `Desired(c, Rload) = { p | max(|p.x-c.x|, |p.z-c.z|) <= Rload }` is request policy.
+- `Visible` contains authoritative locally-lit columns whose current presentation has every
+  expected resident section mesh available. Visible speculative terrain may extend outside Safe.
+- `Safe` is the connected union of complete 3x3 Visible neighborhoods overlapping the existing
+  Safe set, seeded by the complete 3x3 neighborhood around the restored player. Collision,
+  movement, targeting, placement and breaking may use only Safe columns. Consequently
+  `Safe => Visible`; the only transition occurs atomically inside result application.
+- `Retained(c, Rretain, pins)` is the Chebyshev radius-5 square plus explicit active-light,
+  dirty/save-in-flight and dropped-entity pins. Pins extend storage lifetime only; they never
+  redefine Safe or Visible.
+
+Initial lighting supplies local authoritative voxel/light readiness. Cross-border reconciliation
+is eventual convergence, not a safety prerequisite: it dirties only changed sections and never
+revokes an already Safe column. The urgency order is current column, immediate Safe core, visible
+travel area, directional prefetch, then outer Desired. Movement direction is the primary prediction
+signal when optional lookahead is enabled; camera direction only breaks ties within the same
+urgency class. Lookahead defaults off because the controlled route showed no useful margin or
+latency benefit.
 
 The game resolves camera medium through the compiled voxel material and liquid surface metadata;
 it supplies the water fog policy. Generic world shaders apply distance-dependent fog to opaque and

@@ -498,3 +498,105 @@ compatibility domains. Product version changes never implicitly migrate saves. F
 uses the owner-selected `MIT OR Apache-2.0` project license. Local history was rewritten to remove
 `reference/assets`; release automation verifies the license metadata and scans reachable objects. It
 never pushes, renames a remote repository, tags, or publishes.
+
+## D-038 — Local world residency is interest-driven and bounded
+
+Status: accepted for the M4 local streaming slice.
+
+The generic `WorldResidency` mechanism takes signed column interest, tracks request tokens/phases,
+prioritizes by distance with a bounded recent-motion lookahead along a normalized 70% movement /
+30% horizontal view-direction blend, applies a configurable load radius
+and retain hysteresis, and proposes evictions without owning game generation policy. The motion
+estimate measures displacement per fixed tick, tracks stable-heading duration and speed, clamps each
+sampled delta to 8 blocks and speed to 32 blocks/s, resets duration on a heading change, decays
+duration after movement stops, and caps lookahead at three columns. This bounded speed × time means a
+short high-speed nudge has small influence, while sustained travel advances requests ahead. Current
+client policy uses load radius 4 and retain radius 5; `RUSTCRAFT_STREAM_RADIUS=3..12` remains
+available. Desired and retained membership use Chebyshev distance, producing complete square
+neighborhoods. Its
+shared stage score has dominant REQUIRED (3x3 safety core), VISIBLE (next inner ring), and PREFETCH
+classes; motion lookahead only orders work inside those classes.
+Lookahead defaults off: the final normal-speed A/B had identical 0.5-column minimum forward Safe
+and Visible margins, while request-to-visible p95 was 1.30 s on versus 1.50 s off, within the
+software-renderer/run variance and consistent with the earlier indistinguishable A/B. The mechanism
+and `RUSTCRAFT_STREAM_LOOKAHEAD` override remain available for future hardware evidence.
+Bounded workers own disk load/decode/semantic resolution and generation; results carry the
+current request token and are discarded if interest was abandoned. Resident columns outside retain
+radius are considered for eviction every simulation tick; dirty/save-in-flight columns remain pinned
+until successful persistence. Initial-light jobs are separately bounded to eight queued/active/result
+slots; after completion the client applies at most one column per event-loop callback, subject to
+the shared callback work budget. Missing storage may enter generation, but
+corrupt data never does. When persisted generator identity differs, stored columns remain loadable
+while absent columns cannot be generated under the incompatible policy.
+
+Unavailable columns block movement and ray traversal rather than masquerading as air. Dirty columns
+remain resident until their current save generation completes successfully. Columns containing
+non-persisted dropped-item entities are pinned; this is an explicit temporary bound until entity
+persistence is addressed. Eviction removes lighting/world state and invalidates render snapshots,
+mesh jobs and resident GPU sections. Startup creates the window first, then uses a cancellable
+background bootstrap to obtain a minimum safe neighborhood centered on the restored player. This is
+not general multiplayer interest management or an unbounded travel protocol.
+
+New columns use a bounded worker-based bulk initial-lighting stage before voxel publication.
+Initial direct skylight is constructed by vertical scans and only shaded cells/emitters seed
+relaxation. Complete light arrays are applied by ownership transfer, then resident-neighbor faces
+are reconciled; only boundary reconciliation, removal cleanup and interactive edits use the
+existing incremental path. One initial-light worker is the default, coordinated
+with three mesh, one load and one generation worker for six compute-heavy workers on an
+eight-logical-CPU host; save workers are separate and I/O-oriented. A headless sweep found only a modest throughput gain from 2–4 initial-light workers,
+while per-column worker elapsed increased, so one remains the default. This policy is provisional
+until the same route is measured on AMD Vega 8/Vulkan. Order tests compare A→B, B→A and simultaneous
+availability, including a seam emitter, against synchronous lighting.
+
+## D-039 — Streaming application yields to event processing
+
+Status: accepted as a responsiveness safeguard; target-hardware acceptance remains open.
+
+Async workers do not guarantee a responsive client if result application is monopolizing the
+event-loop thread. Per callback, input/event dispatch runs before optional streaming work. The
+initial implementation shared one 2 ms wall-time budget across result application, boundary light,
+snapshot synchronization and mesh scheduling. That kept the event loop responsive but exposed
+render-ready starvation: early work and 20 Hz fixed-tick servicing could defer later presentation
+stages. See D-040 for the revised staged policy and M4-011 acceptance.
+
+## D-040 — Reserve fair per-turn service for visible streaming stages
+
+Status: accepted for M4-011 and the automatic streaming acceptance path.
+
+Streaming service runs after fixed-step/input processing on each event-loop turn, not only on a
+simulation tick. The existing total 2 ms soft budget is divided into ordered windows for critical
+completed-result application, boundary lighting, snapshot synchronization and mesh submission.
+Each stage has its own deadline, so an earlier stage cannot consume every later stage's allowance.
+Mesh upload-ready results continue to receive a per-render allowance and prefer camera-forward
+sections within the same urgency ring. Initial resident mesh jobs are seeded in urgency/distance
+order rather than coordinate order. Locally complete initial-light columns may be presented before
+cross-column boundary reconciliation; the later correction remains authoritative and invalidates
+only light-changed sections. The bounded boundary queue is sized to 256 for the supported radius-6
+sweep and is reprioritized before queued work starts. Queued lighting work outside retention
+is cancellable and does not pin columns; active reconciliation still completes atomically. Within every expensive
+content/presentation queue, urgency classes dominate lookahead:
+REQUIRED is the 3x3 safety core, VISIBLE is the next inner ring, and PREFETCH is the remainder.
+Age is diagnostic and must not promote prefetch above required/visible work. Stage skip, starvation,
+skip, dependency-block, starvation and backlog-age counters plus a forward-facing F3 frontier state
+expose scheduling behavior; waiting on a full prerequisite queue is reported as dependency blocking,
+not scheduler starvation.
+The individual snapshot copy or indivisible light operation can still exceed its soft slice; the
+same-device frame and terrain-arrival measurements decide whether that work needs further
+subdivision/offload.
+
+## D-041 — Streaming area geometry and safety are explicit
+
+Status: accepted for M4 local streaming.
+
+Euclidean membership (29/49/81/113 columns at radii 3/4/5/6) made the old edge look irregular and
+provided unequal cardinal and diagonal reach. Manhattan membership (25/41/61/85) makes a visible
+diamond and the weakest cardinal margin. Chebyshev membership (49/81/121/169) costs explicit corner
+columns but provides a predictable square and a simple guaranteed travel margin, so Desired and
+Retained use Chebyshev distance. The selected normal default is load radius 4 and retain radius 5.
+
+Authoritative residency no longer implies simulation availability. A complete centered 3x3 must
+be both locally authoritative and render-ready before control starts. Thereafter Safe grows only
+by complete 3x3 neighborhoods overlapping the existing connected Safe set. Visible is presentation
+readiness and may lead Safe; Safe can never lead Visible. Retained is radius hysteresis plus explicit
+persistence, active-light and entity pins, none of which alter the player frontier. Boundary light
+is eventual convergence and may remesh changed sections without gating collision or presentation.

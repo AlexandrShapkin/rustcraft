@@ -5,14 +5,14 @@ use rustcraft_bot_api::{BOT_API_VERSION, NearbyBlockObservation, Observation, Se
 use rustcraft_content::ContentManifest;
 use rustcraft_engine_core::{Aabb, BlockId, BlockPos, ChunkPos, Vec3, World, split_block};
 use rustcraft_mod_api::{BlockRegistry, GameplayModule, ModuleId, RegistrationError};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 pub mod inventory;
 pub mod lighting;
 pub mod metrics;
 pub mod survival;
 use inventory::Inventory;
 use inventory::ItemStack;
-use lighting::{Lighting, dirty_neighbors};
+use lighting::{InitialLightingResult, Lighting, dirty_neighbors};
 use survival::{GameMode, ItemEntity, RecipeRegistry, tool_speed};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,6 +52,8 @@ pub struct Simulation {
     pub time: u64,
     dirty_chunks: HashSet<ChunkPos>,
     dirty_sections: HashSet<rustcraft_engine_core::SectionPos>,
+    pending_light_sections: HashMap<ChunkPos, Vec<i32>>,
+    prelit_columns: HashSet<ChunkPos>,
     persistence_dirty_chunks: HashSet<ChunkPos>,
     pub inventory: Inventory,
     pub lighting: Lighting,
@@ -110,6 +112,8 @@ impl Simulation {
             time: 0,
             dirty_chunks,
             dirty_sections,
+            pending_light_sections: HashMap::new(),
+            prelit_columns: HashSet::new(),
             persistence_dirty_chunks: HashSet::new(),
             inventory: Inventory::default(),
             lighting,
@@ -141,6 +145,234 @@ impl Simulation {
     }
     pub fn take_dirty_sections(&mut self) -> Vec<rustcraft_engine_core::SectionPos> {
         self.dirty_sections.drain().collect()
+    }
+
+    /// Atomically publish a fully loaded/generated column into the authoritative world, extend
+    /// derived lighting, and invalidate local/boundary render snapshots. `persist_new` marks new
+    /// generated data dirty independently from its renderer state.
+    pub fn publish_column(
+        &mut self,
+        position: ChunkPos,
+        sections: Vec<(i32, rustcraft_engine_core::Chunk)>,
+        persist_new: bool,
+    ) -> Result<(), &'static str> {
+        let section_ys = sections.iter().map(|(y, _)| *y).collect::<Vec<_>>();
+        self.world.publish_column(position, sections)?;
+        self.lighting.integrate_column(
+            &mut self.world,
+            &self.registry,
+            position,
+            section_ys.clone(),
+            &mut self.dirty_sections,
+        );
+        self.mark_column_render_dirty(position, section_ys);
+        if persist_new {
+            self.persistence_dirty_chunks.insert(position);
+        }
+        Ok(())
+    }
+
+    /// Publish voxel data immediately but spread derived-light integration over bounded ticks.
+    /// A bounded queue lets nearby ready columns become available without waiting for another
+    /// column's light propagation; each integration still converges incrementally.
+    pub fn publish_column_incremental_lighting(
+        &mut self,
+        position: ChunkPos,
+        sections: Vec<(i32, rustcraft_engine_core::Chunk)>,
+        persist_new: bool,
+    ) -> Result<(), &'static str> {
+        let section_ys = sections.iter().map(|(y, _)| *y).collect::<Vec<_>>();
+        if !section_ys.is_empty() && !self.lighting.can_queue_column_integration(position) {
+            return Err("column lighting queue is full");
+        }
+        self.world.publish_column(position, sections)?;
+        if section_ys.is_empty() {
+            self.mark_column_render_dirty(position, section_ys);
+            if persist_new {
+                self.persistence_dirty_chunks.insert(position);
+            }
+            return Ok(());
+        }
+        if !self
+            .lighting
+            .queue_column_integration(position, section_ys.clone())
+        {
+            return Err("column lighting queue is full");
+        }
+        if persist_new {
+            self.persistence_dirty_chunks.insert(position);
+        }
+        self.pending_light_sections
+            .insert(position, section_ys.clone());
+        Ok(())
+    }
+
+    /// Atomically publish a column whose bulk initial lighting was built off-thread. Only the
+    /// small resident-neighbor boundary reconciliation remains in the incremental lighting path.
+    pub fn publish_initial_lit_column(
+        &mut self,
+        mut result: InitialLightingResult,
+        persist_new: bool,
+    ) -> Result<(), &'static str> {
+        let position = result.position;
+        let section_ys = result.sections.iter().map(|(y, _)| *y).collect::<Vec<_>>();
+        self.world
+            .publish_column(position, std::mem::take(&mut result.sections))?;
+        for (section_y, lights) in result.light_sections {
+            self.world
+                .replace_section_lights(position, section_y, lights)
+                .map_err(|_| "initial lighting returned an invalid section length")?;
+        }
+        self.lighting
+            .adopt_initial_column(position, section_ys.clone(), result.direct_sections);
+        if persist_new {
+            self.persistence_dirty_chunks.insert(position);
+        }
+        self.pending_light_sections
+            .insert(position, section_ys.clone());
+        // Bulk initial lighting is already complete and locally self-consistent. Make this
+        // column available to presentation now; cross-column boundary correction will invalidate
+        // only sections whose light actually changes when that bounded work finishes.
+        self.prelit_columns.insert(position);
+        self.mark_column_render_dirty(position, section_ys);
+        Ok(())
+    }
+
+    /// Advance streamed-column lighting by no more than the requested voxel work units.
+    /// Bulk-initialized columns may already have a locally-lit first mesh; the dirty set here is
+    /// the precise boundary-light patch to remesh after reconciliation converges.
+    pub fn advance_column_lighting(&mut self, budget: usize) -> Option<ChunkPos> {
+        let position = self.lighting.integrating_column()?;
+        if self.lighting.advance_column_integration(
+            &mut self.world,
+            &self.registry,
+            &mut self.dirty_sections,
+            budget,
+        ) {
+            let section_ys = self
+                .pending_light_sections
+                .remove(&position)
+                .unwrap_or_default();
+            if !self.prelit_columns.remove(&position) {
+                self.mark_column_render_dirty(position, section_ys);
+            }
+            Some(position)
+        } else {
+            None
+        }
+    }
+
+    fn mark_column_render_dirty(&mut self, position: ChunkPos, section_ys: Vec<i32>) {
+        for y in section_ys {
+            self.dirty_sections.insert((position, y));
+            for neighbor in [
+                ChunkPos {
+                    x: position.x - 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x + 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z - 1,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z + 1,
+                },
+            ] {
+                if self.world.column_available(neighbor) {
+                    self.dirty_sections.insert((neighbor, y));
+                }
+            }
+        }
+    }
+
+    /// Remove a no-longer-retained clean column and invalidate its own plus adjacent section
+    /// snapshots so page meshes cannot outlive world residency.
+    pub fn remove_column(
+        &mut self,
+        position: ChunkPos,
+    ) -> Vec<(i32, rustcraft_engine_core::Chunk)> {
+        let removed = self.world.remove_column(position);
+        self.prelit_columns.remove(&position);
+        self.pending_light_sections.remove(&position);
+        self.lighting.remove_column_from_world(
+            &mut self.world,
+            &self.registry,
+            position,
+            &mut self.dirty_sections,
+        );
+        for (y, _) in &removed {
+            self.dirty_sections.insert((position, *y));
+            for neighbor in [
+                ChunkPos {
+                    x: position.x - 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x + 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z - 1,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z + 1,
+                },
+            ] {
+                if self.world.column_available(neighbor) {
+                    self.dirty_sections.insert((neighbor, *y));
+                }
+            }
+        }
+        removed
+    }
+
+    /// Evict voxel residency immediately and schedule neighbor light cleanup incrementally.
+    pub fn remove_column_incremental_lighting(
+        &mut self,
+        position: ChunkPos,
+    ) -> Result<Vec<(i32, rustcraft_engine_core::Chunk)>, &'static str> {
+        if !self.lighting.queue_column_removal(position) {
+            return Err("column is being lit or lighting cleanup queue is full");
+        }
+        self.prelit_columns.remove(&position);
+        self.pending_light_sections.remove(&position);
+        let removed = self.world.remove_column(position);
+        if removed.is_empty() {
+            self.lighting.remove_column(position);
+        }
+        for (y, _) in &removed {
+            self.dirty_sections.insert((position, *y));
+            for neighbor in [
+                ChunkPos {
+                    x: position.x - 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x + 1,
+                    z: position.z,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z - 1,
+                },
+                ChunkPos {
+                    x: position.x,
+                    z: position.z + 1,
+                },
+            ] {
+                if self.world.column_available(neighbor) {
+                    self.dirty_sections.insert((neighbor, *y));
+                }
+            }
+        }
+        Ok(removed)
     }
     pub fn dirty_section_count(&self) -> usize {
         self.dirty_sections.len()
@@ -309,6 +541,9 @@ impl Simulation {
     }
     #[must_use]
     pub fn break_block(&mut self, position: BlockPos) -> bool {
+        if !self.world.column_available(split_block(position).0) {
+            return false;
+        }
         if !self
             .registry
             .get(self.world.get(position))
@@ -340,6 +575,9 @@ impl Simulation {
     }
     #[must_use]
     pub fn place_block(&mut self, position: BlockPos, block: BlockId) -> bool {
+        if !self.world.column_available(split_block(position).0) {
+            return false;
+        }
         let Some(definition) = self.registry.get(block) else {
             return false;
         };
@@ -696,6 +934,131 @@ mod tests {
             (sim.player.position.y - 1.0).abs() < 0.01,
             "y={}",
             sim.player.position.y
+        );
+    }
+
+    #[test]
+    fn streamed_world_frontier_blocks_movement_and_interactions_until_publish() {
+        let mut registry = BlockRegistry::default();
+        registry.register(STONE).unwrap();
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 15, y: 0, z: 0 }, STONE.id);
+        world.enforce_column_availability(true);
+        let mut sim = Simulation::new(world, registry, Vec3::new(15.4, 1.0, 0.5));
+        for _ in 0..20 {
+            sim.step(
+                AgentIntent {
+                    movement: MoveIntent {
+                        forward: 0.0,
+                        strafe: -1.0,
+                    },
+                    ..Default::default()
+                },
+                0.05,
+            );
+        }
+        assert!(sim.player.position.x + sim.player.half_width <= 16.01);
+        assert!(!sim.break_block(BlockPos { x: 16, y: 0, z: 0 }));
+        assert!(
+            sim.publish_column(ChunkPos { x: 1, z: 0 }, Vec::new(), false)
+                .is_ok()
+        );
+        sim.step(
+            AgentIntent {
+                movement: MoveIntent {
+                    forward: 0.0,
+                    strafe: -1.0,
+                },
+                ..Default::default()
+            },
+            0.05,
+        );
+        assert!(sim.player.position.x + sim.player.half_width <= 16.01);
+        assert!(sim.world.set_column_safe(ChunkPos { x: 1, z: 0 }, true));
+        sim.step(
+            AgentIntent {
+                movement: MoveIntent {
+                    forward: 0.0,
+                    strafe: -1.0,
+                },
+                ..Default::default()
+            },
+            0.05,
+        );
+        assert!(sim.player.position.x > 15.4);
+    }
+
+    #[test]
+    fn queued_lighting_columns_cannot_be_evicted_before_convergence() {
+        let mut registry = BlockRegistry::default();
+        registry.register(STONE).unwrap();
+        let mut world = World::new(BlockId(0));
+        let first = ChunkPos { x: 0, z: 0 };
+        let second = ChunkPos { x: 1, z: 0 };
+        let third = ChunkPos { x: 2, z: 0 };
+        world
+            .publish_column(
+                first,
+                vec![(0, rustcraft_engine_core::Chunk::new(BlockId(0)))],
+            )
+            .unwrap();
+        let mut sim = Simulation::new(world, registry, Vec3::new(0.5, 2.0, 0.5));
+        for column in [second, third] {
+            sim.publish_column_incremental_lighting(
+                column,
+                vec![(0, rustcraft_engine_core::Chunk::new(BlockId(0)))],
+                false,
+            )
+            .unwrap();
+        }
+        assert!(sim.lighting.has_integration_work());
+        assert!(sim.remove_column_incremental_lighting(second).is_err());
+        assert!(
+            !sim.remove_column_incremental_lighting(first)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !sim.world
+                .section_positions()
+                .any(|(column, _)| column == first)
+        );
+        assert!(sim.lighting.has_integration_work());
+    }
+
+    #[test]
+    fn streamed_column_is_not_remeshed_until_bounded_lighting_finishes() {
+        let mut world = World::new(BlockId(0));
+        let first = ChunkPos { x: 0, z: 0 };
+        world
+            .publish_column(
+                first,
+                vec![(0, rustcraft_engine_core::Chunk::new(BlockId(0)))],
+            )
+            .unwrap();
+        let mut sim = Simulation::new(world, BlockRegistry::default(), Vec3::new(0.5, 2.0, 0.5));
+        sim.take_dirty_sections();
+        let second = ChunkPos { x: 1, z: 0 };
+        sim.publish_column_incremental_lighting(
+            second,
+            vec![(0, rustcraft_engine_core::Chunk::new(BlockId(0)))],
+            false,
+        )
+        .unwrap();
+        assert!(sim.take_dirty_sections().is_empty());
+        let mut completed = false;
+        for _ in 0..32 {
+            if sim.advance_column_lighting(16_384).is_some() {
+                completed = true;
+                break;
+            }
+        }
+        assert!(completed, "column lighting should converge in bounded work");
+        let dirty = sim.take_dirty_sections();
+        assert!(dirty.contains(&(second, 0)));
+        assert!(
+            dirty.len() <= 20,
+            "one-section column invalidation: {dirty:?}"
         );
     }
 

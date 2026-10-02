@@ -23,6 +23,8 @@ fn main() {
         run_worldgen_bench();
     } else if std::env::args().any(|arg| arg == "--persistence-bench") {
         run_persistence_bench();
+    } else if std::env::args().any(|arg| arg == "--world-stream-bench") {
+        run_world_stream_bench();
     } else if smoke {
         run_smoke();
     } else if std::env::args().any(|arg| arg == "--survival") {
@@ -157,6 +159,436 @@ fn run_persistence_bench() {
     );
     drop(storage);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+fn drain_stream_lighting(simulation: &mut Simulation) -> (f64, f64) {
+    use std::time::Instant;
+    let mut total_ms = 0.0;
+    let mut max_step_ms: f64 = 0.0;
+    while simulation.lighting.has_integration_work() {
+        let started = Instant::now();
+        let _ = simulation.advance_column_lighting(4_096);
+        let step_ms = started.elapsed().as_secs_f64() * 1000.0;
+        total_ms += step_ms;
+        max_step_ms = max_step_ms.max(step_ms);
+        let _ = simulation.take_dirty_sections();
+    }
+    (total_ms, max_step_ms)
+}
+
+fn run_world_stream_bench() {
+    use rustcraft_runtime::lighting::InitialLightingScheduler;
+    use rustcraft_world::{
+        ChunkGenerator, ChunkLoadScheduler, GenerationScheduler, PersistenceDirtyTracker,
+        ResidencyPhase, SemanticBlockResolver, WorldResidency, WorldStorage,
+    };
+    use std::{
+        collections::HashSet,
+        sync::Arc,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    let seed = 731_173;
+    let generator: Arc<dyn ChunkGenerator> =
+        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld());
+    let resolver: Arc<dyn SemanticBlockResolver> =
+        Arc::new(rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver);
+    let root = std::env::temp_dir().join(format!(
+        "rustcraft-m4-stream-bench-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let storage = WorldStorage::open(&root, "stream").unwrap();
+    let profile = rustcraft_minecraft_b173::compile_profile().unwrap();
+    let mut bootstrap = RuntimeBootstrap::new(Default::default());
+    bootstrap.register_module(&BlocksModule).unwrap();
+    let mut simulation = Simulation::new(
+        World::new(profile.default_state().block),
+        bootstrap.registry,
+        Vec3::new(0.0, 100.0, 0.0),
+    );
+    let light_work_start = simulation.lighting.work_counters();
+    simulation.world.enforce_column_availability(true);
+    let mut residency = WorldResidency::new(1, 1);
+    // Radius one is a complete 3x3 Chebyshev square, so every stage must admit all nine critical
+    // columns without letting an outer/speculative workload consume their bounded capacity.
+    let mut loads = ChunkLoadScheduler::new(1, 9);
+    let mut generations = GenerationScheduler::new(1, 9);
+    let light_workers = std::env::var("RUSTCRAFT_LIGHT_WORKERS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 4);
+    let mut initial_lighting = InitialLightingScheduler::new(light_workers, 9);
+    let initial_lighting_registry = Arc::new(simulation.registry.clone());
+    let mut initial_lighting_submitted = 0usize;
+    let mut initial_lighting_completed_total = 0usize;
+    let mut initial_lighting_queue_wait_ms = 0.0;
+    let mut initial_lighting_worker_ms = 0.0;
+    let mut initial_light_direct_voxels = 0u64;
+    let mut initial_light_emitters = 0u64;
+    let mut initial_light_propagation_nodes = 0u64;
+    let mut initial_light_queue_samples = Vec::new();
+    let mut initial_light_service_samples = Vec::new();
+    let mut max_initial_lighting_backlog = 0usize;
+    let mut dirty = PersistenceDirtyTracker::default();
+    let edited_columns = [
+        (
+            ChunkPos { x: -8, z: 0 },
+            BlockPos {
+                x: -127,
+                y: 100,
+                z: 1,
+            },
+        ),
+        (
+            ChunkPos { x: 4, z: 0 },
+            BlockPos {
+                x: 65,
+                y: 100,
+                z: 1,
+            },
+        ),
+    ];
+    let mut generated_edits = HashSet::new();
+    let mut modified_edits = HashSet::new();
+    let mut revisited_edits = HashSet::new();
+    let mut load_hits = 0usize;
+    let mut load_misses = 0usize;
+    let mut generated_count = 0usize;
+    let mut evictions = 0usize;
+    let mut saved_before_evict = 0usize;
+    let mut max_resident = 0usize;
+    let mut max_pending = 0usize;
+    let mut load_ms = 0.0;
+    let mut generation_ms = 0.0;
+    let mut publication_ms = 0.0;
+    let mut publication_max_ms: f64 = 0.0;
+    let mut max_lighting_queue = 0usize;
+    let started = Instant::now();
+
+    let mut path = (-8..=16).map(|x| ChunkPos { x, z: 0 }).collect::<Vec<_>>();
+    path.extend((-5..=15).rev().map(|x| ChunkPos { x, z: 0 }));
+    path.extend((-4..=16).map(|x| ChunkPos { x, z: 0 }));
+    path.extend((-8..=15).rev().map(|x| ChunkPos { x, z: 0 }));
+
+    for center in path.iter().copied() {
+        let resident = simulation.world.column_positions().collect::<HashSet<_>>();
+        let plan = residency.update(center, &resident, &HashSet::new());
+        let requests = plan.requests;
+        for request in requests.iter().copied() {
+            residency.set_phase(request, ResidencyPhase::Loading);
+            loads
+                .submit(storage.clone(), request, resolver.clone())
+                .expect("bounded stream benchmark load queue");
+        }
+        let load_metrics = loads.metrics();
+        max_pending = max_pending.max(load_metrics.queued + load_metrics.in_flight);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut loaded_done = 0usize;
+        let mut generated_expected = 0usize;
+        while loaded_done < requests.len() {
+            for completion in loads.take_ready(requests.len()) {
+                loaded_done += 1;
+                load_ms += completion.load_ms;
+                if !residency.is_current(completion.request) {
+                    continue;
+                }
+                match completion.result.expect("stream chunk load succeeded") {
+                    Some(sections) => {
+                        initial_lighting
+                            .submit(rustcraft_runtime::lighting::InitialLightingRequest {
+                                position: completion.request.position,
+                                token: completion.request.token,
+                                priority: residency.priority_key(completion.request.position),
+                                default_block: simulation.world.empty_block(),
+                                sections,
+                                registry: initial_lighting_registry.clone(),
+                                persist_new: false,
+                            })
+                            .unwrap();
+                        initial_lighting_submitted += 1;
+                        max_initial_lighting_backlog =
+                            max_initial_lighting_backlog.max(initial_lighting.outstanding());
+                        load_hits += 1;
+                    }
+                    None => {
+                        residency.set_phase(completion.request, ResidencyPhase::Generating);
+                        generations
+                            .request(
+                                generator.clone(),
+                                seed,
+                                completion.request.position,
+                                completion.request.token,
+                            )
+                            .expect("bounded stream benchmark generation queue");
+                        let generation_metrics = generations.metrics();
+                        let load_metrics = loads.metrics();
+                        max_pending = max_pending.max(
+                            load_metrics.queued
+                                + load_metrics.in_flight
+                                + generation_metrics.pending
+                                + generation_metrics.in_flight,
+                        );
+                        generated_expected += 1;
+                        load_misses += 1;
+                    }
+                }
+            }
+            if loaded_done < requests.len() {
+                assert!(Instant::now() < deadline, "stream load timed out");
+                std::thread::yield_now();
+            }
+        }
+        let mut generated_done = 0usize;
+        while generated_done < generated_expected {
+            for result in generations.take_ready() {
+                let request = rustcraft_world::ResidencyRequest {
+                    position: result.position,
+                    token: result.generation,
+                };
+                if !residency.is_current(request) {
+                    continue;
+                }
+                let sections = result.sections.expect("stream generation succeeded");
+                generation_ms += result.generation_ms;
+                if edited_columns
+                    .iter()
+                    .any(|(position, _)| *position == result.position)
+                {
+                    generated_edits.insert(result.position);
+                }
+                initial_lighting
+                    .submit(rustcraft_runtime::lighting::InitialLightingRequest {
+                        position: result.position,
+                        token: result.generation,
+                        priority: residency.priority_key(result.position),
+                        default_block: simulation.world.empty_block(),
+                        sections,
+                        registry: initial_lighting_registry.clone(),
+                        persist_new: false,
+                    })
+                    .unwrap();
+                initial_lighting_submitted += 1;
+                max_initial_lighting_backlog =
+                    max_initial_lighting_backlog.max(initial_lighting.outstanding());
+                dirty.mark_dirty(result.position);
+                generated_count += 1;
+                generated_done += 1;
+            }
+            assert!(Instant::now() < deadline, "stream generation timed out");
+            std::thread::yield_now();
+        }
+
+        let mut initial_lighting_completed = 0usize;
+        while initial_lighting_completed < initial_lighting_submitted {
+            let completed = initial_lighting.take_ready(8);
+            initial_lighting_completed += completed.len();
+            initial_lighting_completed_total += completed.len();
+            for result in completed {
+                assert!(
+                    result.error.is_none(),
+                    "initial lighting failed: {:?}",
+                    result.error
+                );
+                initial_lighting_queue_wait_ms += result.queue_wait_ms;
+                initial_lighting_worker_ms += result.worker_elapsed_ms;
+                initial_light_queue_samples.push(result.queue_wait_ms);
+                initial_light_service_samples.push(result.worker_elapsed_ms);
+                initial_light_direct_voxels += result.work_counters.direct_voxels_scanned;
+                initial_light_emitters += result.work_counters.emitters_found;
+                initial_light_propagation_nodes += result.work_counters.propagation_queue_pops;
+                let position = result.position;
+                let token = result.token;
+                if !residency.is_current(rustcraft_world::ResidencyRequest { position, token }) {
+                    continue;
+                }
+                simulation
+                    .publish_initial_lit_column(result, false)
+                    .unwrap();
+                max_lighting_queue =
+                    max_lighting_queue.max(simulation.lighting.integration_columns().len());
+                residency.published(position, token);
+                if modified_edits.contains(&position) {
+                    let (_, block) = edited_columns
+                        .iter()
+                        .find(|(edit_position, _)| *edit_position == position)
+                        .expect("modified stream column has an edit definition");
+                    assert_eq!(
+                        simulation.world.state(*block).block,
+                        STONE.id,
+                        "edited block did not survive async residency reload"
+                    );
+                    revisited_edits.insert(position);
+                }
+            }
+            if initial_lighting_completed < initial_lighting_submitted {
+                assert!(Instant::now() < deadline, "initial lighting timed out");
+                std::thread::yield_now();
+            }
+        }
+        initial_lighting_submitted = 0;
+
+        let (step_total, step_max) = drain_stream_lighting(&mut simulation);
+        publication_ms += step_total;
+        publication_max_ms = publication_max_ms.max(step_max);
+
+        if generated_edits.contains(&center) && modified_edits.insert(center) {
+            let (_, block) = edited_columns
+                .iter()
+                .find(|(position, _)| *position == center)
+                .expect("generated stream column has an edit definition");
+            simulation
+                .world
+                .set_state(*block, rustcraft_engine_core::BlockState::new(STONE.id));
+            dirty.mark_dirty(center);
+        }
+
+        let resident = simulation.world.column_positions().collect::<HashSet<_>>();
+        let eviction_plan = residency.update(center, &resident, &HashSet::new());
+        for position in eviction_plan.evict {
+            if dirty.is_dirty(position) {
+                let token = dirty.begin_save(position).expect("dirty save token");
+                let sections = simulation
+                    .world
+                    .section_positions()
+                    .filter(|(candidate, _)| *candidate == position)
+                    .filter_map(|(_, y)| {
+                        simulation
+                            .world
+                            .section(position, y)
+                            .cloned()
+                            .map(|chunk| (y, chunk))
+                    })
+                    .collect::<Vec<_>>();
+                let stored =
+                    WorldStorage::encode_runtime_chunk(position, sections, resolver.as_ref())
+                        .unwrap();
+                storage.store_chunk(&stored).unwrap();
+                dirty.complete_save(token, true);
+                saved_before_evict += 1;
+            }
+            assert!(
+                !dirty.is_dirty(position),
+                "dirty column evicted before save"
+            );
+            let _ = simulation.remove_column_incremental_lighting(position);
+            let (step_total, step_max) = drain_stream_lighting(&mut simulation);
+            publication_ms += step_total;
+            publication_max_ms = publication_max_ms.max(step_max);
+            residency.evicted(position);
+            evictions += 1;
+        }
+        max_resident = max_resident.max(simulation.world.chunk_count());
+        let load_metrics = loads.metrics();
+        let generation_metrics = generations.metrics();
+        max_pending = max_pending.max(
+            load_metrics.queued
+                + load_metrics.in_flight
+                + generation_metrics.pending
+                + generation_metrics.in_flight,
+        );
+    }
+
+    assert_eq!(generated_edits.len(), edited_columns.len());
+    assert_eq!(modified_edits.len(), edited_columns.len());
+    assert_eq!(revisited_edits.len(), edited_columns.len());
+    for (position, block) in edited_columns {
+        let persisted = storage
+            .load_runtime_chunk(position, resolver.as_ref())
+            .unwrap();
+        let restored = persisted
+            .iter()
+            .find(|(y, _)| *y == block.y.div_euclid(16))
+            .unwrap()
+            .1
+            .state((1, 4, 1));
+        assert_eq!(
+            restored.block, STONE.id,
+            "edit did not survive eviction/reload"
+        );
+    }
+    let generated_again = generator.generate(seed, ChunkPos { x: 4, z: 2 }).unwrap();
+    let sample_chunk_state_hash = canonical_chunk_hash(&generated_again);
+    let light_work_end = simulation.lighting.work_counters();
+    let render_dirty_sections = simulation.take_dirty_sections().len();
+    let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+    storage.flush().unwrap();
+    println!(
+        "world-stream-bench profile={} centers={} generated={} loaded={} misses={} load_workers=1 generation_workers=1 initial_light_workers={} max_resident={} max_pending_inflight={} max_initial_light_backlog={} max_lighting_boundary_queue={} evicted={} save_before_evict={} load_ms={:.3} worker_generation_ms={:.3} initial_light_jobs={} initial_light_queue_wait_sum_ms={:.3} initial_light_queue_p50/p95/max_ms={:?} initial_light_worker_elapsed_sum_ms={:.3} initial_light_worker_p50/p95/max_ms={:?} initial_light_columns_per_sec={:.2} initial_light_direct_voxels={} initial_light_emitters={} initial_light_propagation_nodes={} publication_ms={:.3} publication_max_ms={:.3} boundary_light_scanned={} boundary={} boundary_qpush/pop={}/{} boundary_light_writes={} light_dirty_sections={} render_dirty_sections={} wall_ms={:.3} separated_revisit_edits={} negative_coordinates=ok sample_chunk_state_hash={}",
+        if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "release"
+        },
+        path.len(),
+        generated_count,
+        load_hits,
+        load_misses,
+        light_workers,
+        max_resident,
+        max_pending,
+        max_initial_lighting_backlog,
+        max_lighting_queue,
+        evictions,
+        saved_before_evict,
+        load_ms,
+        generation_ms,
+        initial_lighting_completed_total,
+        initial_lighting_queue_wait_ms,
+        latency_summary(&mut initial_light_queue_samples),
+        initial_lighting_worker_ms,
+        latency_summary(&mut initial_light_service_samples),
+        initial_lighting_completed_total as f64 / started.elapsed().as_secs_f64().max(0.001),
+        initial_light_direct_voxels,
+        initial_light_emitters,
+        initial_light_propagation_nodes,
+        publication_ms,
+        publication_max_ms,
+        light_work_end
+            .direct_voxels_scanned
+            .saturating_sub(light_work_start.direct_voxels_scanned),
+        light_work_end
+            .boundary_voxels_inspected
+            .saturating_sub(light_work_start.boundary_voxels_inspected),
+        light_work_end
+            .propagation_queue_pushes
+            .saturating_sub(light_work_start.propagation_queue_pushes),
+        light_work_end
+            .propagation_queue_pops
+            .saturating_sub(light_work_start.propagation_queue_pops),
+        light_work_end
+            .light_writes
+            .saturating_sub(light_work_start.light_writes),
+        light_work_end
+            .dirty_section_insertions
+            .saturating_sub(light_work_start.dirty_section_insertions),
+        render_dirty_sections,
+        elapsed,
+        revisited_edits.len(),
+        sample_chunk_state_hash,
+    );
+    drop(loads);
+    drop(generations);
+    drop(storage);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn latency_summary(samples: &mut [f64]) -> Option<[f64; 3]> {
+    if samples.is_empty() {
+        return None;
+    }
+    samples.sort_by(f64::total_cmp);
+    let percentile = |p: f64| {
+        let index = ((samples.len() as f64 * p).ceil() as usize)
+            .saturating_sub(1)
+            .min(samples.len() - 1);
+        samples[index]
+    };
+    Some([percentile(0.5), percentile(0.95), *samples.last().unwrap()])
 }
 
 fn run_world_roundtrip() {

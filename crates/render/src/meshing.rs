@@ -28,6 +28,7 @@ struct MeshJob {
     section: SectionPos,
     generation: u64,
     snapshot: RenderChunk,
+    enqueued_at: Instant,
 }
 
 #[derive(Debug)]
@@ -35,7 +36,9 @@ pub struct CompletedMesh {
     pub section: SectionPos,
     pub generation: u64,
     pub pages: Vec<PageMesh>,
+    pub queue_wait_ms: f64,
     pub mesh_ms: f64,
+    pub completed_at: Instant,
 }
 
 impl CompletedMesh {
@@ -90,6 +93,8 @@ impl WorkerPool {
                             };
                             let Ok(job) = job else { break };
                             let started = Instant::now();
+                            let queue_wait_ms =
+                                started.duration_since(job.enqueued_at).as_secs_f64() * 1000.0;
                             let section = job.section;
                             let generation = job.generation;
                             let outcome = catch_unwind(AssertUnwindSafe(|| {
@@ -100,7 +105,9 @@ impl WorkerPool {
                                     section,
                                     generation,
                                     pages,
+                                    queue_wait_ms,
                                     mesh_ms: started.elapsed().as_secs_f64() * 1000.0,
+                                    completed_at: Instant::now(),
                                 }),
                                 Err(_) => WorkerResult::Failed {
                                     section,
@@ -173,6 +180,13 @@ pub struct MeshScheduler {
     counters: MeshingStats,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnMeshStage {
+    Pending,
+    InFlight,
+    UploadPending,
+}
+
 impl MeshScheduler {
     #[must_use]
     pub fn new<R>(worker_count: usize, queue_capacity: usize, resolver: R) -> Self
@@ -199,6 +213,7 @@ impl MeshScheduler {
             section,
             generation,
             snapshot,
+            enqueued_at: Instant::now(),
         };
         if self.in_flight.contains_key(&section) {
             self.counters.mesh_jobs_coalesced += 1;
@@ -291,6 +306,7 @@ impl MeshScheduler {
     pub fn take_ready(
         &mut self,
         camera: Vec3,
+        view_forward: Vec3,
         max_sections: usize,
         max_bytes: usize,
     ) -> Vec<CompletedMesh> {
@@ -303,15 +319,52 @@ impl MeshScheduler {
                 false
             }
         });
+        let forward_length = (view_forward.x * view_forward.x
+            + view_forward.y * view_forward.y
+            + view_forward.z * view_forward.z)
+            .sqrt();
+        let forward = if forward_length > 1.0e-5 {
+            Vec3::new(
+                view_forward.x / forward_length,
+                view_forward.y / forward_length,
+                view_forward.z / forward_length,
+            )
+        } else {
+            Vec3::ZERO
+        };
         self.ready.sort_by(|a, b| {
-            let distance = |result: &CompletedMesh| {
+            let key = |result: &CompletedMesh| {
                 let x = result.section.0.x as f32 * 16.0 + 8.0 - camera.x;
                 let y = result.section.1 as f32 * 16.0 + 8.0 - camera.y;
                 let z = result.section.0.z as f32 * 16.0 + 8.0 - camera.z;
-                x * x + y * y + z * z
+                let distance_squared = x * x + y * y + z * z;
+                // Keep the immediate safety core ahead of ordinary visible and
+                // prefetch work, then prefer ready sections in the view direction.
+                let urgency = if distance_squared <= 2_000.0 {
+                    0
+                } else if distance_squared <= 16_000.0 {
+                    1
+                } else {
+                    2
+                };
+                let distance = distance_squared.sqrt();
+                let alignment = if distance > 1.0e-5 {
+                    (x * forward.x + y * forward.y + z * forward.z) / distance
+                } else {
+                    0.0
+                };
+                // A bounded directional discount breaks same-ring ties without
+                // allowing a distant speculative result to outrank nearby work.
+                let directional_distance = distance - alignment * distance.min(64.0) * 0.35;
+                (urgency, directional_distance, distance_squared)
             };
-            distance(a)
-                .total_cmp(&distance(b))
+            let a_key = key(a);
+            let b_key = key(b);
+            a_key
+                .0
+                .cmp(&b_key.0)
+                .then_with(|| a_key.1.total_cmp(&b_key.1))
+                .then_with(|| a_key.2.total_cmp(&b_key.2))
                 .then_with(|| a.section.0.x.cmp(&b.section.0.x))
                 .then_with(|| a.section.0.z.cmp(&b.section.0.z))
                 .then_with(|| a.section.1.cmp(&b.section.1))
@@ -348,6 +401,19 @@ impl MeshScheduler {
     }
 
     #[must_use]
+    pub fn column_stage(&self, column: rustcraft_engine_core::ChunkPos) -> Option<ColumnMeshStage> {
+        if self.ready.iter().any(|result| result.section.0 == column) {
+            Some(ColumnMeshStage::UploadPending)
+        } else if self.in_flight.keys().any(|section| section.0 == column) {
+            Some(ColumnMeshStage::InFlight)
+        } else if self.pending.keys().any(|section| section.0 == column) {
+            Some(ColumnMeshStage::Pending)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
     pub fn is_idle(&self) -> bool {
         self.pending.is_empty() && self.in_flight.is_empty() && self.ready.is_empty()
     }
@@ -371,12 +437,16 @@ mod tests {
     }
 
     fn snapshot(block_id: u32, section_x: i32) -> RenderChunk {
+        snapshot_at(block_id, section_x, 0)
+    }
+
+    fn snapshot_at(block_id: u32, section_x: i32, section_z: i32) -> RenderChunk {
         let mut world = World::new(BlockId(0));
         world.set(
             BlockPos {
                 x: section_x * 16,
                 y: 0,
-                z: 0,
+                z: section_z * 16,
             },
             BlockId(block_id),
         );
@@ -421,7 +491,7 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(2);
         let completed = loop {
             scheduler.poll();
-            let ready = scheduler.take_ready(Vec3::ZERO, 4, usize::MAX);
+            let ready = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 4, usize::MAX);
             if !ready.is_empty() {
                 break ready;
             }
@@ -506,12 +576,38 @@ mod tests {
         }
         assert_eq!(scheduler.stats().ready, 3);
         let per_section_bytes = scheduler.stats().ready_cpu_bytes / 3;
-        let first = scheduler.take_ready(Vec3::ZERO, 3, per_section_bytes);
+        let first = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 3, per_section_bytes);
         assert_eq!(first.len(), 1);
         assert_eq!(scheduler.stats().ready, 2);
-        let rest = scheduler.take_ready(Vec3::ZERO, 2, usize::MAX);
+        let rest = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 2, usize::MAX);
         assert_eq!(rest.len(), 2);
         assert_eq!(scheduler.stats().ready, 0);
+    }
+
+    #[test]
+    fn ready_mesh_uploads_prefer_camera_forward_within_same_urgency_ring() {
+        let mut scheduler = MeshScheduler::new(3, 3, StaticMaterials);
+        let forward = (rustcraft_engine_core::ChunkPos { x: 1, z: 0 }, 0);
+        let rear = (rustcraft_engine_core::ChunkPos { x: -1, z: 0 }, 0);
+        let lateral = (rustcraft_engine_core::ChunkPos { x: 0, z: 1 }, 0);
+        scheduler.mark_dirty(snapshot_at(1, forward.0.x, forward.0.z));
+        scheduler.mark_dirty(snapshot_at(2, rear.0.x, rear.0.z));
+        scheduler.mark_dirty(snapshot_at(3, lateral.0.x, lateral.0.z));
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while scheduler.stats().mesh_jobs_completed < 3 {
+            scheduler.poll();
+            assert!(Instant::now() < deadline, "meshing did not finish");
+            std::thread::yield_now();
+        }
+        let ready = scheduler.take_ready(
+            Vec3::new(8.0, 8.0, 8.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            1,
+            usize::MAX,
+        );
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].section, forward);
     }
 
     #[test]
@@ -528,7 +624,11 @@ mod tests {
         assert_eq!(scheduler.stats().ready, 1);
 
         assert_eq!(scheduler.mark_dirty(snapshot(2, 0)), 2);
-        assert!(scheduler.take_ready(Vec3::ZERO, 1, usize::MAX).is_empty());
+        assert!(
+            scheduler
+                .take_ready(Vec3::ZERO, Vec3::ZERO, 1, usize::MAX)
+                .is_empty()
+        );
         assert_eq!(scheduler.stats().mesh_jobs_discarded_stale, 1);
 
         while scheduler.stats().mesh_jobs_completed < 2 || scheduler.stats().ready == 0 {
@@ -536,7 +636,7 @@ mod tests {
             assert!(Instant::now() < deadline, "new generation did not finish");
             std::thread::yield_now();
         }
-        let latest = scheduler.take_ready(Vec3::ZERO, 1, usize::MAX);
+        let latest = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 1, usize::MAX);
         assert_eq!(latest.len(), 1);
         assert_eq!(latest[0].section, section);
         assert_eq!(latest[0].generation, 2);
