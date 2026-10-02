@@ -42,6 +42,61 @@ pub fn uv_chart() -> Vec<u8> {
 
 /// Offscreen color/depth attachments are explicit, never a window/surface copy.
 pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Result<(), String> {
+    render_input(scene, None, atlas.map(AtlasInput::Path), output).await
+}
+
+pub async fn render_rgba(
+    scene: &Scene,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    output: &Path,
+) -> Result<(), String> {
+    render_input(
+        scene,
+        None,
+        Some(AtlasInput::Rgba {
+            width,
+            height,
+            rgba,
+        }),
+        output,
+    )
+    .await
+}
+
+/// Multi-page offscreen path used by synthetic renderer contract tests.
+pub async fn render_pages_rgba(
+    scene: &Scene,
+    geometry: &[PageVertices],
+    atlas_pages: &[RgbaTexture],
+    output: &Path,
+) -> Result<(), String> {
+    render_input(
+        scene,
+        Some(geometry),
+        Some(AtlasInput::RgbaPages(atlas_pages)),
+        output,
+    )
+    .await
+}
+
+enum AtlasInput<'a> {
+    Path(&'a Path),
+    Rgba {
+        width: u32,
+        height: u32,
+        rgba: &'a [u8],
+    },
+    RgbaPages(&'a [RgbaTexture]),
+}
+
+async fn render_input(
+    scene: &Scene,
+    page_geometry: Option<&[PageVertices]>,
+    atlas: Option<AtlasInput<'_>>,
+    output: &Path,
+) -> Result<(), String> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
@@ -62,11 +117,31 @@ pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Resul
         adapter.get_info().name,
         adapter.get_info().backend
     );
-    let texture = if let Some(path) = atlas {
-        load_texture(&device, &queue, path)?
-    } else {
-        upload_texture(&device, &queue, 64, 64, &uv_chart())
+    let textures = match atlas {
+        Some(AtlasInput::Path(path)) => vec![load_texture(&device, &queue, path)?],
+        Some(AtlasInput::Rgba {
+            width,
+            height,
+            rgba,
+        }) => vec![upload_texture(&device, &queue, width, height, rgba)],
+        Some(AtlasInput::RgbaPages(pages)) => pages
+            .iter()
+            .map(|page| {
+                upload_texture_with_sampling(
+                    &device,
+                    &queue,
+                    page.width,
+                    page.height,
+                    &page.rgba,
+                    page.sampler,
+                )
+            })
+            .collect(),
+        None => vec![upload_texture(&device, &queue, 64, 64, &uv_chart())],
     };
+    if textures.is_empty() {
+        return Err("offscreen render requires at least one atlas page".into());
+    }
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("shared production shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -78,21 +153,26 @@ pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Resul
         primitive:wgpu::PrimitiveState{cull_mode:scene.cull.then_some(wgpu::Face::Back),..Default::default()},
         depth_stencil:Some(wgpu::DepthStencilState{format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None,
     });
-    let bind = scene.textured.then(|| {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-        })
+    let binds = scene.textured.then(|| {
+        textures
+            .iter()
+            .map(|texture| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                        },
+                    ],
+                })
+            })
+            .collect::<Vec<_>>()
     });
     let size = wgpu::Extent3d {
         width: scene.width,
@@ -119,9 +199,27 @@ pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Resul
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
+    let mut flattened = Vec::new();
+    let mut ranges = Vec::new();
+    if let Some(pages) = page_geometry {
+        for page in pages {
+            if page.texture.0 as usize >= textures.len() {
+                return Err(format!(
+                    "offscreen geometry references missing atlas page {}",
+                    page.texture.0
+                ));
+            }
+            let start = flattened.len() as u32;
+            flattened.extend_from_slice(&page.vertices);
+            ranges.push((page.texture, start..flattened.len() as u32));
+        }
+    } else {
+        flattened.extend_from_slice(&scene.vertices);
+        ranges.push((TextureHandle(0), 0..flattened.len() as u32));
+    }
     let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(&scene.vertices),
+        contents: bytemuck::cast_slice(&flattened),
         usage: wgpu::BufferUsages::VERTEX,
     });
     let stride = (scene.width * 4).div_ceil(256) * 256;
@@ -163,11 +261,13 @@ pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Resul
             occlusion_query_set: None,
         });
         pass.set_pipeline(&pipeline);
-        if let Some(bind) = &bind {
-            pass.set_bind_group(0, bind, &[]);
-        }
         pass.set_vertex_buffer(0, vertices.slice(..));
-        pass.draw(0..scene.vertices.len() as u32, 0..1);
+        for (texture, range) in &ranges {
+            if let Some(binds) = &binds {
+                pass.set_bind_group(0, &binds[texture.0 as usize], &[]);
+            }
+            pass.draw(range.clone(), 0..1);
+        }
     }
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
@@ -218,4 +318,144 @@ pub async fn render(scene: &Scene, atlas: Option<&Path>, output: &Path) -> Resul
         .map_err(|e| e.to_string())?;
     eprintln!("{}", output.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MultiPage;
+    impl BlockTextureResolver for MultiPage {
+        fn texture(&self, block: BlockId, face: Face) -> Option<AtlasRegion> {
+            (block.0 != 0).then(|| {
+                let page = match face {
+                    Face::Top => 0,
+                    Face::East => 2,
+                    _ => 1,
+                };
+                AtlasRegion::full(TextureHandle(page))
+            })
+        }
+        fn opaque(&self, block: BlockId) -> bool {
+            block.0 != 0
+        }
+    }
+
+    fn model() -> inspection::BlockModel {
+        inspection::BlockModel::resolve(BlockState::new(BlockId(1)), &MultiPage).unwrap()
+    }
+
+    fn append_transformed(
+        output: &mut Vec<PageVertices>,
+        input: &[PageVertices],
+        transform: impl Fn([f32; 3]) -> [f32; 3],
+    ) {
+        for page in input {
+            let out = page_vertices_mut(output, page.texture);
+            out.extend(page.vertices.iter().copied().map(|mut vertex| {
+                vertex.position = transform(vertex.position);
+                vertex
+            }));
+        }
+    }
+
+    /// GPU-dependent by design; `just render-test-all` invokes this ignored offscreen contract.
+    #[test]
+    #[ignore = "requires an offscreen wgpu adapter"]
+    fn chunk_dropped_and_gui_multi_page_paths_render_every_page() {
+        let mut combined = Vec::new();
+
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 0, y: 0, z: 0 }, BlockId(1));
+        let extracted = RenderWorld::from_world(&world);
+        let chunk = extracted.chunks().next().unwrap();
+        let chunk_pages = build_chunk_mesh_pages(&extracted, chunk, &MultiPage)
+            .into_iter()
+            .map(|page| PageVertices {
+                texture: page.texture,
+                vertices: page
+                    .mesh
+                    .indices
+                    .iter()
+                    .map(|index| page.mesh.vertices[*index as usize])
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(chunk_pages.len(), 3);
+        append_transformed(&mut combined, &chunk_pages, |p| {
+            [
+                -0.88 + p[0] * 0.24 + p[2] * 0.08,
+                0.45 - p[1] * 0.5 + p[2] * 0.08,
+                0.5,
+            ]
+        });
+
+        let block_model = model();
+        let mut dropped = Vec::new();
+        append_dropped_item_pages(
+            &mut dropped,
+            &[ItemSprite {
+                model: Some(block_model),
+                position: Vec3::ZERO,
+                top: block_model.texture(Face::Top),
+                side: block_model.texture(Face::North),
+                bottom: block_model.texture(Face::Bottom),
+                tint: [1.; 3],
+                age: 7.,
+                count: 1,
+                hover_start: 0.,
+            }],
+        );
+        assert_eq!(dropped.len(), 3);
+        append_transformed(&mut combined, &dropped, |p| {
+            [p[0] * 1.2, p[1] * 1.2 - 0.1, 0.45 + p[2] * 0.1]
+        });
+
+        let mut gui = Vec::new();
+        block_model.gui_page_vertices(&mut gui, [242., 34.], 3., [300., 100.]);
+        assert_eq!(gui.len(), 3);
+        append_transformed(&mut combined, &gui, |p| p);
+
+        assert_eq!(
+            combined.iter().map(|page| page.texture).collect::<Vec<_>>(),
+            [TextureHandle(0), TextureHandle(1), TextureHandle(2)]
+        );
+        let atlas_pages =
+            [[255, 32, 32, 255], [32, 255, 32, 255], [32, 32, 255, 255]].map(|color| RgbaTexture {
+                width: 2,
+                height: 2,
+                rgba: color.repeat(4),
+                sampler: TextureSampling::Nearest,
+            });
+        let output = std::env::temp_dir().join(format!(
+            "rustcraft-multi-page-offscreen-{}.png",
+            std::process::id()
+        ));
+        pollster::block_on(render_pages_rgba(
+            &Scene {
+                vertices: Vec::new(),
+                width: 300,
+                height: 100,
+                textured: true,
+                cull: false,
+            },
+            &combined,
+            &atlas_pages,
+            &output,
+        ))
+        .unwrap();
+        let decoder = png::Decoder::new(std::fs::File::open(&output).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size()];
+        let frame = reader.next_frame(&mut bytes).unwrap();
+        let pixels = bytes[..frame.buffer_size()].as_chunks::<4>().0.iter();
+        for channel in 0..3 {
+            assert!(pixels.clone().any(|pixel| {
+                pixel[channel] > 200
+                    && pixel[(channel + 1) % 3] < 80
+                    && pixel[(channel + 2) % 3] < 80
+            }));
+        }
+        std::fs::remove_file(output).unwrap();
+    }
 }

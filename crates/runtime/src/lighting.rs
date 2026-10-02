@@ -310,3 +310,25 @@ mod enclosure_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod dirty_section_tests {
+    use super::*;
+
+    #[test]
+    fn boundary_voxel_invalidates_each_neighbor_section_input() {
+        for (position, expected) in [
+            (BlockPos { x: 0, y: 8, z: 8 }, (ChunkPos { x: -1, z: 0 }, 0)),
+            (BlockPos { x: 15, y: 8, z: 8 }, (ChunkPos { x: 1, z: 0 }, 0)),
+            (BlockPos { x: 8, y: 0, z: 8 }, (ChunkPos { x: 0, z: 0 }, -1)),
+            (BlockPos { x: 8, y: 15, z: 8 }, (ChunkPos { x: 0, z: 0 }, 1)),
+            (BlockPos { x: 8, y: 8, z: 0 }, (ChunkPos { x: 0, z: -1 }, 0)),
+            (BlockPos { x: 8, y: 8, z: 15 }, (ChunkPos { x: 0, z: 1 }, 0)),
+        ] {
+            let mut dirty = HashSet::new();
+            dirty_neighbors(&mut dirty, position);
+            assert!(dirty.contains(&section(position)));
+            assert!(dirty.contains(&expected), "{position:?}");
+        }
+    }
+}

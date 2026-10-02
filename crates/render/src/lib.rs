@@ -1,15 +1,32 @@
 //! Presentation extraction, CPU voxel meshing and the wgpu presentation backend.
 //! Simulation never depends on this crate.
 
-use rustcraft_engine_core::{
-    BlockId, BlockPos, BlockState, CHUNK_SIZE, ChunkPos, Vec3, World, block_index,
+use rustcraft_engine_core::{BlockId, BlockPos, BlockState, CHUNK_SIZE, ChunkPos, Vec3, World};
+use std::{
+    collections::{BTreeMap, HashMap},
+    io::BufReader,
+    path::Path,
+    sync::Arc,
 };
-use std::{collections::HashMap, io::BufReader, path::Path, sync::Arc};
+
+const SNAPSHOT_EDGE: usize = CHUNK_SIZE as usize + 2;
+const SNAPSHOT_VOLUME: usize = SNAPSHOT_EDGE * SNAPSHOT_EDGE * SNAPSHOT_EDGE;
+
+fn snapshot_index(x: i32, y: i32, z: i32) -> usize {
+    debug_assert!((-1..=CHUNK_SIZE).contains(&x));
+    debug_assert!((-1..=CHUNK_SIZE).contains(&y));
+    debug_assert!((-1..=CHUNK_SIZE).contains(&z));
+    let x = (x + 1) as usize;
+    let y = (y + 1) as usize;
+    let z = (z + 1) as usize;
+    (y * SNAPSHOT_EDGE + z) * SNAPSHOT_EDGE + x
+}
 
 pub mod diagnostic;
 pub mod geometry;
 pub mod hud;
 pub mod inspection;
+pub mod meshing;
 pub mod offscreen;
 mod timing;
 
@@ -23,10 +40,59 @@ pub enum Face {
     Bottom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextureTile {
-    pub x: u8,
-    pub y: u8,
+/// Profile-local handle for a resolved physical texture page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TextureHandle(pub u32);
+
+/// A normalized rectangle in a resolved texture, independent of atlas cell size/layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AtlasRegion {
+    pub texture: TextureHandle,
+    pub uv_min: [f32; 2],
+    pub uv_max: [f32; 2],
+}
+
+impl AtlasRegion {
+    pub const fn full(texture: TextureHandle) -> Self {
+        Self {
+            texture,
+            uv_min: [0.0, 0.0],
+            uv_max: [1.0, 1.0],
+        }
+    }
+
+    pub fn from_pixels(
+        texture: TextureHandle,
+        texture_size: [u32; 2],
+        rectangle: [u32; 4],
+    ) -> Option<Self> {
+        let [width, height] = texture_size;
+        let [x, y, region_width, region_height] = rectangle;
+        (width > 0
+            && height > 0
+            && region_width > 0
+            && region_height > 0
+            && x.checked_add(region_width)? <= width
+            && y.checked_add(region_height)? <= height)
+            .then_some(Self {
+                texture,
+                uv_min: [x as f32 / width as f32, y as f32 / height as f32],
+                uv_max: [
+                    (x + region_width) as f32 / width as f32,
+                    (y + region_height) as f32 / height as f32,
+                ],
+            })
+    }
+
+    pub fn grid_cell(
+        texture: TextureHandle,
+        columns: u32,
+        rows: u32,
+        x: u32,
+        y: u32,
+    ) -> Option<Self> {
+        Self::from_pixels(texture, [columns, rows], [x, y, 1, 1])
+    }
 }
 
 pub trait BlockTextureResolver {
@@ -37,12 +103,20 @@ pub trait BlockTextureResolver {
     ) -> rustcraft_engine_core::orientation::ModelRotation {
         rustcraft_engine_core::orientation::ModelRotation::IDENTITY
     }
-    fn state_texture(&self, state: BlockState, face: Face) -> Option<TextureTile> {
+    fn state_texture(&self, state: BlockState, face: Face) -> Option<AtlasRegion> {
         self.texture(state.block, face)
     }
 
-    fn texture(&self, block: BlockId, face: Face) -> Option<TextureTile>;
+    fn texture(&self, block: BlockId, face: Face) -> Option<AtlasRegion>;
     fn opaque(&self, block: BlockId) -> bool;
+    /// Materials submitted with alpha blending after opaque/cutout geometry.
+    fn translucent(&self, _block: BlockId) -> bool {
+        false
+    }
+    /// Optional top height for static liquid geometry in block-local units.
+    fn liquid_surface_height(&self, _state: BlockState) -> Option<f32> {
+        None
+    }
     fn visible(&self, block: BlockId) -> bool {
         self.opaque(block)
     }
@@ -56,13 +130,42 @@ pub trait BlockTextureResolver {
 pub struct RenderChunk {
     pub position: ChunkPos,
     pub section_y: i32,
-    pub blocks: Vec<BlockState>,
+    voxels: Vec<BlockState>,
+    lights: Vec<rustcraft_engine_core::VoxelLight>,
 }
 
-#[derive(Debug, Default)]
+impl RenderChunk {
+    #[must_use]
+    pub fn state(&self, local: (i32, i32, i32)) -> BlockState {
+        self.voxels[snapshot_index(local.0, local.1, local.2)]
+    }
+
+    #[must_use]
+    pub fn light(&self, local: (i32, i32, i32)) -> rustcraft_engine_core::VoxelLight {
+        self.lights[snapshot_index(local.0, local.1, local.2)]
+    }
+
+    #[must_use]
+    pub fn snapshot_bytes(&self) -> usize {
+        self.voxels.len() * std::mem::size_of::<BlockState>()
+            + self.lights.len() * std::mem::size_of::<rustcraft_engine_core::VoxelLight>()
+    }
+}
+
+#[derive(Debug)]
 pub struct RenderWorld {
     chunks: HashMap<(ChunkPos, i32), RenderChunk>,
-    lights: HashMap<BlockPos, rustcraft_engine_core::VoxelLight>,
+    default_state: BlockState,
+}
+
+impl Default for RenderWorld {
+    fn default() -> Self {
+        Self {
+            chunks: HashMap::new(),
+            // Standalone diagnostics explicitly use zero as their local empty sentinel.
+            default_state: BlockState::new(BlockId(0)),
+        }
+    }
 }
 
 impl RenderWorld {
@@ -71,19 +174,24 @@ impl RenderWorld {
         world: &World,
         dirty: impl IntoIterator<Item = rustcraft_engine_core::SectionPos>,
     ) {
+        self.default_state = world.default_state();
         for (pos, y) in dirty {
             self.copy_chunk(world, pos, y);
         }
     }
     #[must_use]
     pub fn from_world(world: &World) -> Self {
-        let mut presentation = Self::default();
+        let mut presentation = Self {
+            default_state: world.default_state(),
+            ..Self::default()
+        };
         for (position, section_y) in world.section_positions() {
             presentation.copy_chunk(world, position, section_y);
         }
         presentation
     }
     pub fn sync_dirty(&mut self, world: &World, dirty: impl IntoIterator<Item = ChunkPos>) {
+        self.default_state = world.default_state();
         for position in dirty {
             let sections = world
                 .section_positions()
@@ -95,24 +203,37 @@ impl RenderWorld {
         }
     }
     fn copy_chunk(&mut self, world: &World, position: ChunkPos, section_y: i32) {
-        if let Some(chunk) = world.section(position, section_y) {
-            for y in -1..=16 {
-                for z in -1..=16 {
-                    for x in -1..=16 {
-                        let p = BlockPos {
-                            x: position.x * 16 + x,
-                            y: section_y * 16 + y,
-                            z: position.z * 16 + z,
-                        };
-                        self.lights.insert(p, world.light(p));
-                    }
-                }
-            }
-            let mut blocks = Vec::with_capacity(4096);
+        if let Some(section) = world.section(position, section_y) {
+            let origin = section_origin(position, section_y);
+            let mut voxels = vec![world.default_state(); SNAPSHOT_VOLUME];
+            let mut lights = vec![rustcraft_engine_core::VoxelLight::default(); SNAPSHOT_VOLUME];
+            let center_lights = world.section_lights(position, section_y);
             for y in 0..16 {
                 for z in 0..16 {
                     for x in 0..16 {
-                        blocks.push(chunk.state((x, y, z)));
+                        let source_index = y * 256 + z * 16 + x;
+                        let destination_index = snapshot_index(x as i32, y as i32, z as i32);
+                        voxels[destination_index] = section.states()[source_index];
+                        if let Some(section_lights) = center_lights {
+                            lights[destination_index] = section_lights[source_index];
+                        }
+                    }
+                }
+            }
+            for y in -1..=16 {
+                for z in -1..=16 {
+                    for x in -1..=16 {
+                        if (0..16).contains(&x) && (0..16).contains(&y) && (0..16).contains(&z) {
+                            continue;
+                        }
+                        let p = BlockPos {
+                            x: origin.x + x,
+                            y: origin.y + y,
+                            z: origin.z + z,
+                        };
+                        let destination_index = snapshot_index(x, y, z);
+                        voxels[destination_index] = world.state(p);
+                        lights[destination_index] = world.light(p);
                     }
                 }
             }
@@ -121,7 +242,8 @@ impl RenderWorld {
                 RenderChunk {
                     position,
                     section_y,
-                    blocks,
+                    voxels,
+                    lights,
                 },
             );
         } else {
@@ -136,6 +258,10 @@ impl RenderWorld {
         self.chunks.len()
     }
     #[must_use]
+    pub fn snapshot_bytes(&self) -> usize {
+        self.chunks.values().map(RenderChunk::snapshot_bytes).sum()
+    }
+    #[must_use]
     pub fn block(&self, position: BlockPos) -> BlockId {
         let cx = position.x.div_euclid(CHUNK_SIZE);
         let cz = position.z.div_euclid(CHUNK_SIZE);
@@ -143,13 +269,14 @@ impl RenderWorld {
         let section_y = position.y.div_euclid(16);
         self.chunks
             .get(&(key, section_y))
-            .map_or(BlockId(0), |chunk| {
-                chunk.blocks[block_index((
-                    position.x.rem_euclid(16) as u8,
-                    position.y.rem_euclid(16) as u8,
-                    position.z.rem_euclid(16) as u8,
-                ))]
-                .block
+            .map_or(self.default_state.block, |chunk| {
+                chunk
+                    .state((
+                        position.x.rem_euclid(16),
+                        position.y.rem_euclid(16),
+                        position.z.rem_euclid(16),
+                    ))
+                    .block
             })
     }
 }
@@ -163,6 +290,28 @@ pub struct Camera {
     pub fov_y: f32,
     pub near: f32,
     pub far: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FogPresentation {
+    pub color: [f32; 3],
+    pub start: f32,
+    pub end: f32,
+}
+impl FogPresentation {
+    #[must_use]
+    pub fn linear_amount(self, distance: f32) -> f32 {
+        ((distance - self.start) / (self.end - self.start).max(0.001)).clamp(0.0, 1.0)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    matrix: [[f32; 4]; 4],
+    position: [f32; 4],
+    fog_color: [f32; 4],
+    fog_range: [f32; 4],
 }
 
 impl Camera {
@@ -193,6 +342,89 @@ impl Camera {
     }
 }
 
+/// Conservative camera-frustum test used only for draw submission. Resident meshes are retained.
+#[derive(Debug, Clone, Copy)]
+pub struct Frustum {
+    camera: Camera,
+    right: Vec3,
+    up: Vec3,
+    forward: Vec3,
+    tan_y: f32,
+    tan_x: f32,
+}
+
+impl Frustum {
+    #[must_use]
+    pub fn from_camera(camera: Camera) -> Self {
+        let (right, up, forward) = camera.basis();
+        let tan_y = (camera.fov_y * 0.5).tan();
+        Self {
+            camera,
+            right,
+            up,
+            forward,
+            tan_y,
+            tan_x: tan_y * camera.aspect,
+        }
+    }
+
+    #[must_use]
+    pub fn intersects_aabb(self, bounds: rustcraft_engine_core::Aabb) -> bool {
+        let mut outside = [true; 6];
+        for x in [bounds.min.x, bounds.max.x] {
+            for y in [bounds.min.y, bounds.max.y] {
+                for z in [bounds.min.z, bounds.max.z] {
+                    let relative = Vec3::new(
+                        x - self.camera.position.x,
+                        y - self.camera.position.y,
+                        z - self.camera.position.z,
+                    );
+                    let view_x = dot(relative, self.right);
+                    let view_y = dot(relative, self.up);
+                    let view_z = dot(relative, self.forward);
+                    let tests = [
+                        view_z - self.camera.near,
+                        self.camera.far - view_z,
+                        view_x + view_z * self.tan_x,
+                        -view_x + view_z * self.tan_x,
+                        view_y + view_z * self.tan_y,
+                        -view_y + view_z * self.tan_y,
+                    ];
+                    for (still_outside, distance) in outside.iter_mut().zip(tests) {
+                        *still_outside &= distance < 0.0;
+                    }
+                }
+            }
+        }
+        !outside.into_iter().any(|value| value)
+    }
+
+    #[must_use]
+    pub fn intersects_section(self, position: ChunkPos, section_y: i32) -> bool {
+        let origin = section_origin(position, section_y);
+        self.intersects_aabb(rustcraft_engine_core::Aabb::new(
+            Vec3::new(origin.x as f32, origin.y as f32, origin.z as f32),
+            Vec3::new(
+                (origin.x + CHUNK_SIZE) as f32,
+                (origin.y + CHUNK_SIZE) as f32,
+                (origin.z + CHUNK_SIZE) as f32,
+            ),
+        ))
+    }
+}
+
+pub fn visible_section_positions(
+    sections: impl IntoIterator<Item = (ChunkPos, i32)>,
+    frustum: Frustum,
+) -> Vec<(ChunkPos, i32)> {
+    let mut visible = sections
+        .into_iter()
+        .filter(|(position, section_y)| frustum.intersects_section(*position, *section_y))
+        .collect::<Vec<_>>();
+    visible.sort_by_key(|(position, section_y)| (position.x, position.z, *section_y));
+    visible
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -202,13 +434,39 @@ pub struct Vertex {
     pub color: [f32; 3],
 }
 
+/// CPU geometry that must be submitted with one compiled atlas page bound.
+#[derive(Debug, Clone)]
+pub struct PageVertices {
+    pub texture: TextureHandle,
+    pub vertices: Vec<Vertex>,
+}
+
+pub(crate) fn page_vertices_mut(
+    pages: &mut Vec<PageVertices>,
+    texture: TextureHandle,
+) -> &mut Vec<Vertex> {
+    match pages.binary_search_by_key(&texture, |page| page.texture) {
+        Ok(index) => &mut pages[index].vertices,
+        Err(index) => {
+            pages.insert(
+                index,
+                PageVertices {
+                    texture,
+                    vertices: Vec::new(),
+                },
+            );
+            &mut pages[index].vertices
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ItemSprite {
     pub model: Option<inspection::BlockModel>,
     pub position: Vec3,
-    pub top: TextureTile,
-    pub side: TextureTile,
-    pub bottom: TextureTile,
+    pub top: AtlasRegion,
+    pub side: AtlasRegion,
+    pub bottom: AtlasRegion,
     pub tint: [f32; 3],
     pub age: f32,
     pub count: u16,
@@ -226,7 +484,7 @@ pub fn beta_item_rotation_degrees(age_ticks: f32, hover_start: f32) -> f32 {
 }
 
 /// Shared production/inspector world-space item extraction; animation never mutates simulation.
-pub fn append_dropped_items(vertices: &mut Vec<Vertex>, sprites: &[ItemSprite]) {
+pub fn append_dropped_item_pages(pages: &mut Vec<PageVertices>, sprites: &[ItemSprite]) {
     for sprite in sprites {
         let p = sprite.position;
         // Beta 1.7.3 RenderItem.doRenderItem bob/rotation formulas.
@@ -291,7 +549,8 @@ pub fn append_dropped_items(vertices: &mut Vec<Vertex>, sprites: &[ItemSprite]) 
                 let tint = sprite
                     .model
                     .map_or(sprite.tint, |m| m.tints[direction as usize]);
-                let uv = uvs.map(|uv| tile_uv(tile, uv));
+                let uv = uvs.map(|uv| region_uv(tile, uv));
+                let vertices = page_vertices_mut(pages, tile.texture);
                 for (i, u) in [
                     (0, uv[0]),
                     (1, uv[1]),
@@ -309,6 +568,21 @@ pub fn append_dropped_items(vertices: &mut Vec<Vertex>, sprites: &[ItemSprite]) 
                 }
             }
         }
+    }
+}
+
+/// Compatibility helper for single-page offscreen diagnostics.
+///
+/// Production rendering uses [`append_dropped_item_pages`] so the texture page is never lost.
+pub fn append_dropped_items(vertices: &mut Vec<Vertex>, sprites: &[ItemSprite]) {
+    let mut pages = Vec::new();
+    append_dropped_item_pages(&mut pages, sprites);
+    assert!(
+        pages.len() <= 1,
+        "single-page dropped-item helper received a multi-page model"
+    );
+    if let Some(page) = pages.pop() {
+        vertices.extend(page.vertices);
     }
 }
 
@@ -340,6 +614,13 @@ pub struct CpuMesh {
     pub indices: Vec<u32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PageMesh {
+    pub texture: TextureHandle,
+    pub translucent: bool,
+    pub mesh: CpuMesh,
+}
+
 impl CpuMesh {
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -348,25 +629,52 @@ impl CpuMesh {
 }
 
 pub fn build_chunk_mesh(
-    world: &RenderWorld,
+    _world: &RenderWorld,
     chunk: &RenderChunk,
     resolver: &impl BlockTextureResolver,
 ) -> CpuMesh {
-    let mut mesh = CpuMesh::default();
+    let pages = build_section_mesh_pages(chunk, resolver);
+    let mut merged = CpuMesh::default();
+    for page in pages {
+        let base = merged.vertices.len() as u32;
+        merged.vertices.extend(page.mesh.vertices);
+        merged
+            .indices
+            .extend(page.mesh.indices.into_iter().map(|index| base + index));
+    }
+    merged
+}
+
+pub fn build_chunk_mesh_pages(
+    _world: &RenderWorld,
+    chunk: &RenderChunk,
+    resolver: &impl BlockTextureResolver,
+) -> Vec<PageMesh> {
+    build_section_mesh_pages(chunk, resolver)
+}
+
+/// Builds one immutable section snapshot without consulting shared world state.
+pub fn build_section_mesh_pages(
+    chunk: &RenderChunk,
+    resolver: &impl BlockTextureResolver,
+) -> Vec<PageMesh> {
+    let mut pages = BTreeMap::<(bool, u32), CpuMesh>::new();
     let origin = section_origin(chunk.position, chunk.section_y);
     for y in 0..16 {
         for z in 0..16 {
             for x in 0..16 {
-                let state = chunk.blocks[block_index((x, y, z))];
+                let state = chunk.state((x, y, z));
                 let block = state.block;
                 let rotation = resolver.model_rotation(state);
+                let translucent = resolver.translucent(block);
+                let liquid_height = resolver.liquid_surface_height(state);
                 if !resolver.visible(block) {
                     continue;
                 }
                 let position = BlockPos {
-                    x: origin.x + i32::from(x),
-                    y: origin.y + i32::from(y),
-                    z: origin.z + i32::from(z),
+                    x: origin.x + x,
+                    y: origin.y + y,
+                    z: origin.z + z,
                 };
                 for model_face in geometry::FACES {
                     let normal = rotation.transform(model_face.normal);
@@ -375,24 +683,36 @@ pub fn build_chunk_mesh(
                         .find(|f| f.normal == normal)
                         .expect("orthogonal model rotation")
                         .direction;
-                    let (_, neighbor, shade) = faces(position)[face as usize];
-                    if resolver.opaque(world.block(neighbor))
-                        || (!resolver.opaque(block) && world.block(neighbor) == block)
+                    let (_, _neighbor, shade) = faces(position)[face as usize];
+                    let neighbor_local = (
+                        x + normal[0] as i32,
+                        y + normal[1] as i32,
+                        z + normal[2] as i32,
+                    );
+                    let neighbor_block = chunk.state(neighbor_local).block;
+                    if resolver.opaque(neighbor_block)
+                        || ((!resolver.opaque(block) || translucent) && neighbor_block == block)
                     {
                         continue;
                     }
                     if let Some(tile) = resolver.state_texture(state, model_face.direction) {
+                        let mesh = pages.entry((translucent, tile.texture.0)).or_default();
                         let start = mesh.vertices.len();
-                        let light = world.lights.get(&neighbor).map_or(1.0, |l| {
-                            let own = world.lights.get(&position).map_or(0, |v| v.block());
-                            0.05 + 0.95 * f32::from(l.sky().max(l.block()).max(own)) / 15.0
-                        });
+                        let neighbor_light = chunk.light(neighbor_local);
+                        let own = chunk.light((x, y, z)).block();
+                        let light = 0.05
+                            + 0.95
+                                * f32::from(
+                                    neighbor_light.sky().max(neighbor_light.block()).max(own),
+                                )
+                                / 15.0;
                         append_face(
-                            &mut mesh,
+                            mesh,
                             position,
                             model_face.direction,
                             tile,
                             shade * light,
+                            liquid_height,
                         );
                         for v in &mut mesh.vertices[start..] {
                             let local = [
@@ -415,7 +735,14 @@ pub fn build_chunk_mesh(
             }
         }
     }
-    mesh
+    pages
+        .into_iter()
+        .map(|((translucent, page), mesh)| PageMesh {
+            texture: TextureHandle(page),
+            translucent,
+            mesh,
+        })
+        .collect()
 }
 
 #[must_use]
@@ -428,11 +755,10 @@ pub fn section_origin(position: ChunkPos, section_y: i32) -> BlockPos {
 }
 
 // PNG and texture coordinates both start at top-left; no V flip.
-fn tile_uv(tile: TextureTile, uv: [f32; 2]) -> [f32; 2] {
-    assert!(tile.x < 16 && tile.y < 16);
+fn region_uv(region: AtlasRegion, uv: [f32; 2]) -> [f32; 2] {
     [
-        (f32::from(tile.x) + uv[0]) / 16.0,
-        (f32::from(tile.y) + uv[1]) / 16.0,
+        region.uv_min[0] + uv[0] * (region.uv_max[0] - region.uv_min[0]),
+        region.uv_min[1] + uv[1] * (region.uv_max[1] - region.uv_min[1]),
     ]
 }
 
@@ -489,18 +815,32 @@ fn faces(position: BlockPos) -> [(Face, BlockPos, f32); 6] {
     ]
 }
 
-fn append_face(mesh: &mut CpuMesh, position: BlockPos, face: Face, tile: TextureTile, shade: f32) {
+fn append_face(
+    mesh: &mut CpuMesh,
+    position: BlockPos,
+    face: Face,
+    tile: AtlasRegion,
+    shade: f32,
+    liquid_surface_height: Option<f32>,
+) {
     let x = position.x as f32;
     let y = position.y as f32;
     let z = position.z as f32;
     let n = mesh.vertices.len() as u32;
     let definition = geometry::definition(face);
-    let corners = definition.positions.map(|p| [x + p[0], y + p[1], z + p[2]]);
+    let corners = definition.positions.map(|mut p| {
+        if p[1] >= 1.0
+            && let Some(height) = liquid_surface_height
+        {
+            p[1] = height.clamp(0.5, 1.0);
+        }
+        [x + p[0], y + p[1], z + p[2]]
+    });
     let uv = definition.uv_corners;
     for i in 0..4 {
         mesh.vertices.push(Vertex {
             position: corners[i],
-            uv: tile_uv(tile, uv[i]),
+            uv: region_uv(tile, uv[i]),
             shade,
             color: [1.0; 3],
         });
@@ -514,12 +854,121 @@ pub struct Texture {
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
+
+#[derive(Debug, Clone)]
+pub struct RgbaTexture {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub sampler: TextureSampling,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureSampling {
+    Nearest,
+    Linear,
+}
+
+/// Compiled physical pages plus game-selected semantic presentation roles.
+#[derive(Debug, Clone)]
+pub struct RendererResources {
+    pub atlas_pages: Vec<RgbaTexture>,
+    pub container_background: AtlasRegion,
+    pub hud: AtlasRegion,
+    pub player_skin: AtlasRegion,
+    pub occupancy: f32,
+    pub cache_hit: bool,
+}
 #[derive(Debug)]
-pub struct GpuChunk {
+pub struct GpuPageMesh {
+    texture: TextureHandle,
+    translucent: bool,
     pub vertex: wgpu::Buffer,
     pub index: wgpu::Buffer,
+    vertex_capacity_bytes: u64,
+    index_capacity_bytes: u64,
     pub index_count: u32,
     vertex_count: usize,
+}
+
+#[derive(Debug)]
+pub struct GpuChunk {
+    pages: Vec<GpuPageMesh>,
+}
+
+fn buffer_capacity(logical_bytes: usize) -> u64 {
+    logical_bytes
+        .max(256)
+        .checked_next_power_of_two()
+        .expect("mesh buffer capacity overflow") as u64
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BufferCapacityAction {
+    Reuse,
+    Reallocate(u64),
+}
+
+fn buffer_capacity_action(existing_capacity: u64, logical_bytes: usize) -> BufferCapacityAction {
+    let logical = logical_bytes as u64;
+    let should_shrink = logical.saturating_mul(4) < existing_capacity;
+    if logical <= existing_capacity && !should_shrink {
+        BufferCapacityAction::Reuse
+    } else {
+        BufferCapacityAction::Reallocate(buffer_capacity(logical_bytes))
+    }
+}
+
+fn create_mesh_buffer(
+    device: &wgpu::Device,
+    capacity: u64,
+    usage: wgpu::BufferUsages,
+    label: &str,
+) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: capacity,
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn reuse_or_allocate_buffer(
+    device: &wgpu::Device,
+    existing: wgpu::Buffer,
+    existing_capacity: u64,
+    logical_bytes: usize,
+    usage: wgpu::BufferUsages,
+    label: &str,
+) -> (wgpu::Buffer, u64, bool) {
+    match buffer_capacity_action(existing_capacity, logical_bytes) {
+        BufferCapacityAction::Reuse => (existing, existing_capacity, false),
+        BufferCapacityAction::Reallocate(capacity) => (
+            create_mesh_buffer(device, capacity, usage, label),
+            capacity,
+            true,
+        ),
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RenderSubmissionStats {
+    pub resident_sections: usize,
+    pub meshed_sections: usize,
+    pub visible_sections: usize,
+    pub culled_sections: usize,
+    pub drawn_section_page_batches: usize,
+    pub texture_page_bind_switches: usize,
+    pub pipeline_switches: usize,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct MeshUploadStats {
+    pub logical_bytes: usize,
+    pub allocations: u64,
+    pub reallocations: u64,
+    pub reuses: u64,
+    pub submit_ms: f64,
 }
 
 pub struct Renderer {
@@ -528,56 +977,71 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    translucent_pipeline: wgpu::RenderPipeline,
     hud_pipeline: wgpu::RenderPipeline,
     gui_item_pipeline: wgpu::RenderPipeline,
     gui_pipeline: wgpu::RenderPipeline,
     crack_pipeline: wgpu::RenderPipeline,
+    selection_pipeline: wgpu::RenderPipeline,
     hud_geometry: hud::HudGeometry,
     hud_buffer: wgpu::Buffer,
-    gui_bind: wgpu::BindGroup,
-    hotbar_bind: wgpu::BindGroup,
-    player_bind: wgpu::BindGroup,
+    selection_buffer: wgpu::Buffer,
+    page_binds: Vec<wgpu::BindGroup>,
+    container_background: AtlasRegion,
+    hud_texture: AtlasRegion,
+    player_skin: AtlasRegion,
     item_buffer: wgpu::Buffer,
     item_vertices: usize,
+    item_page_ranges: Vec<(TextureHandle, std::ops::Range<u32>)>,
     crack_buffer: wgpu::Buffer,
     crack_vertices: usize,
+    crack_texture: Option<TextureHandle>,
     pub adapter_info: wgpu::AdapterInfo,
     timing: Option<timing::GpuTiming>,
     pub telemetry_enabled: bool,
     camera_buffer: wgpu::Buffer,
-    camera_bind: wgpu::BindGroup,
-    _texture: Texture,
-    _gui_texture: Texture,
-    _hotbar_texture: Texture,
-    _player_texture: Texture,
+    fog: Option<FogPresentation>,
+    _textures: Vec<Texture>,
     depth_view: wgpu::TextureView,
     chunks: HashMap<(ChunkPos, i32), GpuChunk>,
     pub mesh_rebuilds: u64,
     pub vertices: usize,
     pub indices: usize,
+    mesh_buffer_allocations: u64,
+    mesh_buffer_reallocations: u64,
+    mesh_buffer_reuses: u64,
+    resident_section_count: usize,
     diagnostic: Option<diagnostic::Stage>,
     projection_logged: bool,
+    texture_bytes: usize,
+    atlas_occupancy: f32,
+    resource_cache_hit: bool,
+    atlas_upload_submit_ms: f64,
+    submission: RenderSubmissionStats,
 }
 
 impl Renderer {
+    pub fn set_camera_fog(&mut self, fog: Option<FogPresentation>) {
+        self.fog = fog;
+    }
     pub async fn new(
         window: Arc<winit::window::Window>,
-        texture_path: &Path,
+        resources: &RendererResources,
     ) -> Result<Self, String> {
-        Self::new_with_stage(window, texture_path, None).await
+        Self::new_with_stage(window, resources, None).await
     }
 
     pub async fn new_diagnostic(
         window: Arc<winit::window::Window>,
-        texture_path: &Path,
+        resources: &RendererResources,
         stage: diagnostic::Stage,
     ) -> Result<Self, String> {
-        Self::new_with_stage(window, texture_path, Some(stage)).await
+        Self::new_with_stage(window, resources, Some(stage)).await
     }
 
     async fn new_with_stage(
         window: Arc<winit::window::Window>,
-        texture_path: &Path,
+        resources: &RendererResources,
         diagnostic: Option<diagnostic::Stage>,
     ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -632,26 +1096,55 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-        let texture = if diagnostic.is_some_and(|s| !s.uses_atlas()) {
-            diagnostic::checker(&device, &queue)
+        let upload_started = std::time::Instant::now();
+        let max_texture_dimension = adapter.limits().max_texture_dimension_2d;
+        let textures = if diagnostic.is_some_and(|s| !s.uses_atlas()) {
+            vec![diagnostic::checker(&device, &queue)]
         } else {
-            load_texture(&device, &queue, texture_path)?
+            if resources.atlas_pages.is_empty() {
+                return Err("compiled renderer resources contain no atlas pages".into());
+            }
+            resources
+                .atlas_pages
+                .iter()
+                .enumerate()
+                .map(|(index, page)| {
+                    if page.width == 0
+                        || page.height == 0
+                        || page.width > max_texture_dimension
+                        || page.height > max_texture_dimension
+                        || page.rgba.len() != page.width as usize * page.height as usize * 4
+                    {
+                        return Err(format!(
+                            "invalid atlas page {index}: {}x{} with {} bytes",
+                            page.width,
+                            page.height,
+                            page.rgba.len()
+                        ));
+                    }
+                    Ok(upload_texture_with_sampling(
+                        &device,
+                        &queue,
+                        page.width,
+                        page.height,
+                        &page.rgba,
+                        page.sampler,
+                    ))
+                })
+                .collect::<Result<Vec<_>, String>>()?
         };
-        let gui_path = texture_path
-            .parent()
-            .unwrap_or_else(|| Path::new("reference/assets"))
-            .join("gui/inventory.png");
-        let gui_texture = load_texture(&device, &queue, &gui_path)?;
-        let hotbar_path = texture_path
-            .parent()
-            .unwrap_or_else(|| Path::new("reference/assets"))
-            .join("gui/gui.png");
-        let hotbar_texture = load_texture(&device, &queue, &hotbar_path)?;
-        let player_path = texture_path
-            .parent()
-            .unwrap_or_else(|| Path::new("reference/assets"))
-            .join("mob/char.png");
-        let player_texture = load_texture(&device, &queue, &player_path)?;
+        let atlas_upload_submit_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
+        let texture_bytes = resources
+            .atlas_pages
+            .iter()
+            .map(|page| page.rgba.len())
+            .sum();
+        eprintln!(
+            "atlas upload submission: pages={} bytes={} device_max={} submit_ms={atlas_upload_submit_ms:.3}",
+            textures.len(),
+            texture_bytes,
+            max_texture_dimension
+        );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("voxel-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -660,7 +1153,12 @@ impl Renderer {
             &device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("camera"),
-                contents: bytemuck::bytes_of(&[[0.0_f32; 4]; 4]),
+                contents: bytemuck::bytes_of(&CameraUniform {
+                    matrix: [[0.0; 4]; 4],
+                    position: [0.0; 4],
+                    fog_color: [0.0; 4],
+                    fog_range: [0.0; 4],
+                }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
@@ -669,7 +1167,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -695,78 +1193,30 @@ impl Renderer {
                 },
             ],
         });
-        let camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera-texture-bind"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-        });
-        let gui_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gui-texture-bind"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&gui_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&gui_texture.sampler),
-                },
-            ],
-        });
-        let hotbar_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hotbar-texture-bind"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&hotbar_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&hotbar_texture.sampler),
-                },
-            ],
-        });
-        let player_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("player-preview-texture-bind"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&player_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&player_texture.sampler),
-                },
-            ],
-        });
+        let page_binds = textures
+            .iter()
+            .enumerate()
+            .map(|(index, texture)| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("atlas-page-{index}-bind")),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: camera_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                        },
+                    ],
+                })
+            })
+            .collect::<Vec<_>>();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("voxel-pipeline-layout"),
             bind_group_layouts: &[&layout],
@@ -787,7 +1237,7 @@ impl Renderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some(if diagnostic.is_some_and(|s| !s.textured()) { "fs_color" } else if diagnostic.is_some_and(|s| s != diagnostic::Stage::NormalLit) { "fs_unlit" } else { "fs_main" }),
+                entry_point: Some(if diagnostic.is_some_and(|s| !s.textured()) { "fs_color" } else if diagnostic.is_some_and(|s| s != diagnostic::Stage::NormalLit) { "fs_unlit" } else { "fs_world" }),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
@@ -805,6 +1255,46 @@ impl Renderer {
                 format: wgpu::TextureFormat::Depth24Plus,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let translucent_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("voxel-translucent-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_translucent"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
+                front_face: wgpu::FrontFace::Ccw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -844,6 +1334,35 @@ impl Renderer {
             depth_stencil: Some(wgpu::DepthStencilState { format: wgpu::TextureFormat::Depth24Plus, depth_write_enabled: false, depth_compare: wgpu::CompareFunction::LessEqual, stencil: Default::default(), bias: wgpu::DepthBiasState { constant: -3, slope_scale: -3.0, clamp: 0.0 } }),
             multisample: Default::default(), multiview: None, cache: None,
         });
+        let selection_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("depth-tested-block-selection-outline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_selection"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: selection_primitive_state(),
+            depth_stencil: Some(selection_depth_stencil_state()),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         let item_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("world-item-sprites"),
             size: 512 * 1024,
@@ -856,6 +1375,12 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let selection_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("world-space-selection-outline"),
+            size: 4096,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let adapter_info = adapter.get_info();
         let timing = timing::GpuTiming::new(&device);
         Ok(Self {
@@ -864,35 +1389,47 @@ impl Renderer {
             queue,
             config,
             pipeline,
+            translucent_pipeline,
             hud_pipeline,
             gui_item_pipeline,
             gui_pipeline,
             crack_pipeline,
+            selection_pipeline,
             hud_geometry: hud::HudGeometry::default(),
             hud_buffer,
-            gui_bind,
-            hotbar_bind,
-            player_bind,
+            selection_buffer,
+            page_binds,
+            container_background: resources.container_background,
+            hud_texture: resources.hud,
+            player_skin: resources.player_skin,
             item_buffer,
             item_vertices: 0,
+            item_page_ranges: Vec::new(),
             crack_buffer,
             crack_vertices: 0,
+            crack_texture: None,
             adapter_info,
             timing,
             telemetry_enabled: false,
             camera_buffer,
-            camera_bind,
-            _texture: texture,
-            _gui_texture: gui_texture,
-            _hotbar_texture: hotbar_texture,
-            _player_texture: player_texture,
+            fog: None,
+            _textures: textures,
             depth_view,
             chunks: HashMap::new(),
             mesh_rebuilds: 0,
             vertices: 0,
             indices: 0,
+            mesh_buffer_allocations: 0,
+            mesh_buffer_reallocations: 0,
+            mesh_buffer_reuses: 0,
+            resident_section_count: 0,
             diagnostic,
             projection_logged: false,
+            texture_bytes,
+            atlas_occupancy: resources.occupancy,
+            resource_cache_hit: resources.cache_hit,
+            atlas_upload_submit_ms,
+            submission: RenderSubmissionStats::default(),
         })
     }
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -910,12 +1447,21 @@ impl Renderer {
     pub fn set_hud(&mut self, snapshot: &hud::HudSnapshot, camera: Camera) {
         self.hud_geometry
             .build(snapshot, self.width(), self.height(), camera);
+        for vertex in &mut self.hud_geometry.player_vertices {
+            vertex.uv = region_uv(self.player_skin, vertex.uv);
+        }
         self.hud_geometry.build_gui_background(
             self.width(),
             self.height(),
             snapshot.inventory_open,
             snapshot.selected,
         );
+        for vertex in &mut self.hud_geometry.gui_vertices {
+            vertex.uv = region_uv(self.container_background, vertex.uv);
+        }
+        for vertex in &mut self.hud_geometry.hotbar_vertices {
+            vertex.uv = region_uv(self.hud_texture, vertex.uv);
+        }
         let gui_bytes = bytemuck::cast_slice(&self.hud_geometry.gui_vertices);
         assert!(
             gui_bytes.len() <= 256 * 1024,
@@ -936,6 +1482,17 @@ impl Renderer {
                 .write_buffer(&self.hud_buffer, 896 * 1024, player_bytes);
         }
         let item_bytes = bytemuck::cast_slice(&self.hud_geometry.item_vertices);
+        for page in &self.hud_geometry.item_pages {
+            assert!(
+                (page.texture.0 as usize) < self.page_binds.len(),
+                "GUI item references missing atlas page {}",
+                page.texture.0
+            );
+        }
+        assert!(
+            item_bytes.len() <= 7 * 1024 * 1024,
+            "GUI item geometry capacity exceeded"
+        );
         if !item_bytes.is_empty() {
             self.queue
                 .write_buffer(&self.hud_buffer, 1024 * 1024, item_bytes);
@@ -943,6 +1500,15 @@ impl Renderer {
         let bytes = bytemuck::cast_slice(&self.hud_geometry.vertices);
         assert!(bytes.len() <= 256 * 1024, "HUD geometry capacity exceeded");
         self.queue.write_buffer(&self.hud_buffer, 0, bytes);
+        let selection_bytes = bytemuck::cast_slice(&self.hud_geometry.selection_vertices);
+        assert!(
+            selection_bytes.len() <= 4096,
+            "selection geometry capacity exceeded"
+        );
+        if !selection_bytes.is_empty() {
+            self.queue
+                .write_buffer(&self.selection_buffer, 0, selection_bytes);
+        }
         if self.hud_geometry.debug_changed {
             let debug_bytes = bytemuck::cast_slice(&self.hud_geometry.debug_vertices);
             assert!(
@@ -956,30 +1522,46 @@ impl Renderer {
         }
     }
     pub fn set_item_sprites(&mut self, sprites: &[ItemSprite]) {
+        let mut pages = Vec::new();
+        append_dropped_item_pages(&mut pages, sprites);
         let mut vertices = Vec::with_capacity(sprites.len() * 36);
-        append_dropped_items(&mut vertices, sprites);
+        self.item_page_ranges.clear();
+        for page in pages {
+            assert!(
+                (page.texture.0 as usize) < self.page_binds.len(),
+                "dropped item references missing atlas page {}",
+                page.texture.0
+            );
+            let start = vertices.len() as u32;
+            vertices.extend(page.vertices);
+            self.item_page_ranges
+                .push((page.texture, start..vertices.len() as u32));
+        }
         self.item_vertices = vertices.len();
+        let bytes = bytemuck::cast_slice(&vertices);
+        assert!(
+            bytes.len() <= 512 * 1024,
+            "dropped item geometry capacity exceeded"
+        );
         if !vertices.is_empty() {
-            self.queue
-                .write_buffer(&self.item_buffer, 0, bytemuck::cast_slice(&vertices));
+            self.queue.write_buffer(&self.item_buffer, 0, bytes);
         }
     }
     pub fn item_render_count(&self) -> usize {
         self.item_vertices / 6
     }
-    pub fn set_crack_overlay(&mut self, target: Option<BlockPos>, progress: Option<f32>) {
+    pub fn set_crack_overlay(&mut self, target: Option<BlockPos>, region: Option<AtlasRegion>) {
         let mut vertices = Vec::new();
         let Some(target) = target else {
             self.crack_vertices = 0;
+            self.crack_texture = None;
             return;
         };
-        let Some(progress) = progress else {
+        let Some(crack_region) = region else {
             self.crack_vertices = 0;
+            self.crack_texture = None;
             return;
         };
-        // Beta 1.7.3 RenderGlobal: terrain tiles 240..249 and block geometry override.
-        let stage = hud::destroy_stage(progress);
-        let crack_tile = TextureTile { x: stage, y: 15 };
         let o = [target.x as f32, target.y as f32, target.z as f32];
         for face in geometry::FACES {
             let quad = face.positions;
@@ -1000,30 +1582,84 @@ impl Renderer {
             ] {
                 vertices.push(Vertex {
                     position: [o[0] + quad[i][0], o[1] + quad[i][1], o[2] + quad[i][2]],
-                    uv: crate::tile_uv(crack_tile, uv),
+                    uv: crate::region_uv(crack_region, uv),
                     shade,
                     color: [1.; 3],
                 });
             }
         }
         self.crack_vertices = vertices.len();
+        self.crack_texture = Some(crack_region.texture);
         self.queue
             .write_buffer(&self.crack_buffer, 0, bytemuck::cast_slice(&vertices));
     }
-    /// No frustum culling yet: every nonempty resident mesh is submitted.
     pub fn rendered_sections(&self) -> usize {
-        self.chunks.values().filter(|c| c.index_count > 0).count()
+        self.submission.visible_sections
+    }
+    pub fn submission_stats(&self) -> RenderSubmissionStats {
+        self.submission
     }
     pub fn draw_calls(&self) -> usize {
-        self.rendered_sections()
+        self.submission.drawn_section_page_batches
+            + self.item_page_ranges.len()
+            + usize::from(!self.hud_geometry.selection_vertices.is_empty())
+            + usize::from(self.crack_vertices > 0)
+            + usize::from(!self.hud_geometry.gui_vertices.is_empty())
+            + usize::from(!self.hud_geometry.hotbar_vertices.is_empty())
+            + usize::from(!self.hud_geometry.player_vertices.is_empty())
+            + self.hud_geometry.item_pages.len()
             + usize::from(!self.hud_geometry.vertices.is_empty())
             + usize::from(!self.hud_geometry.debug_vertices.is_empty())
     }
     pub fn mesh_count(&self) -> usize {
         self.chunks.len()
     }
+    pub fn gpu_mesh_logical_bytes(&self) -> usize {
+        self.chunks
+            .values()
+            .flat_map(|chunk| &chunk.pages)
+            .map(|page| {
+                page.vertex_count * std::mem::size_of::<Vertex>()
+                    + page.index_count as usize * std::mem::size_of::<u32>()
+            })
+            .sum()
+    }
+    pub fn gpu_mesh_allocated_bytes(&self) -> u64 {
+        self.chunks
+            .values()
+            .flat_map(|chunk| &chunk.pages)
+            .map(|page| page.vertex_capacity_bytes + page.index_capacity_bytes)
+            .sum()
+    }
+    pub fn mesh_buffer_allocations(&self) -> u64 {
+        self.mesh_buffer_allocations
+    }
+    pub fn mesh_buffer_reallocations(&self) -> u64 {
+        self.mesh_buffer_reallocations
+    }
+    pub fn mesh_buffer_reuses(&self) -> u64 {
+        self.mesh_buffer_reuses
+    }
+    pub fn set_resident_section_count(&mut self, sections: usize) {
+        self.resident_section_count = sections;
+    }
     pub fn gpu_ms(&self) -> Option<f64> {
         self.timing.as_ref().and_then(|t| t.milliseconds)
+    }
+    pub fn atlas_page_count(&self) -> usize {
+        self._textures.len()
+    }
+    pub fn texture_bytes(&self) -> usize {
+        self.texture_bytes
+    }
+    pub fn atlas_occupancy(&self) -> f32 {
+        self.atlas_occupancy
+    }
+    pub fn resource_cache_hit(&self) -> bool {
+        self.resource_cache_hit
+    }
+    pub fn atlas_upload_submit_ms(&self) -> f64 {
+        self.atlas_upload_submit_ms
     }
     pub fn surface_description(&self) -> String {
         format!(
@@ -1041,38 +1677,121 @@ impl Renderer {
     pub fn height(&self) -> u32 {
         self.config.height
     }
+    /// Uploads geometry under the explicit single-page compatibility contract.
+    ///
+    /// Generic compiled-resource meshing must use [`Self::upload_chunk_pages`]
+    /// so every page referenced by the block model is preserved.
     pub fn upload_chunk(&mut self, position: ChunkPos, section_y: i32, mesh: &CpuMesh) {
-        use wgpu::util::DeviceExt;
-        let vertex = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("chunk-vertices"),
-                contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("chunk-indices"),
-                contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-        if let Some(old) = self.chunks.remove(&(position, section_y)) {
-            self.vertices = self.vertices.saturating_sub(old.vertex_count);
-            self.indices = self.indices.saturating_sub(old.index_count as usize);
-        }
-        self.vertices += mesh.vertices.len();
-        self.indices += mesh.indices.len();
-        self.chunks.insert(
-            (position, section_y),
-            GpuChunk {
-                vertex,
-                index,
-                index_count: mesh.indices.len() as u32,
-                vertex_count: mesh.vertices.len(),
-            },
+        self.upload_chunk_pages(
+            position,
+            section_y,
+            &[PageMesh {
+                texture: TextureHandle(0),
+                translucent: false,
+                mesh: mesh.clone(),
+            }],
         );
+    }
+
+    pub fn upload_chunk_pages(
+        &mut self,
+        position: ChunkPos,
+        section_y: i32,
+        meshes: &[PageMesh],
+    ) -> MeshUploadStats {
+        let started = std::time::Instant::now();
+        let mut reusable = HashMap::new();
+        if let Some(old) = self.chunks.remove(&(position, section_y)) {
+            for page in old.pages {
+                self.vertices = self.vertices.saturating_sub(page.vertex_count);
+                self.indices = self.indices.saturating_sub(page.index_count as usize);
+                reusable.insert((page.texture, page.translucent), page);
+            }
+        }
+        let mut upload = MeshUploadStats::default();
+        let pages = meshes
+            .iter()
+            .filter(|page| !page.mesh.is_empty())
+            .map(|page| {
+                assert!(
+                    (page.texture.0 as usize) < self.page_binds.len(),
+                    "mesh references missing atlas page {}",
+                    page.texture.0
+                );
+                let vertex_bytes = bytemuck::cast_slice(&page.mesh.vertices);
+                let index_bytes = bytemuck::cast_slice(&page.mesh.indices);
+                upload.logical_bytes += vertex_bytes.len() + index_bytes.len();
+                let old = reusable.remove(&(page.texture, page.translucent));
+                let (vertex, vertex_capacity_bytes, index, index_capacity_bytes) =
+                    if let Some(old) = old {
+                        let (vertex, vertex_capacity_bytes, vertex_reallocated) =
+                            reuse_or_allocate_buffer(
+                                &self.device,
+                                old.vertex,
+                                old.vertex_capacity_bytes,
+                                vertex_bytes.len(),
+                                wgpu::BufferUsages::VERTEX,
+                                "chunk-vertices",
+                            );
+                        let (index, index_capacity_bytes, index_reallocated) =
+                            reuse_or_allocate_buffer(
+                                &self.device,
+                                old.index,
+                                old.index_capacity_bytes,
+                                index_bytes.len(),
+                                wgpu::BufferUsages::INDEX,
+                                "chunk-indices",
+                            );
+                        upload.reallocations +=
+                            u64::from(vertex_reallocated) + u64::from(index_reallocated);
+                        upload.reuses +=
+                            u64::from(!vertex_reallocated) + u64::from(!index_reallocated);
+                        (vertex, vertex_capacity_bytes, index, index_capacity_bytes)
+                    } else {
+                        upload.allocations += 2;
+                        let vertex_capacity_bytes = buffer_capacity(vertex_bytes.len());
+                        let index_capacity_bytes = buffer_capacity(index_bytes.len());
+                        (
+                            create_mesh_buffer(
+                                &self.device,
+                                vertex_capacity_bytes,
+                                wgpu::BufferUsages::VERTEX,
+                                "chunk-vertices",
+                            ),
+                            vertex_capacity_bytes,
+                            create_mesh_buffer(
+                                &self.device,
+                                index_capacity_bytes,
+                                wgpu::BufferUsages::INDEX,
+                                "chunk-indices",
+                            ),
+                            index_capacity_bytes,
+                        )
+                    };
+                self.queue.write_buffer(&vertex, 0, vertex_bytes);
+                self.queue.write_buffer(&index, 0, index_bytes);
+                self.vertices += page.mesh.vertices.len();
+                self.indices += page.mesh.indices.len();
+                GpuPageMesh {
+                    texture: page.texture,
+                    translucent: page.translucent,
+                    vertex,
+                    index,
+                    vertex_capacity_bytes,
+                    index_capacity_bytes,
+                    index_count: page.mesh.indices.len() as u32,
+                    vertex_count: page.mesh.vertices.len(),
+                }
+            })
+            .collect();
+        self.chunks
+            .insert((position, section_y), GpuChunk { pages });
         self.mesh_rebuilds += 1;
+        self.mesh_buffer_allocations += upload.allocations;
+        self.mesh_buffer_reallocations += upload.reallocations;
+        self.mesh_buffer_reuses += upload.reuses;
+        upload.submit_ms = started.elapsed().as_secs_f64() * 1000.0;
+        upload
     }
     pub fn remove_chunk(&mut self, position: ChunkPos) {
         let positions = self
@@ -1086,8 +1805,19 @@ impl Renderer {
             let Some(old) = self.chunks.remove(&key) else {
                 continue;
             };
-            self.vertices = self.vertices.saturating_sub(old.vertex_count);
-            self.indices = self.indices.saturating_sub(old.index_count as usize);
+            for page in old.pages {
+                self.vertices = self.vertices.saturating_sub(page.vertex_count);
+                self.indices = self.indices.saturating_sub(page.index_count as usize);
+            }
+        }
+    }
+
+    pub fn remove_section(&mut self, position: ChunkPos, section_y: i32) {
+        if let Some(old) = self.chunks.remove(&(position, section_y)) {
+            for page in old.pages {
+                self.vertices = self.vertices.saturating_sub(page.vertex_count);
+                self.indices = self.indices.saturating_sub(page.index_count as usize);
+            }
         }
     }
     pub fn render(&mut self, camera: Camera) -> Result<(), wgpu::SurfaceError> {
@@ -1116,8 +1846,126 @@ impl Renderer {
             .diagnostic
             .filter(|s| !s.normal_world())
             .map_or_else(|| camera.view_projection(), |s| s.matrix(camera.aspect));
+        let fog = self.fog.unwrap_or(FogPresentation {
+            color: [0.0; 3],
+            start: 0.0,
+            end: 0.0,
+        });
+        let uniform = CameraUniform {
+            matrix,
+            position: [camera.position.x, camera.position.y, camera.position.z, 1.0],
+            fog_color: [fog.color[0], fog.color[1], fog.color[2], 1.0],
+            fog_range: [
+                fog.start,
+                fog.end,
+                if self.fog.is_some() { 1.0 } else { 0.0 },
+                0.0,
+            ],
+        };
         self.queue
-            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&matrix));
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        let frustum = Frustum::from_camera(camera);
+        let visible = visible_section_positions(
+            self.chunks.iter().filter_map(|(key, chunk)| {
+                chunk
+                    .pages
+                    .iter()
+                    .any(|page| page.index_count > 0)
+                    .then_some(*key)
+            }),
+            frustum,
+        );
+        let mut world_draws = visible
+            .iter()
+            .flat_map(|key| {
+                self.chunks[key]
+                    .pages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, page)| page.index_count > 0)
+                    .map(move |(page_index, page)| {
+                        (page.translucent, page.texture, *key, page_index)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let draw_distance = |key: &(ChunkPos, i32)| {
+            let center = Vec3::new(
+                key.0.x as f32 * CHUNK_SIZE as f32 + CHUNK_SIZE as f32 * 0.5,
+                key.1 as f32 * CHUNK_SIZE as f32 + CHUNK_SIZE as f32 * 0.5,
+                key.0.z as f32 * CHUNK_SIZE as f32 + CHUNK_SIZE as f32 * 0.5,
+            );
+            let delta = Vec3::new(
+                center.x - camera.position.x,
+                center.y - camera.position.y,
+                center.z - camera.position.z,
+            );
+            delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
+        };
+        world_draws.sort_by(|a, b| match (a.0, b.0) {
+            (false, true) => std::cmp::Ordering::Less,
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, false) => {
+                (a.1.0, a.2.0.x, a.2.0.z, a.2.1).cmp(&(b.1.0, b.2.0.x, b.2.0.z, b.2.1))
+            }
+            (true, true) => draw_distance(&b.2)
+                .total_cmp(&draw_distance(&a.2))
+                .then_with(|| {
+                    (a.1.0, a.2.0.x, a.2.0.z, a.2.1).cmp(&(b.1.0, b.2.0.x, b.2.0.z, b.2.1))
+                }),
+        });
+        let meshed_sections = self
+            .chunks
+            .values()
+            .filter(|chunk| chunk.pages.iter().any(|page| page.index_count > 0))
+            .count();
+        let texture_page_bind_switches = world_draws
+            .iter()
+            .map(|draw| draw.1)
+            .fold((None, 0), |(previous, switches), texture| {
+                (
+                    Some(texture),
+                    switches + usize::from(previous.is_some() && previous != Some(texture)),
+                )
+            })
+            .1;
+        let mut active_pipelines = Vec::new();
+        if world_draws.iter().any(|draw| !draw.0) || self.item_vertices > 0 {
+            active_pipelines.push(0_u8);
+        }
+        if world_draws.iter().any(|draw| draw.0) {
+            active_pipelines.push(1_u8);
+        }
+        if !self.hud_geometry.selection_vertices.is_empty() {
+            active_pipelines.push(2_u8);
+        }
+        if self.crack_vertices > 0 {
+            active_pipelines.push(3);
+        }
+        if !self.hud_geometry.gui_vertices.is_empty()
+            || !self.hud_geometry.hotbar_vertices.is_empty()
+            || !self.hud_geometry.player_vertices.is_empty()
+        {
+            active_pipelines.push(4);
+        }
+        if !self.hud_geometry.item_vertices.is_empty() {
+            active_pipelines.push(5);
+        }
+        if !self.hud_geometry.vertices.is_empty() || !self.hud_geometry.debug_vertices.is_empty() {
+            active_pipelines.push(6);
+        }
+        let pipeline_switches = active_pipelines
+            .windows(2)
+            .filter(|pair| pair[0] != pair[1])
+            .count();
+        self.submission = RenderSubmissionStats {
+            resident_sections: self.resident_section_count.max(self.chunks.len()),
+            meshed_sections,
+            visible_sections: visible.len(),
+            culled_sections: meshed_sections.saturating_sub(visible.len()),
+            drawn_section_page_batches: world_draws.len(),
+            texture_page_bind_switches,
+            pipeline_switches,
+        };
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -1176,18 +2024,60 @@ impl Renderer {
                 },
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.camera_bind, &[]);
-            for chunk in self.chunks.values() {
-                if chunk.index_count > 0 {
-                    pass.set_vertex_buffer(0, chunk.vertex.slice(..));
-                    pass.set_index_buffer(chunk.index.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..chunk.index_count, 0, 0..1);
+            for (translucent, texture, key, page_index) in &world_draws {
+                if *translucent {
+                    continue;
                 }
+                let page = &self.chunks[key].pages[*page_index];
+                pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
+                pass.set_vertex_buffer(0, page.vertex.slice(..));
+                pass.set_index_buffer(page.index.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..page.index_count, 0, 0..1);
             }
             if self.item_vertices > 0 {
                 pass.set_vertex_buffer(0, self.item_buffer.slice(..));
-                pass.draw(0..self.item_vertices as u32, 0..1);
+                for (texture, range) in &self.item_page_ranges {
+                    pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
+                    pass.draw(range.clone(), 0..1);
+                }
             }
+            if world_draws.iter().any(|draw| draw.0) {
+                pass.set_pipeline(&self.translucent_pipeline);
+                for (_, texture, key, page_index) in world_draws.iter().filter(|draw| draw.0) {
+                    let page = &self.chunks[key].pages[*page_index];
+                    pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
+                    pass.set_vertex_buffer(0, page.vertex.slice(..));
+                    pass.set_index_buffer(page.index.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..page.index_count, 0, 0..1);
+                }
+            }
+        }
+        if !self.hud_geometry.selection_vertices.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("depth-tested-selection-outline"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: None,
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.selection_pipeline);
+            // The selection shader only consumes the camera uniform from this shared bind group;
+            // the atlas bindings are not sampled.
+            pass.set_bind_group(0, &self.page_binds[0], &[]);
+            pass.set_vertex_buffer(0, self.selection_buffer.slice(..));
+            pass.draw(0..self.hud_geometry.selection_vertices.len() as u32, 0..1);
         }
         if self.crack_vertices > 0 {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1210,7 +2100,10 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.crack_pipeline);
-            pass.set_bind_group(0, &self.camera_bind, &[]);
+            let texture = self
+                .crack_texture
+                .expect("visible crack geometry always retains its texture page");
+            pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
             pass.set_vertex_buffer(0, self.crack_buffer.slice(..));
             pass.draw(0..self.crack_vertices as u32, 0..1);
         }
@@ -1231,7 +2124,11 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_pipeline);
-            pass.set_bind_group(0, &self.gui_bind, &[]);
+            pass.set_bind_group(
+                0,
+                &self.page_binds[self.container_background.texture.0 as usize],
+                &[],
+            );
             pass.set_vertex_buffer(0, self.hud_buffer.slice(512 * 1024..));
             pass.draw(0..self.hud_geometry.gui_vertices.len() as u32, 0..1);
         }
@@ -1252,7 +2149,11 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_pipeline);
-            pass.set_bind_group(0, &self.hotbar_bind, &[]);
+            pass.set_bind_group(
+                0,
+                &self.page_binds[self.hud_texture.texture.0 as usize],
+                &[],
+            );
             pass.set_vertex_buffer(0, self.hud_buffer.slice(768 * 1024..));
             pass.draw(0..self.hud_geometry.hotbar_vertices.len() as u32, 0..1);
         }
@@ -1273,7 +2174,11 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_pipeline);
-            pass.set_bind_group(0, &self.player_bind, &[]);
+            pass.set_bind_group(
+                0,
+                &self.page_binds[self.player_skin.texture.0 as usize],
+                &[],
+            );
             pass.set_vertex_buffer(0, self.hud_buffer.slice(896 * 1024..));
             pass.draw(0..self.hud_geometry.player_vertices.len() as u32, 0..1);
         }
@@ -1301,9 +2206,14 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_item_pipeline);
-            pass.set_bind_group(0, &self.camera_bind, &[]);
             pass.set_vertex_buffer(0, self.hud_buffer.slice(1024 * 1024..));
-            pass.draw(0..self.hud_geometry.item_vertices.len() as u32, 0..1);
+            let mut start = 0_u32;
+            for page in &self.hud_geometry.item_pages {
+                pass.set_bind_group(0, &self.page_binds[page.texture.0 as usize], &[]);
+                let end = start + page.vertices.len() as u32;
+                pass.draw(start..end, 0..1);
+                start = end;
+            }
         }
         if !self.hud_geometry.vertices.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1332,7 +2242,9 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.hud_pipeline);
-            pass.set_bind_group(0, &self.camera_bind, &[]);
+            // All textured HUD items are submitted through item_pages above. This pass contains
+            // only procedural color geometry whose shader branch does not sample the bound page.
+            pass.set_bind_group(0, &self.page_binds[0], &[]);
             pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
             pass.draw(0..self.hud_geometry.vertices.len() as u32, 0..1);
             if !self.hud_geometry.debug_vertices.is_empty() {
@@ -1438,6 +2350,17 @@ fn upload_texture(
     height: u32,
     rgba: &[u8],
 ) -> Texture {
+    upload_texture_with_sampling(device, queue, width, height, rgba, TextureSampling::Nearest)
+}
+
+fn upload_texture_with_sampling(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    sampling: TextureSampling,
+) -> Texture {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("terrain-atlas"),
         size: wgpu::Extent3d {
@@ -1472,10 +2395,15 @@ fn upload_texture(
         },
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let filter = match sampling {
+        TextureSampling::Nearest => wgpu::FilterMode::Nearest,
+        TextureSampling::Linear => wgpu::FilterMode::Linear,
+    };
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
+        mag_filter: filter,
+        min_filter: filter,
         mipmap_filter: wgpu::FilterMode::Nearest,
+        anisotropy_clamp: 1,
         ..Default::default()
     });
     Texture { view, sampler }
@@ -1494,6 +2422,29 @@ fn projection(c: Camera) -> [[f32; 4]; 4] {
         [0., 0., -1., 0.],
     ]
 }
+
+fn selection_primitive_state() -> wgpu::PrimitiveState {
+    wgpu::PrimitiveState {
+        topology: wgpu::PrimitiveTopology::LineList,
+        cull_mode: None,
+        ..Default::default()
+    }
+}
+
+fn selection_depth_stencil_state() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: wgpu::TextureFormat::Depth24Plus,
+        depth_write_enabled: false,
+        depth_compare: wgpu::CompareFunction::LessEqual,
+        stencil: Default::default(),
+        bias: wgpu::DepthBiasState {
+            constant: -1,
+            slope_scale: -1.0,
+            clamp: 0.0,
+        },
+    }
+}
+
 fn view(c: Camera) -> [[f32; 4]; 4] {
     let (right, up, forward) = c.basis();
     view_from_basis(c.position, right, up, forward)
@@ -1557,6 +2508,172 @@ fn transpose(matrix: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linear_underwater_fog_keeps_nearby_geometry_and_attenuates_distance() {
+        let fog = FogPresentation {
+            color: [0.2, 0.4, 0.62],
+            start: 2.0,
+            end: 18.0,
+        };
+        assert_eq!(fog.linear_amount(1.0), 0.0);
+        assert_eq!(fog.linear_amount(2.0), 0.0);
+        assert!((fog.linear_amount(10.0) - 0.5).abs() < 0.001);
+        assert_eq!(fog.linear_amount(24.0), 1.0);
+    }
+
+    #[test]
+    fn selection_pipeline_depth_tests_without_writing_depth() {
+        let depth = selection_depth_stencil_state();
+        assert_eq!(depth.format, wgpu::TextureFormat::Depth24Plus);
+        assert!(!depth.depth_write_enabled);
+        assert_eq!(depth.depth_compare, wgpu::CompareFunction::LessEqual);
+        assert_eq!(
+            selection_primitive_state().topology,
+            wgpu::PrimitiveTopology::LineList
+        );
+    }
+
+    #[test]
+    fn mesh_buffer_capacity_reuses_grows_and_shrinks_after_large_reduction() {
+        assert_eq!(buffer_capacity(0), 256);
+        assert_eq!(buffer_capacity(1), 256);
+        assert_eq!(buffer_capacity(257), 512);
+        assert_eq!(
+            buffer_capacity_action(1024, 1024),
+            BufferCapacityAction::Reuse
+        );
+        assert_eq!(
+            buffer_capacity_action(1024, 1100),
+            BufferCapacityAction::Reallocate(2048)
+        );
+        assert_eq!(
+            buffer_capacity_action(1024, 768),
+            BufferCapacityAction::Reuse
+        );
+        assert_eq!(
+            buffer_capacity_action(1024, 0),
+            BufferCapacityAction::Reallocate(256)
+        );
+        assert_eq!(
+            buffer_capacity_action(4096, 512),
+            BufferCapacityAction::Reallocate(512)
+        );
+        assert_eq!(
+            buffer_capacity_action(4096, 1024),
+            BufferCapacityAction::Reuse
+        );
+        assert_eq!(
+            buffer_capacity_action(4096, 512 - 1),
+            BufferCapacityAction::Reallocate(512)
+        );
+    }
+
+    fn test_camera() -> Camera {
+        Camera {
+            position: Vec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            aspect: 1.0,
+            fov_y: 90.0_f32.to_radians(),
+            near: 1.0,
+            far: 10.0,
+        }
+    }
+
+    #[test]
+    fn frustum_accepts_inside_intersecting_and_near_far_edges() {
+        let frustum = Frustum::from_camera(test_camera());
+        let aabb = |min, max| rustcraft_engine_core::Aabb::new(min, max);
+        assert!(
+            frustum.intersects_aabb(aabb(Vec3::new(-1.0, -1.0, 4.0), Vec3::new(1.0, 1.0, 6.0)))
+        );
+        assert!(
+            !frustum.intersects_aabb(aabb(Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, -1.0)))
+        );
+        assert!(frustum.intersects_aabb(aabb(Vec3::new(3.5, -1.0, 4.0), Vec3::new(5.5, 1.0, 6.0))));
+        assert!(
+            frustum.intersects_aabb(aabb(Vec3::new(-0.5, -0.5, 0.5), Vec3::new(0.5, 0.5, 1.5)))
+        );
+        assert!(
+            frustum.intersects_aabb(aabb(Vec3::new(-0.5, -0.5, 9.5), Vec3::new(0.5, 0.5, 10.5)))
+        );
+        assert!(
+            !frustum.intersects_aabb(aabb(Vec3::new(-0.5, -0.5, 11.0), Vec3::new(0.5, 0.5, 12.0)))
+        );
+    }
+
+    #[test]
+    fn frustum_handles_camera_rotation_and_negative_sections() {
+        let mut camera = test_camera();
+        camera.yaw = std::f32::consts::FRAC_PI_2;
+        camera.far = 64.0;
+        let frustum = Frustum::from_camera(camera);
+        assert!(frustum.intersects_section(ChunkPos { x: 1, z: 0 }, 0));
+        assert!(!frustum.intersects_section(ChunkPos { x: -3, z: 0 }, 0));
+
+        camera.position = Vec3::new(-24.0, 8.0, -48.0);
+        camera.yaw = 0.0;
+        let frustum = Frustum::from_camera(camera);
+        assert!(frustum.intersects_section(ChunkPos { x: -2, z: -2 }, 0));
+    }
+
+    #[test]
+    fn camera_visibility_changes_submission_set_without_changing_resident_sections() {
+        let sections = (-4..=4)
+            .flat_map(|z| (-4..=4).map(move |x| (ChunkPos { x, z }, 0)))
+            .collect::<Vec<_>>();
+        let camera = Camera {
+            position: Vec3::new(0., 8., -24.),
+            yaw: 0.,
+            pitch: 0.,
+            aspect: 16. / 9.,
+            fov_y: 70_f32.to_radians(),
+            near: 0.05,
+            far: 128.,
+        };
+        let forward =
+            visible_section_positions(sections.iter().copied(), Frustum::from_camera(camera));
+        let turned = visible_section_positions(
+            sections.iter().copied(),
+            Frustum::from_camera(Camera {
+                yaw: std::f32::consts::PI,
+                ..camera
+            }),
+        );
+        assert!(!forward.is_empty());
+        assert_ne!(forward, turned);
+        assert!(forward.len() < sections.len());
+        assert!(turned.len() < sections.len());
+        assert_eq!(sections.len(), 81, "resident snapshot set is unchanged");
+    }
+
+    #[test]
+    fn section_snapshot_halo_copies_neighbor_voxels_and_light_at_negative_boundaries() {
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: -1, y: 0, z: 0 }, BlockId(4));
+        world.set(BlockPos { x: 0, y: 0, z: 0 }, BlockId(5));
+        world.set_light(
+            BlockPos { x: -1, y: 0, z: 0 },
+            rustcraft_engine_core::VoxelLight::new(7, 11),
+        );
+        let extracted = RenderWorld::from_world(&world);
+        let right = extracted
+            .chunks()
+            .find(|chunk| chunk.position.x == 0)
+            .unwrap();
+        let left = extracted
+            .chunks()
+            .find(|chunk| chunk.position.x == -1)
+            .unwrap();
+        assert_eq!(left.state((16, 0, 0)).block, BlockId(5));
+        assert_eq!(right.state((-1, 0, 0)).block, BlockId(4));
+        assert_eq!(
+            right.light((-1, 0, 0)),
+            rustcraft_engine_core::VoxelLight::new(7, 11)
+        );
+        assert_eq!(extracted.snapshot_bytes(), 2 * 18 * 18 * 18 * 9);
+    }
 
     // Interpret the uploaded bytes exactly as WGSL does: outer array = columns.
     fn shader_transform(matrix: [[f32; 4]; 4], p: [f32; 4]) -> [f32; 4] {
@@ -1702,8 +2819,9 @@ mod tests {
                 &mut mesh,
                 BlockPos { x: 0, y: 0, z: 0 },
                 face,
-                TextureTile { x: 1, y: 0 },
+                AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap(),
                 1.0,
+                None,
             );
             let base = (face_number * 4) as u32;
             assert_eq!(
@@ -1716,7 +2834,13 @@ mod tests {
                 [1., 0.],
                 [0., 0.],
             ]) {
-                assert_eq!(vertex.uv, tile_uv(TextureTile { x: 1, y: 0 }, expected_uv));
+                assert_eq!(
+                    vertex.uv,
+                    region_uv(
+                        AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap(),
+                        expected_uv,
+                    )
+                );
             }
             for triangle in mesh.indices[face_number * 6..].as_chunks::<3>().0 {
                 let p: [[f32; 3]; 3] =
@@ -1733,14 +2857,35 @@ mod tests {
     #[test]
     fn atlas_uv_bounds_use_top_left_origin() {
         assert_eq!(
-            tile_uv(TextureTile { x: 1, y: 0 }, [0., 0.]),
+            region_uv(
+                AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap(),
+                [0., 0.],
+            ),
             [16.0 / 256.0, 0.]
         );
         assert_eq!(
-            tile_uv(TextureTile { x: 1, y: 0 }, [1., 1.]),
+            region_uv(
+                AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap(),
+                [1., 1.],
+            ),
             [32.0 / 256.0, 16.0 / 256.0]
         );
-        assert_eq!(tile_uv(TextureTile { x: 15, y: 15 }, [1., 1.]), [1., 1.]);
+        assert_eq!(
+            region_uv(
+                AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 15, 15).unwrap(),
+                [1., 1.],
+            ),
+            [1., 1.]
+        );
+        let arbitrary =
+            AtlasRegion::from_pixels(TextureHandle(3), [1024, 512], [13, 27, 71, 45]).unwrap();
+        assert_eq!(arbitrary.texture, TextureHandle(3));
+        assert_eq!(arbitrary.uv_min, [13.0 / 1024.0, 27.0 / 512.0]);
+        assert_eq!(arbitrary.uv_max, [84.0 / 1024.0, 72.0 / 512.0]);
+        assert!(AtlasRegion::from_pixels(TextureHandle(0), [0, 512], [0, 0, 1, 1]).is_none());
+        assert!(AtlasRegion::from_pixels(TextureHandle(0), [512, 0], [0, 0, 1, 1]).is_none());
+        assert!(AtlasRegion::from_pixels(TextureHandle(0), [512, 512], [0, 0, 0, 1]).is_none());
+        assert!(AtlasRegion::from_pixels(TextureHandle(0), [512, 512], [500, 0, 13, 1]).is_none());
     }
 
     #[test]
@@ -1776,8 +2921,8 @@ mod tests {
     }
     struct Textures;
     impl BlockTextureResolver for Textures {
-        fn texture(&self, block: BlockId, _face: Face) -> Option<TextureTile> {
-            (block.0 != 0).then_some(TextureTile { x: 1, y: 0 })
+        fn texture(&self, block: BlockId, _face: Face) -> Option<AtlasRegion> {
+            (block.0 != 0).then(|| AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap())
         }
         fn opaque(&self, block: BlockId) -> bool {
             block.0 != 0
@@ -1801,6 +2946,39 @@ mod tests {
         let world = World::new(BlockId(0));
         let presentation = RenderWorld::from_world(&world);
         assert_eq!(presentation.chunk_count(), 0);
+    }
+    #[test]
+    fn missing_sections_use_world_default_instead_of_numeric_zero() {
+        let world = World::new(BlockId(41));
+        let presentation = RenderWorld::from_world(&world);
+        assert_eq!(
+            presentation.block(BlockPos { x: 50, y: -7, z: 9 }),
+            BlockId(41)
+        );
+    }
+
+    #[test]
+    fn meshing_batches_faces_by_compiled_atlas_page() {
+        struct Paged;
+        impl BlockTextureResolver for Paged {
+            fn texture(&self, block: BlockId, _face: Face) -> Option<AtlasRegion> {
+                (block.0 != 0).then(|| AtlasRegion::full(TextureHandle(block.0 - 1)))
+            }
+            fn opaque(&self, block: BlockId) -> bool {
+                block.0 != 0
+            }
+        }
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 0, y: 0, z: 0 }, BlockId(1));
+        world.set(BlockPos { x: 2, y: 0, z: 0 }, BlockId(2));
+        let presentation = RenderWorld::from_world(&world);
+        let chunk = presentation.chunks().next().unwrap();
+        let pages = build_chunk_mesh_pages(&presentation, chunk, &Paged);
+        assert_eq!(
+            pages.iter().map(|page| page.texture).collect::<Vec<_>>(),
+            [TextureHandle(0), TextureHandle(1)]
+        );
+        assert!(pages.iter().all(|page| page.mesh.indices.len() == 36));
     }
 
     #[test]
@@ -1890,8 +3068,9 @@ mod tests {
                 &mut mesh,
                 BlockPos { x: 0, y: 0, z: 0 },
                 face,
-                TextureTile { x: 4, y: 7 },
+                AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 4, 7).unwrap(),
                 1.0,
+                None,
             );
             let a = mesh.vertices[0].position;
             let b = mesh.vertices[1].position;
@@ -1941,6 +3120,51 @@ mod item_fidelity_tests {
             assert!(positions.iter().flatten().all(|v| v.abs() == 0.5));
         }
     }
+
+    fn multi_page_model() -> inspection::BlockModel {
+        inspection::BlockModel {
+            state: BlockState::new(BlockId(7)),
+            textures: [
+                AtlasRegion::full(TextureHandle(1)),
+                AtlasRegion::full(TextureHandle(0)),
+                AtlasRegion::full(TextureHandle(1)),
+                AtlasRegion::full(TextureHandle(0)),
+                AtlasRegion::full(TextureHandle(2)),
+                AtlasRegion::full(TextureHandle(0)),
+            ],
+            tints: [[1.; 3]; 6],
+            rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+        }
+    }
+
+    #[test]
+    fn dropped_block_batches_every_face_by_atlas_page() {
+        let model = multi_page_model();
+        let mut pages = Vec::new();
+        append_dropped_item_pages(
+            &mut pages,
+            &[ItemSprite {
+                model: Some(model),
+                position: Vec3::new(3., 4., 5.),
+                top: model.texture(Face::Top),
+                side: model.texture(Face::North),
+                bottom: model.texture(Face::Bottom),
+                tint: [1.; 3],
+                age: 17.,
+                count: 6,
+                hover_start: 0.25,
+            }],
+        );
+        assert_eq!(
+            pages.iter().map(|page| page.texture).collect::<Vec<_>>(),
+            [TextureHandle(0), TextureHandle(1), TextureHandle(2)]
+        );
+        assert_eq!(
+            pages.iter().map(|page| page.vertices.len()).sum::<usize>(),
+            3 * 36
+        );
+        assert!(pages.iter().all(|page| !page.vertices.is_empty()));
+    }
 }
 
 #[cfg(test)]
@@ -1948,8 +3172,8 @@ mod m2_tests {
     use super::*;
     struct Materials;
     impl BlockTextureResolver for Materials {
-        fn texture(&self, _: BlockId, _: Face) -> Option<TextureTile> {
-            Some(TextureTile { x: 0, y: 0 })
+        fn texture(&self, _: BlockId, _: Face) -> Option<AtlasRegion> {
+            Some(AtlasRegion::full(TextureHandle(0)))
         }
         fn opaque(&self, b: BlockId) -> bool {
             b.0 == 1
@@ -1994,5 +3218,110 @@ mod m2_tests {
                 .any(|(l, d)| l.shade > d.shade)
         );
         assert_eq!(dark.indices, lit.indices);
+    }
+}
+
+#[cfg(test)]
+mod liquid_tests {
+    use super::*;
+
+    struct LiquidMaterials;
+
+    impl BlockTextureResolver for LiquidMaterials {
+        fn texture(&self, block: BlockId, _face: Face) -> Option<AtlasRegion> {
+            (block.0 != 0).then_some(AtlasRegion::full(TextureHandle(0)))
+        }
+        fn opaque(&self, block: BlockId) -> bool {
+            block == BlockId(1)
+        }
+        fn visible(&self, block: BlockId) -> bool {
+            block.0 != 0
+        }
+        fn translucent(&self, block: BlockId) -> bool {
+            block == BlockId(2)
+        }
+        fn liquid_surface_height(&self, state: BlockState) -> Option<f32> {
+            (state.block == BlockId(2)).then_some(0.875)
+        }
+    }
+
+    fn counts(world: &World) -> (usize, usize, Vec<Vertex>) {
+        let snapshot = RenderWorld::from_world(world);
+        let pages = snapshot
+            .chunks()
+            .flat_map(|chunk| build_section_mesh_pages(chunk, &LiquidMaterials))
+            .collect::<Vec<_>>();
+        let opaque = pages
+            .iter()
+            .filter(|page| !page.translucent)
+            .map(|page| page.mesh.indices.len())
+            .sum();
+        let liquid = pages
+            .iter()
+            .filter(|page| page.translucent)
+            .map(|page| page.mesh.indices.len())
+            .sum();
+        let vertices = pages
+            .into_iter()
+            .flat_map(|page| page.mesh.vertices)
+            .collect();
+        (opaque, liquid, vertices)
+    }
+
+    #[test]
+    fn static_liquid_is_lowered_blended_and_emits_no_internal_faces() {
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 1, y: 1, z: 1 }, BlockId(2));
+        let (_, liquid, vertices) = counts(&world);
+        assert_eq!(liquid, 6 * 6);
+        assert!(
+            vertices
+                .iter()
+                .any(|v| (v.position[1] - 1.875).abs() < 1e-6)
+        );
+
+        world.set(BlockPos { x: 2, y: 1, z: 1 }, BlockId(2));
+        let (_, liquid, _) = counts(&world);
+        assert_eq!(liquid, 10 * 6, "water-water face is culled");
+    }
+
+    #[test]
+    fn liquid_shore_and_floor_keep_the_opaque_neighbor_surface() {
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 1, y: 1, z: 1 }, BlockId(2));
+        world.set(BlockPos { x: 2, y: 1, z: 1 }, BlockId(1));
+        let (opaque, liquid, _) = counts(&world);
+        assert_eq!(liquid, 5 * 6, "liquid face against solid is hidden");
+        assert_eq!(opaque, 6 * 6, "the shore block keeps its own exposed faces");
+
+        world.set(BlockPos { x: 2, y: 1, z: 1 }, BlockId(0));
+        world.set(BlockPos { x: 1, y: 0, z: 1 }, BlockId(1));
+        let (opaque, liquid, _) = counts(&world);
+        assert_eq!(liquid, 5 * 6, "liquid bottom face is hidden by the floor");
+        assert_eq!(
+            opaque,
+            6 * 6,
+            "floor top stays visible through static water"
+        );
+    }
+
+    #[test]
+    fn water_water_faces_are_culled_across_section_and_chunk_boundaries() {
+        for (left, right) in [
+            (
+                BlockPos { x: 3, y: 15, z: 3 },
+                BlockPos { x: 3, y: 16, z: 3 },
+            ),
+            (
+                BlockPos { x: 15, y: 4, z: 3 },
+                BlockPos { x: 16, y: 4, z: 3 },
+            ),
+        ] {
+            let mut world = World::new(BlockId(0));
+            world.set(left, BlockId(2));
+            world.set(right, BlockId(2));
+            let (_, liquid, _) = counts(&world);
+            assert_eq!(liquid, 10 * 6);
+        }
     }
 }

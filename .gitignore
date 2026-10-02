@@ -1,17 +1,40 @@
 /target/
-/Cargo.lock.tmp
+**/target/
+saves/
+/release-dist/
+/dist/
+/.release-staging/
+/atlas-debug/
+/render-tests/
+/benchmark-worlds/
+/test-worlds/
+/local-worlds/
+/resource-cache/
+/.resource-cache/
+/.content-cache/
+/.cache/
+/.code-graph/
+/.idea/
+/.vscode/
+/.fleet/
+/.zed/
 *.swp
 *.swo
 *.profraw
 *.flamegraph.svg
-/.idea/
-/.vscode/
+__pycache__/
+*.py[cod]
 .DS_Store
+Thumbs.db
+/Cargo.lock.tmp
 
 # Local/reference material is intentionally not committed by default.
 /reference/minecraft-beta-1.7.3-src/
+/reference/assets/**
 /reference/external/*
 !/reference/external/.gitkeep
+
+# Reproducible local reference payloads; keep their policy/source maps tracked.
 /reference/assets/vanilla-b1.7.3/
 /reference/assets/vanilla-b1.7.3.zip
 

@@ -3,10 +3,13 @@ name = "rustcraft-game-api"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
+blake3.workspace = true
 rustcraft-content.workspace = true
 rustcraft-engine-core.workspace = true

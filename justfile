@@ -125,8 +125,17 @@ bench-m2:
 bench-m3:
     cargo run -p rustcraft-client -- --bench-m3
 
+# R1.2 deterministic CPU extraction/meshing scaling and dirty-remesh workload.
+render-scale profile="release":
+    cargo run --{{profile}} -p rustcraft-client -- --render-scale
+
+# Real renderer camera/culling and capacity-reuse submission diagnostic.
+render-camera-motion:
+    cargo run --release -p rustcraft-client -- --camera-motion
+
 # Deterministic offscreen fidelity suite, no surface or visible window.
 fidelity-m3:
+    cargo test -p rustcraft-render chunk_dropped_and_gui_multi_page_paths_render_every_page -- --ignored
     cargo run -p rustcraft-client -- --fidelity-m3
 
 # Surface-independent PNG inspector. Modes: solid, corners, uv, atlas.
@@ -134,13 +143,51 @@ render-test scene *args:
     cargo run -p rustcraft-client -- --render-test {{quote(scene)}} {{args}}
 
 render-test-all:
+    cargo test -p rustcraft-render chunk_dropped_and_gui_multi_page_paths_render_every_page -- --ignored
     cargo run -p rustcraft-client -- --render-test-all
 
 survival-scenario:
     cargo run -p rustcraft-server -- --survival
+
+world-roundtrip:
+    cargo run -p rustcraft-server -- --world-roundtrip
+
+worldgen-bench:
+    cargo run --release -p rustcraft-server -- --worldgen-bench
+
+persistence-bench:
+    cargo run --release -p rustcraft-server -- --persistence-bench
+
+# Print the sole authoritative Engine/Product SemVer.
+version:
+    python3 scripts/release.py version
+
+# Build platform client/server archives and checksum sidecars beneath ignored target/release-dist/.
+release-build:
+    python3 scripts/release.py build
+
+# Run full workspace CI, rebuild release archives, and validate their structure/executables.
+release-check: ci release-build
+    python3 scripts/release.py check
 
 # Non-Minecraft Game API integration slice. Fails if its normal dependency graph gains the
 # first-party Minecraft package, legacy Minecraft gameplay crates, or M0-M3 policy runtime.
 sample-game:
     @deps="$$(cargo tree -p rustcraft-sandbox-test --edges normal --prefix none)"; if rg -q 'rustcraft-(minecraft-b173|gameplay-blocks|gameplay-flat-world|runtime)' <<<"$$deps"; then printf '%s\n' "$$deps" >&2; echo "sample-game dependency boundary violated" >&2; exit 1; fi
     cargo run -p rustcraft-sandbox-test
+
+# Compile/report a native resource package rooted at assets/<namespace>/textures/.
+resource-report root package:
+    cargo run -p rustcraft-content --bin rustcraft-resource -- report {{quote(root)}} {{quote(package)}}
+
+inspect-resource root package resource:
+    cargo run -p rustcraft-content --bin rustcraft-resource -- inspect {{quote(root)}} {{quote(package)}} {{quote(resource)}}
+
+atlas-debug root package output="target/atlas-debug":
+    cargo run -p rustcraft-content --bin rustcraft-resource -- atlas-debug {{quote(root)}} {{quote(package)}} {{quote(output)}}
+
+resource-stress count="1000":
+    cargo run -p rustcraft-content --bin rustcraft-resource -- stress {{quote(count)}}
+
+minecraft-resource-report:
+    cargo run -p rustcraft-client -- --resource-report

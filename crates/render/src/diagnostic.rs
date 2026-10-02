@@ -160,7 +160,10 @@ fn cube(mesh: &mut CpuMesh, origin: [f32; 3], stage: Stage) {
             mesh.vertices.push(Vertex {
                 position: std::array::from_fn(|axis| corner[axis] + origin[axis]),
                 uv: if stage.uses_atlas() {
-                    tile_uv(TextureTile { x: 1, y: 0 }, uv)
+                    region_uv(
+                        AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0).unwrap(),
+                        uv,
+                    )
                 } else {
                     uv
                 },
@@ -183,28 +186,34 @@ fn section_mesh(section_y: i32) -> CpuMesh {
         fn opaque(&self, block: BlockId) -> bool {
             block == BlockId(1)
         }
-        fn texture(&self, _: BlockId, _: Face) -> Option<TextureTile> {
-            Some(TextureTile { x: 1, y: 0 })
+        fn texture(&self, _: BlockId, _: Face) -> Option<AtlasRegion> {
+            AtlasRegion::grid_cell(TextureHandle(0), 16, 16, 1, 0)
         }
     }
     let position = ChunkPos { x: 0, z: 0 };
-    let mut chunk = RenderChunk {
-        position,
-        section_y,
-        blocks: vec![BlockState::new(BlockId(0)); 4096],
-    };
+    let mut source = World::new(BlockId(0));
     for z in 0..3 {
         for x in 0..3 {
-            chunk.blocks[block_index((x, 1, z))] = BlockState::new(BlockId(1));
+            source.set(
+                BlockPos {
+                    x,
+                    y: section_y * 16 + 1,
+                    z,
+                },
+                BlockId(1),
+            );
         }
     }
-    let mut world = RenderWorld::default();
-    world.chunks.insert((position, section_y), chunk.clone());
+    let world = RenderWorld::from_world(&source);
+    let chunk = world
+        .chunks()
+        .find(|chunk| chunk.position == position && chunk.section_y == section_y)
+        .expect("diagnostic section");
     eprintln!(
         "diagnostic section=(0,{section_y},0) world_origin={:?}",
         section_origin(position, section_y)
     );
-    let mut mesh = build_chunk_mesh(&world, &chunk, &Stone);
+    let mut mesh = build_chunk_mesh(&world, chunk, &Stone);
     for v in &mut mesh.vertices {
         v.shade = 1.0;
     }

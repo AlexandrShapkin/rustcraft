@@ -1,56 +1,168 @@
 //! First-party Minecraft Beta 1.7.3 game package composition.
 //!
-//! Existing M0-M3 content modules are re-exported during incremental migration, while this
-//! package also registers through the same public Game API used by other games and native mods.
+//! Authored definitions are semantic. Historical Beta numeric IDs remain only in the legacy
+//! M0-M3 adapter and are resolved explicitly from semantic definitions while that runtime migrates.
 
+use rustcraft_content::{
+    PackageId, ResourceId,
+    resources::{PixelRect, ResourceError, ResourcePackage, SamplerPolicy},
+};
 use rustcraft_game_api::{
-    CollisionDescriptor, ContentId, FaceResources, GamePackage, GameProfile, GameRegistry,
-    LightDescriptor, MaterialClass, RegistrationError, ScheduleStage, SystemDescriptor,
-    VoxelDefinition,
+    BlockKey, CollisionDescriptor, CompiledGameProfile, ContentId, FaceResources, GamePackage,
+    GameProfile, GameRegistry, LightDescriptor, MaterialClass, RegistrationError, ScheduleStage,
+    SystemDescriptor, TextureKey, VoxelDefinition,
 };
 use rustcraft_mod_api::{FaceTextures, Material};
+use std::{collections::BTreeSet, path::Path};
 
 pub use rustcraft_gameplay_blocks as blocks;
 pub use rustcraft_gameplay_flat_world as flat_world;
+pub mod player_persistence;
 
-pub const PACKAGE_ID: ContentId = ContentId::new("minecraft_b173:package/game");
-pub const PROFILE_ID: ContentId = ContentId::new("minecraft_b173:profile/default");
+/// Static-water camera presentation policy consumed by the client renderer adapter.
+pub const UNDERWATER_FOG_COLOR: [f32; 3] = [0.20, 0.40, 0.62];
+pub const UNDERWATER_FOG_START: f32 = 2.0;
+pub const UNDERWATER_FOG_END: f32 = 18.0;
+pub mod worldgen;
+
+fn id(value: &str) -> ContentId {
+    ContentId::parse(value).expect("first-party semantic ID is valid")
+}
+
+fn package_id(value: &str) -> PackageId {
+    PackageId::parse(value).expect("first-party package ID is valid")
+}
+
+fn resource_id(value: &str) -> ResourceId {
+    ResourceId::parse(value).expect("first-party resource ID is valid")
+}
+
+fn block_key(value: &str) -> BlockKey {
+    BlockKey::parse(value).expect("first-party block key is valid")
+}
+
+fn texture_key(legacy: &str) -> TextureKey {
+    let (_, path) = legacy
+        .split_once(':')
+        .expect("legacy first-party texture is namespaced");
+    TextureKey::parse(format!("minecraft_b173:textures/block/{path}"))
+        .expect("adapted first-party texture key is valid")
+}
+
+pub mod resource_keys {
+    use rustcraft_content::ResourceId;
+
+    fn key(value: &str) -> ResourceId {
+        ResourceId::parse(value).expect("first-party resource ID is valid")
+    }
+
+    pub fn inventory() -> ResourceId {
+        key("minecraft_b173:textures/gui/inventory")
+    }
+    pub fn hud() -> ResourceId {
+        key("minecraft_b173:textures/gui/hud")
+    }
+    pub fn player() -> ResourceId {
+        key("minecraft_b173:textures/entity/player")
+    }
+    pub fn destroy_stage(stage: u8) -> ResourceId {
+        key(&format!(
+            "minecraft_b173:textures/effect/destroy_stage_{}",
+            stage.min(9)
+        ))
+    }
+}
+
+/// Beta-specific virtual resource importer. The generic compiler only sees semantic textures and
+/// file/crop sources; it has no knowledge of terrain tile numbers or historical paths.
+pub fn legacy_resource_package(terrain_path: &Path) -> Result<ResourcePackage, ResourceError> {
+    let root = terrain_path.parent().unwrap_or_else(|| Path::new("."));
+    let terrain_name = terrain_path
+        .file_name()
+        .map(Path::new)
+        .unwrap_or_else(|| Path::new("terrain.png"));
+    let mut package =
+        ResourcePackage::new(package_id("minecraft_b173:package/legacy_resources"), root);
+    let mut seen = BTreeSet::new();
+    for block in blocks::BLOCKS {
+        for face in 0..6 {
+            let texture = block.textures.face(face);
+            if !seen.insert(texture) {
+                continue;
+            }
+            let Some((x, y)) = blocks::atlas_tile(texture) else {
+                continue;
+            };
+            package.add_texture(
+                resource_id(texture_key(texture).as_str()),
+                terrain_name,
+                Some(PixelRect {
+                    x: u32::from(x) * 16,
+                    y: u32::from(y) * 16,
+                    width: 16,
+                    height: 16,
+                }),
+                SamplerPolicy::Nearest,
+            )?;
+        }
+    }
+    for stage in 0..10 {
+        package.add_texture(
+            resource_keys::destroy_stage(stage),
+            terrain_name,
+            Some(PixelRect {
+                x: u32::from(stage) * 16,
+                y: 15 * 16,
+                width: 16,
+                height: 16,
+            }),
+            SamplerPolicy::Nearest,
+        )?;
+    }
+    for (id, path) in [
+        (resource_keys::inventory(), Path::new("gui/inventory.png")),
+        (resource_keys::hud(), Path::new("gui/gui.png")),
+        (resource_keys::player(), Path::new("mob/char.png")),
+    ] {
+        package.add_texture(id, path, None, SamplerPolicy::Nearest)?;
+    }
+    Ok(package)
+}
 
 #[derive(Debug, Default)]
 pub struct MinecraftB173Package;
 
 impl GamePackage for MinecraftB173Package {
-    fn id(&self) -> ContentId {
-        PACKAGE_ID
+    fn id(&self) -> PackageId {
+        package_id("minecraft_b173:package/game")
     }
 
     fn register(&self, registry: &mut GameRegistry) -> Result<(), RegistrationError> {
         registry.register_package(self.id())?;
         for block in blocks::BLOCKS {
             let textures = match block.textures {
-                FaceTextures::All(resource) => FaceResources::All(ContentId::new(resource)),
+                FaceTextures::All(resource) => FaceResources::All(texture_key(resource)),
                 FaceTextures::TopSideBottom { top, side, bottom } => FaceResources::TopSideBottom {
-                    top: ContentId::new(top),
-                    side: ContentId::new(side),
-                    bottom: ContentId::new(bottom),
+                    top: texture_key(top),
+                    side: texture_key(side),
+                    bottom: texture_key(bottom),
                 },
-                FaceTextures::Faces(resources) => {
-                    FaceResources::Faces(resources.map(ContentId::new))
-                }
+                FaceTextures::Faces(resources) => FaceResources::Faces(resources.map(texture_key)),
             };
             registry.register_block(VoxelDefinition {
-                id: block.id,
-                key: ContentId::new(block.name),
+                key: block_key(block.name),
                 collision: if block.solid {
                     CollisionDescriptor::FullCube
                 } else {
                     CollisionDescriptor::Empty
                 },
+                targetable: block.targetable,
                 material: match block.material {
                     Material::Invisible => MaterialClass::Invisible,
                     Material::Opaque => MaterialClass::Opaque,
                     Material::Cutout => MaterialClass::Cutout,
                     Material::Translucent => MaterialClass::Translucent,
+                    Material::Liquid => MaterialClass::Liquid,
                 },
                 textures,
                 light: LightDescriptor {
@@ -58,7 +170,13 @@ impl GamePackage for MinecraftB173Package {
                     sky_opacity: block.sky_opacity,
                     block_opacity: block.light_opacity,
                 },
-                capabilities: vec![ContentId::new("voxel_std:capability/block")],
+                base_rotation: block.base_model_rotation,
+                orientation: block.orientation_property,
+                face_tints: std::array::from_fn(|face| {
+                    blocks::tint(block.id, face == 4)
+                        .map(|channel| (channel * f32::from(u16::MAX)).round() as u16)
+                }),
+                capabilities: vec![id("voxel_std:capability/block")],
             })?;
         }
         Ok(())
@@ -68,9 +186,12 @@ impl GamePackage for MinecraftB173Package {
 #[must_use]
 pub fn profile() -> GameProfile {
     GameProfile {
-        id: PROFILE_ID,
-        packages: vec![ContentId::new("voxel_std:package/base"), PACKAGE_ID],
-        resources: vec![ContentId::new("minecraft_b173:resources/vanilla_local")],
+        id: id("minecraft_b173:profile/default"),
+        packages: vec![
+            package_id("voxel_std:package/base"),
+            package_id("minecraft_b173:package/game"),
+        ],
+        resources: vec![resource_id("minecraft_b173:resources/vanilla_local")],
         systems: [
             (
                 "minecraft_b173:system/inventory",
@@ -80,22 +201,50 @@ pub fn profile() -> GameProfile {
             ("minecraft_b173:system/drops", ScheduleStage::FixedUpdate),
             ("minecraft_b173:system/crafting", ScheduleStage::Update),
         ]
-        .map(|(id, stage)| SystemDescriptor {
-            id: ContentId::new(id),
+        .map(|(system, stage)| SystemDescriptor {
+            id: id(system),
             stage,
         })
         .to_vec(),
         manifest: rustcraft_content::ContentManifest::default(),
+        default_block: block_key("minecraft_b173:air"),
     }
 }
 
-/// Validate first-party composition through the same public registration surface used by any
-/// native game package. Legacy M0-M3 runtime wiring remains behind this boundary while it is
-/// migrated incrementally.
-pub fn validate_package() -> Result<(), RegistrationError> {
+pub fn compile_profile() -> Result<CompiledGameProfile, RegistrationError> {
     let mut registry = GameRegistry::default();
+    registry.register_package(package_id("voxel_std:package/base"))?;
     MinecraftB173Package.register(&mut registry)?;
-    profile().validate()
+    registry.compile(&profile())
+}
+
+/// Compatibility adapter for the M0-M3 flat-world module. Semantic presence is validated against
+/// the compiled profile, then translated to the historical registry expected by the legacy runtime.
+pub fn flat_world_module(profile: &CompiledGameProfile) -> flat_world::FlatWorldModule {
+    flat_world::FlatWorldModule {
+        floor_y: 0,
+        dirt_depth: 2,
+        stone: legacy_block_id(profile, "minecraft_b173:stone"),
+        dirt: legacy_block_id(profile, "minecraft_b173:dirt"),
+        grass: legacy_block_id(profile, "minecraft_b173:grass"),
+    }
+}
+
+fn legacy_block_id(profile: &CompiledGameProfile, name: &str) -> rustcraft_engine_core::BlockId {
+    profile
+        .block_id(&block_key(name))
+        .unwrap_or_else(|| panic!("compiled minecraft profile is missing {name}"));
+    blocks::BLOCKS
+        .iter()
+        .find(|definition| definition.name == name)
+        .unwrap_or_else(|| panic!("legacy minecraft registry is missing {name}"))
+        .id
+}
+
+/// Startup compatibility check while authoritative M0-M3 simulation still consumes its legacy
+/// registry. New Game API definitions themselves never author numeric IDs.
+pub fn validate_package() -> Result<(), RegistrationError> {
+    compile_profile().map(|_| ())
 }
 
 #[cfg(test)]
@@ -103,16 +252,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn minecraft_registers_through_the_public_game_api() {
-        let mut registry = GameRegistry::default();
-        MinecraftB173Package.register(&mut registry).unwrap();
-        assert_eq!(registry.blocks().len(), blocks::BLOCKS.len());
+    fn semantic_registration_compiles_dense_runtime_handles() {
+        let compiled = compile_profile().unwrap();
+        assert_eq!(compiled.blocks().len(), blocks::BLOCKS.len());
+        assert_eq!(compiled.default_state().block.0, 0);
         assert!(
-            registry
+            compiled
                 .blocks()
                 .iter()
                 .all(|block| block.key.as_str().starts_with("minecraft_b173:"))
         );
-        validate_package().unwrap();
+    }
+
+    #[test]
+    fn generated_water_profile_keeps_liquid_texture_collision_and_targeting_semantics() {
+        let profile = compile_profile().unwrap();
+        let water_id = profile
+            .block_id(&block_key("minecraft_b173:water"))
+            .unwrap();
+        let water = profile.block(water_id).unwrap();
+        assert_eq!(water.key.as_str(), "minecraft_b173:water");
+        assert_eq!(
+            legacy_block_id(&profile, blocks::WATER.name),
+            blocks::WATER.id
+        );
+        assert_eq!(water.material, MaterialClass::Liquid);
+        assert_eq!(water.collision, CollisionDescriptor::Empty);
+        assert!(!water.targetable);
+        assert_eq!(
+            water.textures.face(0).as_str(),
+            "minecraft_b173:textures/block/water"
+        );
+        assert!(blocks::BLOCKS.iter().any(|block| block.id == water_id));
+    }
+
+    #[test]
+    fn water_texture_key_imports_the_legacy_terrain_crop_semantically() {
+        let package = legacy_resource_package(Path::new("/tmp/m4-reference/terrain.png")).unwrap();
+        assert_eq!(
+            package.id.as_str(),
+            "minecraft_b173:package/legacy_resources"
+        );
+        let key = texture_key("minecraft_b173:water");
+        let water = package
+            .textures()
+            .iter()
+            .find(|texture| texture.id.as_str() == key.as_str())
+            .expect("water semantic texture is imported");
+        assert_eq!(
+            water.source.path,
+            Path::new("/tmp/m4-reference/terrain.png")
+        );
+        assert_eq!(
+            water.source.crop,
+            Some(PixelRect {
+                x: 14 * 16,
+                y: 0,
+                width: 16,
+                height: 16,
+            })
+        );
+        assert_eq!(water.sampler, SamplerPolicy::Nearest);
+    }
+
+    #[test]
+    fn canonical_handles_resolve_through_the_legacy_runtime_adapter() {
+        let compiled = compile_profile().unwrap();
+        for legacy in blocks::BLOCKS {
+            let key = block_key(legacy.name);
+            let compiled_id = compiled.block_id(&key).expect("semantic block is compiled");
+            assert_eq!(compiled.block(compiled_id).unwrap().key, key);
+            assert_eq!(legacy_block_id(&compiled, legacy.name), legacy.id);
+        }
+        let flat = flat_world_module(&compiled);
+        assert_eq!(flat.stone, blocks::STONE.id);
+        assert_eq!(flat.dirt, blocks::DIRT.id);
+        assert_eq!(flat.grass, blocks::GRASS.id);
     }
 }

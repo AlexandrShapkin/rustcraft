@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Validate and package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check tag and public release prerequisites
+        shell: bash
+        run: |
+          python scripts/release.py verify-tag "$GITHUB_REF_NAME"
+          python scripts/release.py publication-check
+      - name: Validate workspace
+        shell: bash
+        run: |
+          cargo fmt --all --check
+          cargo check --workspace --all-targets
+          cargo test --workspace
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Build and validate release package
+        shell: bash
+        run: |
+          python scripts/release.py build
+          python scripts/release.py check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustcraft-${{ matrix.os }}
+          path: |
+            target/release-dist/*.tar.gz
+            target/release-dist/*.tar.gz.sha256
+            target/release-dist/*.zip
+            target/release-dist/*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Attach archives to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - name: Publish tagged artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RustCraft ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release-artifacts/**/*

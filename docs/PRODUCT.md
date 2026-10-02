@@ -1,5 +1,13 @@
 # Product definition
 
+RustCraft is an extensible, performance-oriented voxel engine/runtime in Rust. Minecraft Beta
+1.7.3 is a first-party game package and reference implementation, not the identity of the engine.
+The default client/server composition still embeds that package during this transition.
+
+The product is pre-1.0. Its first formal version is `0.1.0-alpha.1`, selected as a clean starting
+point because the repository has no prior release tags or dependable milestone-to-version history.
+Milestones describe implementation scope, not release numbers.
+
 ## What this is
 
 A Rust voxel sandbox that feels recognizably like Minecraft Beta 1.7.3 while being built as a

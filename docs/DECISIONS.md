@@ -231,7 +231,8 @@ profile remains responsible for resource and presentation selection.
 
 One immutable full-cube face definition owns position perimeter, UV correspondence, normals
 and triangle indices. World, GUI and dropped-item transforms consume that geometry. The
-atlas uses top-left image coordinates; only `tile_uv` performs atlas addressing. GUI items
+atlas uses top-left image coordinates; R1.0 supersedes the old `tile_uv` API with normalized
+`AtlasRegion` mapping while retaining that convention. GUI items
 use the source-derived column-vector transform, a depth-cleared pass and back-face culling;
 GUI projection is independent of the gameplay camera. Resolved `BlockModel` carries semantic
 face textures/tints and model rotation for both production presentation and inspection.
@@ -306,3 +307,190 @@ large-world/content/mod scalability; Game API cleanliness; overall Beta-like ide
 fidelity. A measured or well-justified optimization may accept moderate visual differences while
 preserving semantic readability. Substantial choices compare runtime/frame-time, memory,
 scalability and extensibility benefit with visual/semantic cost, complexity and maintenance.
+
+## D-028 — semantic identity, profile-local handles and canonical digests
+
+Status: implemented in R1.0.
+
+`NamespacedId` is an owned, validated `Arc<str>` authoring/serialization identity. Typed wrappers
+separate packages, resources, blocks and textures where category mixing is unsafe. Packages register
+semantic `VoxelDefinition`s without choosing numeric IDs. `GameRegistry::compile` follows explicit
+`GameProfile` package order and lexical `BlockKey` order inside each package, moves the declared default voxel to
+the reserved first slot, then emits a dense vector plus semantic-key index. `BlockId` is a compact
+compiled-profile handle and has no cross-profile persistence guarantee.
+
+`GameProfile` uses typed `PackageId` and `ResourceId` collections. Package registration and block
+registration failures are atomic. Duplicate semantic block keys are errors; R1.0 deliberately has
+no definition override layering. Resource override precedence remains an R1.1 composition decision.
+
+The declared world default is queried through `World`/`CompiledGameProfile`; generic extraction no
+longer interprets numeric zero as Minecraft air. Retaining the default at handle zero is an explicit
+compiled-profile implementation rule, not content meaning. `BlockState` remains 8 bytes and no new
+global variant flags are introduced.
+
+Content bytes and canonical manifests use BLAKE3 derive-key domain separation. Manifest encoding
+uses fixed-width integers, length-prefixed strings, sorted packages and sorted/deduplicated
+dependency/target sets, covering all current semantic descriptor fields.
+
+Renderer texture inputs are `TextureHandle` plus normalized `AtlasRegion`. The renderer receives
+resolved terrain/inventory/hotbar/player paths from composition rather than discovering Minecraft
+paths. R1.0 supports one uploaded physical page; the client-side Beta 16x16 conversion is a temporary
+R1.1 adapter.
+
+## D-029 — R1.1 compiled resource pages and bounded loading
+
+Status: implemented.
+
+`ResourcePackage` owns generic semantic texture discovery. Later packages override earlier
+providers deterministically by `ResourceId`; the first-party Beta crop importer is package policy,
+not renderer behavior. Before its at-most-eight decode workers start, the compiler validates every
+unique PNG header and the checked aggregate RGBA allocation budget. Deterministic shelf packing
+uses padded edge extrusion and selects the smallest supported power-of-two page dimension that fits
+within the configured maximum and page-count limit.
+
+Compiled pages are BLAKE3 content-addressed by sources, providers, compiler version and the complete
+packing/sampling policy. Corruption rebuilds; unique create-new temporary files plus atomic rename
+make concurrent writers safe; optional write failure is visible but non-fatal. One sampler policy is
+allowed per page. Nearest and uniform linear sampling propagate to GPU creation, while mipmaps,
+anisotropy above one and mixed-sampler pages are deferred pending atlas-safe mip generation and
+measurement.
+
+`TextureHandle` survives geometry extraction. Chunks, dropped block items and GUI block items are
+submitted in page batches, including models whose individual faces span pages. UI sheet roles and
+cracks bind their resolved page. The compatibility page-zero chunk uploader explicitly promises a
+single page; test/inspection helpers that flatten geometry assert the same contract. The remaining
+page-zero HUD bind is never sampled because that pass contains procedural color geometry only.
+
+## D-030 — R1.2 bounded asynchronous section meshing and submission
+
+Status: implemented; complete.
+
+The renderer snapshots dense 16³ section state/light interiors into an 18³ contiguous volume with
+one world-sampled halo cell on each side. This preserves boundary culling and light queries while
+keeping normal mesh traversal hash-free. Client meshing uses a bounded worker pool (1–32 workers),
+owned immutable snapshots, monotonically increasing per-section generations, and one newest pending
+snapshot per in-flight section. Dirty notifications coalesce; stale or removed-section results are
+rejected both at completion and before GPU upload. Worker failure is logged and does not panic the
+client. CPU meshing never creates GPU objects.
+
+Completed valid meshes upload on the render thread under configurable per-frame section/byte
+budgets. A single mesh larger than the byte budget is permitted as a one-item progress exception.
+Opaque/cutout page batches sort by atlas page and then section; translucent ordering is unchanged.
+Per-section GPU buffers use checked geometric capacity (256-byte minimum), reuse existing
+allocations, and shrink only below one-quarter utilization. The policy deliberately retains some
+temporary capacity to avoid remesh churn; it is an estimate, not a fragmentation/VRAM guarantee.
+
+`just render-scale` and `just render-camera-motion` report reproducible CPU workloads and actual
+submission behavior. On the recorded release workload, radius-8 extraction/mesh time changed from
+376.396/110.148 ms before snapshots to 32.767/24.886 ms after dense interior copies and indexed
+meshing. Three real renderer upload cycles reused 108 buffers with zero new allocations or
+reallocations. Greedy meshing remains deferred: it would need atlas-safe repeating UV behavior and
+compatible material/light merging, while R1.2 has not yet established representative hardware
+geometry as the next bottleneck. Bindless, arrays, GPU culling, indirect drawing, Hi-Z and LOD are
+also deferred pending page-switch/draw and hardware profiling.
+
+## D-031 — M4 scope is world generation and persistence
+
+Status: accepted for M4.
+
+The older roadmap entry named M4 as multiplayer/server content resolution. The active M4 contract
+is now world generation and persistence foundation, with no network chunk-streaming protocol.
+Accordingly the old network/content work is retained but moved to an inactive later roadmap item.
+Engine code owns generic lifecycle, deterministic generation mechanisms and storage; selected game
+packages own terrain/biome/feature policy. Persisted blocks use semantic identity and never treat
+profile-local `BlockId` numbers as durable IDs. Renderer optimization topics including greedy
+meshing, Hi-Z, bindless, GPU-driven rendering, compression, mipmaps/AF and LOD are backlog items,
+not an active R1.3 milestone; only a concrete measured M4 blocker can reopen renderer work.
+
+## D-032 — M4 starts with semantic one-file-per-column persistence
+
+Status: accepted for the initial M4 format.
+
+Use portable explicit little-endian encoding, versioned metadata/chunk schemas, per-file BLAKE3
+checksums, section-local semantic palettes and atomic one-file-per-column replacement. This keeps
+random access and crash recovery simple while locally resident worlds are small and avoids premature
+region-container complexity. Revisit region files when measured file-count/open latency becomes
+material at tens of thousands of columns or when streaming patterns justify a container. Runtime
+`BlockId` is never a persistent identity.
+
+The current payload benchmark on the repository's AMD Ryzen 5 PRO 2500U, Linux x86_64, Cargo
+release profile encoded four generated columns into 264,248 raw section-payload bytes and 10,163
+stored bytes (3.8%, including framing/checksums) with safe Rust `flate2` Zlib fast compression. The
+crate is already present in the dependency graph through PNG support, provides a portable safe Rust
+backend, and representative payloads showed a substantial size reduction. Compression stays
+version-tagged and is bypassed when output is not smaller.
+
+## D-033 — M4 generation uses coordinate-derived policy streams
+
+Status: accepted for Minecraft overworld generator version 1.
+
+The generic `ChunkGenerator` takes only seed and signed `ChunkPos`, returns completed sections, and
+must be independent of scheduling order. Minecraft policy samples domain-separated coordinate
+hashes for terrain, bedrock, caves, ores and tree origins; cross-column features enumerate a
+neighborhood of deterministic origins and clip to the requested column. The target is coherent,
+recognizable Beta terrain rather than Java seed parity. Generator semantic changes require a new
+stored generator version or explicit migration; terrain must not silently change on regeneration.
+
+## D-034 — Static liquids retain a distinct compiled presentation class
+
+Status: accepted for M4 generated static liquids.
+
+Do not infer interaction targeting or geometry from the historical block number. Authored
+definitions carry targetability and a distinct liquid material through the compiled profile. The
+renderer submits opaque/cutout geometry first, then section-coarsely sorts blended pages back to
+front with depth writes disabled. Static source-liquid tops are lowered to 0.875 block units and
+same-block internal faces are suppressed. Camera medium is resolved from compiled liquid
+presentation metadata; a bounded linear underwater fog policy is game-owned and applied to generic
+opaque/translucent world shading (Minecraft policy currently uses color `(0.20, 0.40, 0.62)`,
+linear start 2 and end 18 world units). Swimming and fluid simulation remain separate gameplay
+work.
+
+## D-035 — Persistence compatibility follows the persisted schema, not full profile identity
+
+Status: accepted for M4.
+
+`CompiledGameProfile::semantic_fingerprint` remains useful diagnostic identity, but presentation
+and gameplay descriptors are not a save-decoding contract. Metadata v2 stores a separate persisted
+state schema version alongside game/profile family and generator identity. Existing chunk palettes
+are validated by semantic key/variant resolution. Missing content and unsupported state schema are
+explicit errors. Stored chunks remain loadable across generator upgrades; only absent chunks require
+an exact generator ID/version match before generation. Metadata v1 is safely interpreted as the
+existing semantic-key plus `u16` variant schema v1 and rewritten after successful chunk loading.
+
+## D-036 — Generic player record envelope, game-owned durable schema
+
+Status: accepted for M4 local-player persistence.
+
+World storage owns a validated player ID and bounded, versioned, checksummed opaque component
+envelope; it does not interpret payload semantics. Outer record v2 contains a monotonically
+increasing revision and components sorted by semantic ID, each with its own schema version and
+bounded payload. Minecraft codecs currently register `minecraft_b173:player/transform:v1`,
+`minecraft_b173:player/inventory:v1`, and `minecraft_b173:player/game_mode:v1`. Inventory stores
+all slots, selected hotbar, cursor and crafting grid; item identity is semantic text resolved at
+load, never a runtime handle. Unknown components are preserved opaquely through save/reopen;
+missing required or unsupported known components fail explicitly. The prior single-payload record
+is loaded as `rustcraft:legacy-player-payload` and migrated on its next checkpoint.
+
+Durable component changes increment revision; one background worker has at most one in-flight
+checkpoint and one replaceable newest snapshot. The two-slot store overwrites the slot other than
+the newest valid checkpoint, syncs file data and the containing directory on Unix, and validates
+each slot with BLAKE3. An interrupted write leaves the previous revision available; startup picks
+the highest valid revision and reports fallback recovery. Checkpoint cadence defaults to two
+seconds and is clamped to 1–2 seconds (`RUSTCRAFT_PLAYER_AUTOSAVE_SECONDS`); this bounds expected
+recent-state loss to roughly that interval under normal scheduling, not arbitrary hardware cache
+failure. Graceful shutdown waits for the latest dirty revision. First-ready chunks center on the
+saved position. Velocity/contact reset, AABB/camera are derived, and mining/input/UI/render state
+is transient; dropped entities and world time remain outside this persistence slice.
+
+## D-037 — Product identity and release versions are independent of game packages
+
+Status: accepted.
+
+The product/repository brand is RustCraft; `minecraft-b173` remains the first-party game package
+identity. Product releases use the single root workspace SemVer, initially `0.1.0-alpha.1`
+because there are no prior release tags. Content packages carry their own SemVer. Game API,
+network protocol, world/chunk/player/resource schemas, and game-package versions remain independent
+compatibility domains. Product version changes never implicitly migrate saves. Formal publication
+uses the owner-selected `MIT OR Apache-2.0` project license. Local history was rewritten to remove
+`reference/assets`; release automation verifies the license metadata and scans reachable objects. It
+never pushes, renames a remote repository, tags, or publishes.

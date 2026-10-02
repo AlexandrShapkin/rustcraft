@@ -52,12 +52,15 @@ pub struct Simulation {
     pub time: u64,
     dirty_chunks: HashSet<ChunkPos>,
     dirty_sections: HashSet<rustcraft_engine_core::SectionPos>,
+    persistence_dirty_chunks: HashSet<ChunkPos>,
     pub inventory: Inventory,
     pub lighting: Lighting,
     pub mode: GameMode,
     pub items: Vec<ItemEntity>,
     pub recipes: RecipeRegistry,
     pub crafting_grid: [Option<ItemStack>; 4],
+    /// Authoritative inventory transaction stack held by the UI cursor.
+    pub inventory_cursor: Option<ItemStack>,
     pub mining: Option<MiningState>,
     next_entity: u64,
 }
@@ -72,7 +75,12 @@ pub struct MiningState {
 impl Simulation {
     #[must_use]
     pub fn spawn_above_surface(world: &World, registry: &BlockRegistry, x: i32, z: i32) -> Vec3 {
-        for y in (-64..=64).rev() {
+        let max_y = world
+            .section_positions()
+            .map(|(_, section_y)| section_y.saturating_mul(16).saturating_add(15))
+            .max()
+            .unwrap_or(64);
+        for y in (-64..=max_y).rev() {
             let position = BlockPos { x, y, z };
             if registry.is_solid(world.get(position)) {
                 return Vec3::new(x as f32 + 0.5, y as f32 + 2.0, z as f32 + 0.5);
@@ -102,12 +110,14 @@ impl Simulation {
             time: 0,
             dirty_chunks,
             dirty_sections,
+            persistence_dirty_chunks: HashSet::new(),
             inventory: Inventory::default(),
             lighting,
             mode: GameMode::Development,
             items: Vec::new(),
             recipes,
             crafting_grid: [None; 4],
+            inventory_cursor: None,
             mining: None,
             next_entity: 1,
         }
@@ -123,6 +133,11 @@ impl Simulation {
     }
     pub fn take_dirty_chunks(&mut self) -> Vec<ChunkPos> {
         self.dirty_chunks.drain().collect()
+    }
+    /// Authoritative voxel mutations only; unlike render dirtiness this excludes boundary-neighbor
+    /// invalidations that do not alter the neighboring column's persisted state.
+    pub fn take_persistence_dirty_chunks(&mut self) -> Vec<ChunkPos> {
+        self.persistence_dirty_chunks.drain().collect()
     }
     pub fn take_dirty_sections(&mut self) -> Vec<rustcraft_engine_core::SectionPos> {
         self.dirty_sections.drain().collect()
@@ -145,9 +160,10 @@ impl Simulation {
             ),
             5.,
             |id| {
-                self.registry
-                    .get(id)
-                    .is_some_and(|d| d.material != rustcraft_mod_api::Material::Invisible)
+                self.registry.get(id).is_some_and(|definition| {
+                    definition.targetable
+                        && definition.material != rustcraft_mod_api::Material::Invisible
+                })
             },
         )
     }
@@ -161,6 +177,7 @@ impl Simulation {
         );
         let (chunk, local) = split_block(position);
         self.dirty_chunks.insert(chunk);
+        self.persistence_dirty_chunks.insert(chunk);
         if local.0 == 0 {
             self.dirty_chunks.insert(ChunkPos {
                 x: chunk.x - 1,
@@ -681,6 +698,45 @@ mod tests {
             sim.player.position.y
         );
     }
+
+    #[test]
+    fn non_targetable_liquid_is_ray_pass_through_and_non_solid() {
+        use rustcraft_mod_api::{BlockDefinition, Material};
+        let water = BlockDefinition {
+            solid: false,
+            targetable: false,
+            material: Material::Liquid,
+            sky_opacity: 1,
+            light_opacity: 1,
+            ..BlockDefinition::cube(2, "test:water", "test:water")
+        };
+        let mut registry = BlockRegistry::default();
+        registry.register(STONE).unwrap();
+        registry.register(water).unwrap();
+        let mut water_only = World::new(BlockId(0));
+        water_only.set(BlockPos { x: 0, y: 2, z: 1 }, water.id);
+        let water_only_sim =
+            Simulation::new(water_only, registry.clone(), Vec3::new(0.5, 1.0, 0.5));
+        assert!(water_only_sim.target().is_none());
+
+        let mut world = World::new(BlockId(0));
+        world.set(BlockPos { x: 0, y: 2, z: 1 }, water.id);
+        world.set(BlockPos { x: 0, y: 2, z: 2 }, STONE.id);
+        let sim = Simulation::new(world, registry.clone(), Vec3::new(0.5, 1.0, 0.5));
+        assert_eq!(sim.target().unwrap().block, BlockPos { x: 0, y: 2, z: 2 });
+
+        let mut water_world = World::new(BlockId(0));
+        water_world.set(BlockPos { x: 0, y: 0, z: 0 }, water.id);
+        let mut falling = Simulation::new(water_world, registry, Vec3::new(0.5, 2.0, 0.5));
+        for _ in 0..30 {
+            falling.step(AgentIntent::default(), 0.02);
+        }
+        assert!(
+            falling.player.position.y < 1.0,
+            "y={}",
+            falling.player.position.y
+        );
+    }
     #[test]
     fn explicit_break_and_place_update_world() {
         let mut registry = BlockRegistry::default();
@@ -732,6 +788,11 @@ mod tests {
         let dirty = simulation.take_dirty_chunks();
         assert!(dirty.contains(&ChunkPos { x: 0, z: 0 }));
         assert!(dirty.contains(&ChunkPos { x: 1, z: 0 }));
+        assert_eq!(
+            simulation.take_persistence_dirty_chunks(),
+            vec![ChunkPos { x: 0, z: 0 }],
+            "render-neighbor invalidation must not dirty adjacent persistence"
+        );
     }
     #[test]
     fn spawn_is_derived_above_surface() {

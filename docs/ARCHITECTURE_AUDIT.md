@@ -9,10 +9,10 @@ gameplay and presentation behavior is preserved.
 | Chunk/world voxel storage | `engine-core` | engine | OK | Keep compact, game-neutral storage. |
 | `BlockState` orientation bits | `engine-core` | engine | OK | Retain compact typed state; put Beta metadata adapters in `minecraft-b173`. |
 | Ray cast, AABB and collision math | `engine-core` | engine | OK | Keep policy-free primitives. |
-| Mesh/material/texture/offscreen rendering | `render` | engine/render + tooling | OK | Renderer has no Minecraft IDs; content resolves descriptors before rendering. |
-| Block definition registry | `mod-api` plus `gameplay-blocks` | `game-api` definitions plus game policy | Partial | Added generic `VoxelDefinition`/`GameRegistry`; migrate the legacy policy-rich registry without an M3 rewrite. |
-| Namespaced content identity | mixed legacy strings | `game-api`/content | Fixed for active first-party definitions | Added validated `ContentId`; first-party IDs now use `minecraft_b173:`. |
-| Package/system composition | implicit startup modules | `GameProfile` + public package registration | Fixed foundation | Added `GameProfile`, `GamePackage`, `Schedule` and profile validation at client/server composition roots. |
+| Mesh/material/texture/offscreen rendering | `render` | engine/render + tooling | R1.0 foundation fixed | Renderer accepts `TextureHandle`/arbitrary `AtlasRegion` and resolved paths; one-page upload and Beta adapter remain for R1.1. |
+| Block definition registry | `mod-api` plus `gameplay-blocks` | `game-api` definitions plus game policy | Partial | `VoxelDefinition` is semantic and numeric-ID-free; compiled registry is indexed. Migrate policy-rich legacy consumers incrementally. |
+| Namespaced content identity | mixed legacy strings | `game-api`/content | R1.0 fixed foundation | Owned validated common identity plus typed keys support runtime-loaded content; legacy APIs remain migration debt. |
+| Package/system composition | implicit startup modules | `GameProfile` + public package registration | R1.0 fixed foundation | Typed package/resource keys and canonical package-plus-lexical-block ordering produce profile-local dense handles and a declared default state. |
 | Engine schedule and commands | direct `Simulation::step` mutation | engine/Game API mechanisms | Partial | Added native registered schedules and `CommandBuffer::SetBlock`; migrate real systems when touched. |
 | Movement/collision loop | `runtime` | engine runtime mechanism | Mixed | Extract only when the next engine consumer needs it; do not add Minecraft policy to this portion. |
 | Inventory and `ItemStack` | `runtime`/`mod-api` | generic container primitives where useful; Minecraft policy in game package | Policy leak | Record migration; preserve M3 behavior. Define capabilities from demonstrated non-Minecraft needs before extraction. |
@@ -45,3 +45,23 @@ New engine mechanisms may land in engine/Game API crates. New Minecraft rules la
 `minecraft-b173` and register through the public extension surface. Before modifying a legacy
 mixed subsystem, first migrate the portion needed by that change; do not deepen the leak. This is
 safe for the next milestone only if that rule is enforced.
+
+## R1.0 numeric-identity audit
+
+Repository-wide searches classify the remaining zero/historical IDs as follows:
+
+- `GameRegistry::compile` deliberately assigns the declared profile default to handle zero. Code
+  obtains that handle from `CompiledGameProfile::default_state`; zero carries no Minecraft meaning.
+- `RenderWorld::default` uses zero only as an explicit standalone diagnostic sentinel. Extraction
+  from a real `World` copies its declared default, including a tested nonzero default.
+- raw zero checks and `BlockId(0)` values in `engine-core`, `render`, `runtime`, lighting,
+  survival and flat-world sources are inside isolated unit/diagnostic tests with local registries.
+- `AIR.id`, `STONE.id`, `GRASS.id` and other first-party constants occur in Minecraft client/server,
+  benchmarks, tests and the accepted M0-M3 compatibility runtime. They are game-specific legacy
+  policy, not generic engine semantics.
+- `minecraft-b173::legacy_block_id` validates semantic compiled presence and translates to the
+  historical registry only for accepted M0-M3 consumers. Canonical compiled handles are not
+  required to equal those historical numbers.
+
+No generic production renderer/world path treats numeric zero as Minecraft air, and no authored
+Game API definition selects a runtime `BlockId`.

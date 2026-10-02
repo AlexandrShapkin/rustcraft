@@ -10,6 +10,8 @@ pub enum Material {
     Opaque,
     Cutout,
     Translucent,
+    /// A static voxel liquid: non-solid, alpha blended and rendered with liquid surface geometry.
+    Liquid,
     Invisible,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +80,8 @@ pub struct BlockDefinition {
     pub id: BlockId,
     pub name: &'static str,
     pub solid: bool,
+    /// Whether the normal player block raycast can target this block.
+    pub targetable: bool,
     pub material: Material,
     pub textures: FaceTextures,
     pub base_model_rotation: rustcraft_engine_core::orientation::ModelRotation,
@@ -99,6 +103,7 @@ impl BlockDefinition {
             id: BlockId(id),
             name,
             solid: true,
+            targetable: true,
             material: Material::Opaque,
             textures: FaceTextures::All(texture),
             base_model_rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,

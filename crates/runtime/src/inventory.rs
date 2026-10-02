@@ -21,6 +21,9 @@ impl Default for Inventory {
     }
 }
 impl Inventory {
+    pub fn from_slots(slots: [Option<ItemStack>; 36], selected: usize) -> Option<Self> {
+        (selected < HOTBAR_SLOTS).then_some(Self { slots, selected })
+    }
     /// Applies the Beta 1.7.3 `Container.slotClick` left/right transaction to one slot.
     /// The returned stack is the new cursor contents; the caller owns the cursor state.
     pub fn slot_click(

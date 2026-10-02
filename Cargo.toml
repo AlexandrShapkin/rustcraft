@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/build-info",
     "crates/engine-core",
     "crates/game-api",
     "crates/mod-api",
@@ -8,7 +9,9 @@ members = [
     "crates/bot-api",
     "crates/content",
     "crates/runtime",
+    "crates/world",
     "crates/render",
+    "crates/render-profile",
     "crates/gameplay-blocks",
     "crates/gameplay-flat-world",
     "crates/minecraft-b173",
@@ -19,8 +22,10 @@ members = [
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AlexandrShapkin/rustcraft"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -29,6 +34,10 @@ unsafe_code = "forbid"
 all = "warn"
 
 [workspace.dependencies]
+blake3 = "1.8"
+flate2 = { version = "1.1", default-features = true }
+semver = "1"
+rustcraft-build-info = { path = "crates/build-info" }
 rustcraft-engine-core = { path = "crates/engine-core" }
 rustcraft-game-api = { path = "crates/game-api" }
 rustcraft-mod-api = { path = "crates/mod-api" }
@@ -36,10 +45,12 @@ rustcraft-agent-api = { path = "crates/agent-api" }
 rustcraft-bot-api = { path = "crates/bot-api" }
 rustcraft-content = { path = "crates/content" }
 rustcraft-runtime = { path = "crates/runtime" }
+rustcraft-world = { path = "crates/world" }
 rustcraft-gameplay-blocks = { path = "crates/gameplay-blocks" }
 rustcraft-gameplay-flat-world = { path = "crates/gameplay-flat-world" }
 rustcraft-minecraft-b173 = { path = "crates/minecraft-b173" }
 rustcraft-render = { path = "crates/render" }
+rustcraft-render-profile = { path = "crates/render-profile" }
 bytemuck = { version = "1.23", features = ["derive"] }
 png = "0.17"
 pollster = "0.4"

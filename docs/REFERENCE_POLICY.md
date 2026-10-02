@@ -43,6 +43,12 @@ Reference research informs a decision; it does not automatically select exact re
 Historical M3 exact-fidelity notes remain valid evidence for that completed repair campaign, but
 their local acceptance target is not the default policy for future work.
 
+The M4 Minecraft overworld study is recorded in
+`reference/notes/features/m4-minecraft-overworld-generation.md`. It treats Beta's 128-block
+overworld, sea-level/surface structure and recognizable caves/ores/vegetation as semantic evidence,
+while replacing mutable population-order writes and Java RNG implementation details with
+coordinate-derived streams and clipped deterministic features.
+
 ## Rules
 
 Use reference material narrowly to answer concrete questions such as movement behavior, block

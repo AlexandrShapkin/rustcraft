@@ -34,6 +34,8 @@ When work depends on Beta behavior, protocol, legacy formats or assets, also rea
   controller/agent intent.
 - Bots are a platform feature, not graphical-client emulation.
 - A server defines a content profile; clients and bots automatically resolve the content they need.
+- Semantic content IDs are persistent identity; dense numeric IDs are compiled profile-local
+  handles and must not be treated as stable save/network IDs.
 - Do not reproduce historical bugs unless intentionally promoted to a documented mechanic.
 - Preserve clear gameplay semantics and a recognizable Beta-like identity. Exact Beta output is
   subordinate to measured performance, frame-time stability, scalability and clean extension

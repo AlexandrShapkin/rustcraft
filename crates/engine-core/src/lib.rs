@@ -144,11 +144,52 @@ impl Chunk {
     pub fn state(&self, local: (u8, u8, u8)) -> BlockState {
         self.blocks[block_index(local)]
     }
+    /// Dense section storage in `y * 256 + z * 16 + x` order.
+    #[must_use]
+    pub fn states(&self) -> &[BlockState] {
+        &self.blocks
+    }
     pub fn set_state(&mut self, local: (u8, u8, u8), state: BlockState) {
         self.blocks[block_index(local)] = state;
     }
     pub fn set(&mut self, local: (u8, u8, u8), block: BlockId) {
         self.blocks[block_index(local)] = BlockState { block, variant: 0 };
+    }
+}
+
+/// Efficient unpublished section construction for generators and storage loaders.
+/// The resulting dense section can be published to a `World` in one operation.
+#[derive(Debug, Clone)]
+pub struct ChunkBuilder {
+    chunk: Chunk,
+}
+
+impl ChunkBuilder {
+    #[must_use]
+    pub fn new(fill: BlockState) -> Self {
+        Self {
+            chunk: Chunk {
+                blocks: vec![fill; CHUNK_VOLUME],
+            },
+        }
+    }
+
+    pub fn set(&mut self, local: (u8, u8, u8), state: BlockState) {
+        self.chunk.set_state(local, state);
+    }
+
+    #[must_use]
+    pub fn state(&self, local: (u8, u8, u8)) -> BlockState {
+        self.chunk.state(local)
+    }
+
+    pub fn fill(&mut self, state: BlockState) {
+        self.chunk.blocks.fill(state);
+    }
+
+    #[must_use]
+    pub fn finish(self) -> Chunk {
+        self.chunk
     }
 }
 
@@ -190,11 +231,60 @@ impl World {
     pub fn section_positions(&self) -> impl Iterator<Item = (ChunkPos, i32)> + '_ {
         self.sections.keys().copied()
     }
+    #[must_use]
+    pub fn section_count(&self) -> usize {
+        self.sections.len()
+    }
+    /// Publish a fully constructed section. Callers must not expose the builder before finish.
+    pub fn publish_section(&mut self, position: ChunkPos, section_y: i32, section: Chunk) {
+        self.sections.insert((position, section_y), section);
+    }
+    /// Atomically replace a column's sections after generation or disk loading has completed.
+    pub fn publish_column(
+        &mut self,
+        position: ChunkPos,
+        sections: Vec<(i32, Chunk)>,
+    ) -> Result<(), &'static str> {
+        let mut ys = std::collections::HashSet::with_capacity(sections.len());
+        if sections.iter().any(|(y, _)| !ys.insert(*y)) {
+            return Err("duplicate section in column publication");
+        }
+        self.remove_column(position);
+        for (section_y, section) in sections {
+            self.sections.insert((position, section_y), section);
+        }
+        Ok(())
+    }
+    pub fn remove_section(&mut self, position: ChunkPos, section_y: i32) -> Option<Chunk> {
+        self.lights.remove(&(position, section_y));
+        self.sections.remove(&(position, section_y))
+    }
+    pub fn remove_column(&mut self, position: ChunkPos) -> Vec<(i32, Chunk)> {
+        let section_ys = self
+            .sections
+            .keys()
+            .filter_map(|(chunk_pos, section_y)| (*chunk_pos == position).then_some(*section_y))
+            .collect::<Vec<_>>();
+        section_ys
+            .into_iter()
+            .filter_map(|section_y| {
+                self.lights.remove(&(position, section_y));
+                self.sections
+                    .remove(&(position, section_y))
+                    .map(|chunk| (section_y, chunk))
+            })
+            .collect()
+    }
     pub fn light(&self, p: BlockPos) -> VoxelLight {
         let (c, local) = split_block(p);
         self.lights
             .get(&(c, p.y.div_euclid(16)))
             .map_or(VoxelLight::default(), |v| v[block_index(local)])
+    }
+    /// Dense light values for a section, when lighting has allocated that section.
+    #[must_use]
+    pub fn section_lights(&self, position: ChunkPos, section_y: i32) -> Option<&[VoxelLight]> {
+        self.lights.get(&(position, section_y)).map(Vec::as_slice)
     }
     pub fn set_light(&mut self, p: BlockPos, light: VoxelLight) {
         let (c, local) = split_block(p);
@@ -227,6 +317,10 @@ impl World {
     }
     pub fn empty_block(&self) -> BlockId {
         self.default_block
+    }
+    #[must_use]
+    pub const fn default_state(&self) -> BlockState {
+        BlockState::new(self.default_block)
     }
     pub fn state(&self, position: BlockPos) -> BlockState {
         let (chunk, local) = split_block(position);
@@ -376,6 +470,10 @@ mod tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
+    #[test]
+    fn block_state_remains_compact() {
+        assert_eq!(std::mem::size_of::<BlockState>(), 8);
+    }
     #[test]
     fn states_preserve_variants_and_setting_block_resets_them() {
         let mut w = World::new(BlockId(99));

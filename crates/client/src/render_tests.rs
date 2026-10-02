@@ -1,9 +1,9 @@
 //! Semantic content adapter for the reusable, surface-independent render inspector.
-use super::{FirstPartyTextures, LocalResourceResolver, ResourceId};
+use super::{FirstPartyTextures, minecraft_renderer_resources};
 use rustcraft_engine_core::orientation::{Axis, Facing, HorizontalRotation, ModelRotation};
 use rustcraft_engine_core::{BlockState, Vec3};
 use rustcraft_render::{
-    BlockTextureResolver, Face, ItemSprite, Vertex, geometry,
+    BlockTextureResolver, Face, ItemSprite, PageVertices, TextureHandle, Vertex, geometry,
     hud::{self, Slot},
     offscreen::{self, Scene},
 };
@@ -59,17 +59,32 @@ struct Options {
     rear: bool,
     native: bool,
 }
-fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene, String> {
+struct DiagnosticScene {
+    scene: Scene,
+    pages: Vec<PageVertices>,
+}
+
+fn append_pages(
+    vertices: &mut Vec<Vertex>,
+    vertex_pages: &mut Vec<TextureHandle>,
+    pages: &[PageVertices],
+) {
+    for page in pages {
+        vertices.extend(page.vertices.iter().copied());
+        vertex_pages.extend(std::iter::repeat_n(page.texture, page.vertices.len()));
+    }
+}
+
+fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<DiagnosticScene, String> {
     let colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [1., 1., 0.]];
     let mut vertices = Vec::new();
+    let mut vertex_pages = Vec::new();
     let mut guides = Vec::new();
     if name == "gui-grid" {
         for (row, label) in ["HOTBAR", "INVENTORY", "CURSOR"].into_iter().enumerate() {
-            vertices.extend(hud::diagnostic_label(
-                label,
-                [4., 10. + row as f32 * 80.],
-                [512., 256.],
-            ));
+            let labels = hud::diagnostic_label(label, [4., 10. + row as f32 * 80.], [512., 256.]);
+            vertex_pages.extend(std::iter::repeat_n(TextureHandle(0), labels.len()));
+            vertices.extend(labels);
             for (column, name) in [
                 "bookshelf",
                 "log",
@@ -91,20 +106,25 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
                 )
                 .unwrap();
                 let origin = [10. + column as f32 * 84., 26. + row as f32 * 80.];
-                model.gui_vertices(&mut vertices, origin, 2., [512., 256.]);
-                vertices.extend(hud::diagnostic_label(
-                    name,
-                    [origin[0], origin[1] + 36.],
-                    [512., 256.],
-                ));
+                let mut pages = Vec::new();
+                model.gui_page_vertices(&mut pages, origin, 2., [512., 256.]);
+                append_pages(&mut vertices, &mut vertex_pages, &pages);
+                let labels =
+                    hud::diagnostic_label(name, [origin[0], origin[1] + 36.], [512., 256.]);
+                vertex_pages.extend(std::iter::repeat_n(TextureHandle(0), labels.len()));
+                vertices.extend(labels);
             }
         }
-        return Ok(Scene {
-            vertices,
-            width: 512,
-            height: 256,
-            textured: true,
-            cull: true,
+        let pages = group_page_vertices(&vertices, &vertex_pages);
+        return Ok(DiagnosticScene {
+            scene: Scene {
+                vertices,
+                width: 512,
+                height: 256,
+                textured: true,
+                cull: true,
+            },
+            pages,
         });
     }
     if let Some(face) = name.strip_prefix("face-") {
@@ -114,6 +134,9 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
             .ok_or("unknown face")?
             .1;
         let f = geometry::definition(direction);
+        let atlas_region = FirstPartyTextures
+            .texture(rustcraft_minecraft_b173::blocks::STONE.id, direction)
+            .ok_or("compiled stone texture")?;
         let p = f.positions;
         guides.push((direction, [0., 0., 0.5], [0., 0., 0.2]));
         let u = sub(p[1], p[0]);
@@ -124,8 +147,12 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
                 position: [(dot(q, u) - 0.5) * 1.5, (dot(q, v) - 0.5) * 1.5, 0.5],
                 uv: if mode == "atlas" {
                     [
-                        (3. + f.uv_corners[j][0]) / 16.,
-                        (2. + f.uv_corners[j][1]) / 16.,
+                        atlas_region.uv_min[0]
+                            + f.uv_corners[j][0]
+                                * (atlas_region.uv_max[0] - atlas_region.uv_min[0]),
+                        atlas_region.uv_min[1]
+                            + f.uv_corners[j][1]
+                                * (atlas_region.uv_max[1] - atlas_region.uv_min[1]),
                     ]
                 } else {
                     f.uv_corners[j]
@@ -136,6 +163,11 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
                 } else {
                     [1.; 3]
                 },
+            });
+            vertex_pages.push(if mode == "atlas" {
+                atlas_region.texture
+            } else {
+                TextureHandle(0)
             });
         }
     } else {
@@ -169,19 +201,26 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
             block_3d: true,
         };
         match context {
-            "gui" | "hotbar" | "inventory" | "cursor" => model.gui_vertices(
-                &mut vertices,
-                if options.native {
+            "gui" | "hotbar" | "inventory" | "cursor" => {
+                let origin = if options.native {
                     [120., 120.]
                 } else {
                     [0., 0.]
-                },
-                if options.native { 1. } else { 16. },
-                [256., 256.],
-            ),
+                };
+                let scale = if options.native { 1. } else { 16. };
+                if mode == "atlas" {
+                    let mut pages = Vec::new();
+                    model.gui_page_vertices(&mut pages, origin, scale, [256., 256.]);
+                    append_pages(&mut vertices, &mut vertex_pages, &pages);
+                } else {
+                    model.gui_vertices(&mut vertices, origin, scale, [256., 256.]);
+                    vertex_pages.resize(vertices.len(), TextureHandle(0));
+                }
+            }
             "dropped" => {
-                rustcraft_render::append_dropped_items(
-                    &mut vertices,
+                let mut pages = Vec::new();
+                rustcraft_render::append_dropped_item_pages(
+                    &mut pages,
                     &[ItemSprite {
                         model: Some(model),
                         position: Vec3::ZERO,
@@ -194,19 +233,26 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
                         hover_start: 0.,
                     }],
                 );
-                for v in &mut vertices {
-                    v.position = view([
-                        v.position[0] * 4.,
-                        (v.position[1] - 0.1) * 4.,
-                        v.position[2] * 4.,
-                    ]);
+                for page in &mut pages {
+                    for vertex in &mut page.vertices {
+                        vertex.position = view([
+                            vertex.position[0] * 4.,
+                            (vertex.position[1] - 0.1) * 4.,
+                            vertex.position[2] * 4.,
+                        ]);
+                    }
                 }
+                append_pages(&mut vertices, &mut vertex_pages, &pages);
             }
             "cube" => {
-                model.world_vertices(&mut vertices);
-                for v in &mut vertices {
-                    v.position = view(v.position.map(|v| v - 0.5));
+                let mut pages = Vec::new();
+                model.world_page_vertices(&mut pages);
+                for page in &mut pages {
+                    for vertex in &mut page.vertices {
+                        vertex.position = view(vertex.position.map(|value| value - 0.5));
+                    }
                 }
+                append_pages(&mut vertices, &mut vertex_pages, &pages);
             }
             _ => return Err("unknown representation".into()),
         }
@@ -284,14 +330,37 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Scene,
                 [256., 256.],
             ));
         }
+        vertex_pages.resize(vertices.len(), TextureHandle(0));
     }
-    Ok(Scene {
-        vertices,
-        width: 256,
-        height: 256,
-        textured: mode == "uv" || mode == "atlas",
-        cull: true,
+    let pages = group_page_vertices(&vertices, &vertex_pages);
+    Ok(DiagnosticScene {
+        scene: Scene {
+            vertices,
+            width: 256,
+            height: 256,
+            textured: mode == "uv" || mode == "atlas",
+            cull: true,
+        },
+        pages,
     })
+}
+
+fn group_page_vertices(vertices: &[Vertex], vertex_pages: &[TextureHandle]) -> Vec<PageVertices> {
+    assert_eq!(vertices.len(), vertex_pages.len());
+    let mut pages = Vec::<PageVertices>::new();
+    for (vertex, texture) in vertices.iter().zip(vertex_pages) {
+        match pages.binary_search_by_key(texture, |page| page.texture) {
+            Ok(index) => pages[index].vertices.push(*vertex),
+            Err(index) => pages.insert(
+                index,
+                PageVertices {
+                    texture: *texture,
+                    vertices: vec![*vertex],
+                },
+            ),
+        }
+    }
+    pages
 }
 pub fn run() -> bool {
     let args: Vec<_> = std::env::args().collect();
@@ -394,8 +463,9 @@ pub fn run() -> bool {
         rear: args.iter().any(|a| a == "--rear"),
         native: args.iter().any(|a| a == "--native"),
     };
-    let atlas = LocalResourceResolver::from_environment("reference/assets/terrain.png")
-        .resolve(&ResourceId("terrain.png".into()));
+    let resources =
+        minecraft_renderer_resources().expect("compile minecraft presentation resources");
+    let uv_chart = offscreen::uv_chart();
     for (name, mode) in cases {
         let mut variants = vec![options];
         if all && (name.starts_with("cube-") || name.starts_with("dropped-")) {
@@ -417,7 +487,8 @@ pub fn run() -> bool {
         }
         for options in variants {
             let wire = args.iter().any(|a| a == "--wireframe");
-            let mut scene = scene(&name, &mode, wire, &options).expect("diagnostic scene");
+            let mut diagnostic = scene(&name, &mode, wire, &options).expect("diagnostic scene");
+            let scene = &mut diagnostic.scene;
             scene.cull = !args.iter().any(|a| a == "--no-cull");
             let state_suffix = if options.rotation != ModelRotation::IDENTITY {
                 format!(
@@ -436,12 +507,24 @@ pub fn run() -> bool {
                 if options.rear { "-rear" } else { "" },
                 if options.native { "-native" } else { "" }
             );
-            pollster::block_on(offscreen::render(
-                &scene,
-                (mode == "atlas").then_some(atlas.as_path()),
-                Path::new(&path),
-            ))
-            .expect("offscreen rendering");
+            if mode == "atlas" {
+                pollster::block_on(offscreen::render_pages_rgba(
+                    scene,
+                    &diagnostic.pages,
+                    &resources.atlas_pages,
+                    Path::new(&path),
+                ))
+                .expect("multi-page offscreen rendering");
+            } else {
+                pollster::block_on(offscreen::render_rgba(
+                    scene,
+                    64,
+                    64,
+                    &uv_chart,
+                    Path::new(&path),
+                ))
+                .expect("offscreen rendering");
+            }
             let bounds: [(f32, f32); 3] = std::array::from_fn(|axis| {
                 scene
                     .vertices
@@ -459,6 +542,63 @@ pub fn run() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_options() -> Options {
+        Options {
+            rotation: ModelRotation::IDENTITY,
+            facing: Facing::North,
+            axis: Axis::Y,
+            horizontal: HorizontalRotation::R0,
+            age: 0.,
+            count: 1,
+            rear: false,
+            native: false,
+        }
+    }
+
+    #[test]
+    fn atlas_inspector_retains_compiled_page_for_world_drop_and_gui() {
+        let mut expected = geometry::FACES
+            .map(|face| {
+                FirstPartyTextures
+                    .texture(
+                        rustcraft_minecraft_b173::blocks::BOOKSHELF.id,
+                        face.direction,
+                    )
+                    .unwrap()
+                    .texture
+            })
+            .to_vec();
+        expected.sort_unstable();
+        expected.dedup();
+        for context in ["cube", "dropped", "gui", "hotbar", "inventory", "cursor"] {
+            let diagnostic = scene(
+                &format!("{context}-bookshelf"),
+                "atlas",
+                false,
+                &default_options(),
+            )
+            .unwrap();
+            assert_eq!(diagnostic.scene.vertices.len(), 36);
+            assert_eq!(
+                diagnostic
+                    .pages
+                    .iter()
+                    .map(|page| page.texture)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                diagnostic
+                    .pages
+                    .iter()
+                    .map(|page| page.vertices.len())
+                    .sum::<usize>(),
+                36
+            );
+        }
+    }
+
     #[test]
     fn bookshelf_log_grass_keep_semantic_face_textures_in_every_representation() {
         let resolver = FirstPartyTextures;
@@ -494,10 +634,9 @@ mod tests {
                     _ => side,
                 };
                 assert_eq!(definition.textures.face(f.direction as usize), expected);
-                let tile = rustcraft_minecraft_b173::blocks::atlas_tile(expected).unwrap();
                 assert_eq!(
-                    (model.texture(f.direction).x, model.texture(f.direction).y),
-                    tile
+                    model.texture(f.direction),
+                    resolver.texture(definition.id, f.direction).unwrap()
                 );
             }
             let mut before = Vec::new();

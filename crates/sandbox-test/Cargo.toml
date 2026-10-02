@@ -3,6 +3,8 @@ name = "rustcraft-sandbox-test"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
@@ -14,3 +16,5 @@ rustcraft-content.workspace = true
 rustcraft-engine-core.workspace = true
 rustcraft-game-api.workspace = true
 rustcraft-render.workspace = true
+rustcraft-render-profile.workspace = true
+rustcraft-world.workspace = true

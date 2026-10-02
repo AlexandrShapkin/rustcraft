@@ -10,6 +10,11 @@ should not fail merely because an optional utility is absent.
 
 Common recipes:
 
+- `just version` — print the authoritative product version;
+- `just release-build` / `just release-check` — stage and validate local client/server archives;
+
+The release helpers use Python 3's standard library for archive staging and inspection. Python is
+optional for the ordinary Rust bootstrap but required for release commands.
 - `just doctor` — inspect the local toolchain;
 - `just bootstrap-check` — baseline repo validation;
 - `just ci` — formatting/check/tests/clippy;

@@ -1,12 +1,47 @@
 //! Project-authored 5x7 pixel lettering and read-only presentation geometry.
-use crate::{Camera, TextureTile, Vertex};
+use crate::{AtlasRegion, Camera, PageVertices, Vertex, page_vertices_mut};
 use rustcraft_engine_core::BlockPos;
+
+const SELECTION_EXPANSION: f32 = 0.002;
+
+/// Emits world-space line-list edges. The camera projection clips near-plane intersections, while
+/// the dedicated render pipeline tests fragments against the already-populated scene depth.
+fn selection_segments(position: BlockPos) -> Vec<([f32; 3], [f32; 3])> {
+    let lo = [
+        position.x as f32 - SELECTION_EXPANSION,
+        position.y as f32 - SELECTION_EXPANSION,
+        position.z as f32 - SELECTION_EXPANSION,
+    ];
+    let hi = [
+        position.x as f32 + 1.0 + SELECTION_EXPANSION,
+        position.y as f32 + 1.0 + SELECTION_EXPANSION,
+        position.z as f32 + 1.0 + SELECTION_EXPANSION,
+    ];
+    let point = |index: usize| {
+        std::array::from_fn(|axis| {
+            if index & (1 << axis) == 0 {
+                lo[axis]
+            } else {
+                hi[axis]
+            }
+        })
+    };
+    let mut result = Vec::with_capacity(12);
+    for corner in 0..8 {
+        for bit in [1, 2, 4] {
+            if corner & bit == 0 {
+                result.push((point(corner), point(corner | bit)));
+            }
+        }
+    }
+    result
+}
 #[derive(Clone, Copy)]
 pub struct Slot {
     pub model: Option<crate::inspection::BlockModel>,
-    pub top: TextureTile,
-    pub side: TextureTile,
-    pub bottom: TextureTile,
+    pub top: AtlasRegion,
+    pub side: AtlasRegion,
+    pub bottom: AtlasRegion,
     pub tint: [f32; 3],
     pub count: u16,
     pub block_3d: bool,
@@ -119,14 +154,40 @@ pub fn gui_block_vertices(
     model.gui_vertices(out, origin, scale, viewport);
 }
 
+/// Page-preserving form used by production inventory, hotbar and cursor rendering.
+pub fn gui_block_page_vertices(
+    out: &mut Vec<PageVertices>,
+    slot: Slot,
+    origin: [f32; 2],
+    scale: f32,
+    viewport: [f32; 2],
+) {
+    let model = slot.model.unwrap_or(crate::inspection::BlockModel {
+        state: rustcraft_engine_core::BlockState::new(rustcraft_engine_core::BlockId(0)),
+        textures: [
+            slot.side,
+            slot.side,
+            slot.side,
+            slot.side,
+            slot.top,
+            slot.bottom,
+        ],
+        tints: [slot.tint; 6],
+        rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+    });
+    model.gui_page_vertices(out, origin, scale, viewport);
+}
+
 #[derive(Default)]
 pub struct HudGeometry {
     pub vertices: Vec<Vertex>,
     pub item_vertices: Vec<Vertex>,
+    pub item_pages: Vec<PageVertices>,
     pub gui_vertices: Vec<Vertex>,
     pub hotbar_vertices: Vec<Vertex>,
     pub player_vertices: Vec<Vertex>,
     pub debug_vertices: Vec<Vertex>,
+    pub selection_vertices: Vec<Vertex>,
     pub debug_changed: bool,
     cached_text: String,
     cached_size: (u32, u32),
@@ -255,7 +316,15 @@ impl HudGeometry {
             });
         }
     }
-    fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 3], tile: Option<TextureTile>) {
+    fn rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [f32; 3],
+        region: Option<AtlasRegion>,
+    ) {
         for i in [0, 1, 2, 0, 2, 3] {
             let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]][i];
             self.vertices.push(Vertex {
@@ -264,29 +333,29 @@ impl HudGeometry {
                     1. - (y + uv[1] * h) / self.height * 2.,
                     0.,
                 ],
-                uv: tile.map_or(uv, |t| crate::tile_uv(t, uv)),
-                shade: if tile.is_some() { 1. } else { -1. },
+                uv: region.map_or(uv, |value| crate::region_uv(value, uv)),
+                shade: if region.is_some() { 1. } else { -1. },
                 color,
             });
         }
     }
     fn slot_item(&mut self, slot: Slot, x: f32, y: f32, size: f32, scale: f32) {
         if slot.block_3d {
-            gui_block_vertices(
-                &mut self.item_vertices,
+            gui_block_page_vertices(
+                &mut self.item_pages,
                 slot,
                 [x, y],
                 scale,
                 [self.width, self.height],
             );
         } else {
-            self.rect(
+            self.item_rect(
                 x + 2. * scale,
                 y + 2. * scale,
                 size - 4. * scale,
                 size - 4. * scale,
                 slot.tint,
-                Some(slot.side),
+                slot.side,
             );
         }
         if slot.count > 1 {
@@ -298,9 +367,27 @@ impl HudGeometry {
             );
         }
     }
+    fn item_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 3], region: AtlasRegion) {
+        let out = page_vertices_mut(&mut self.item_pages, region.texture);
+        for i in [0, 1, 2, 0, 2, 3] {
+            let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]][i];
+            out.push(Vertex {
+                position: [
+                    (x + uv[0] * w) / self.width * 2. - 1.,
+                    1. - (y + uv[1] * h) / self.height * 2.,
+                    0.,
+                ],
+                uv: crate::region_uv(region, uv),
+                shade: 1.,
+                color,
+            });
+        }
+    }
     pub fn build(&mut self, s: &HudSnapshot, width: u32, height: u32, camera: Camera) {
         self.vertices.clear();
+        self.selection_vertices.clear();
         self.item_vertices.clear();
+        self.item_pages.clear();
         self.width = width as f32;
         self.height = height as f32;
         let scale = beta_gui_scale(width, height);
@@ -420,7 +507,11 @@ impl HudGeometry {
                 );
             }
             if let Some(item) = s.cursor_slot {
-                let cursor_start = self.item_vertices.len();
+                let cursor_starts = self
+                    .item_pages
+                    .iter()
+                    .map(|page| (page.texture, page.vertices.len()))
+                    .collect::<Vec<_>>();
                 self.slot_item(
                     item,
                     s.cursor_position[0] - 8. * scale,
@@ -429,11 +520,22 @@ impl HudGeometry {
                     scale,
                 );
                 // Cursor has its own depth band above ordinary slots.
-                for v in &mut self.item_vertices[cursor_start..] {
-                    v.position[2] -= 0.25;
+                for page in &mut self.item_pages {
+                    let start = cursor_starts
+                        .iter()
+                        .find_map(|(texture, len)| (*texture == page.texture).then_some(*len))
+                        .unwrap_or(0);
+                    for vertex in &mut page.vertices[start..] {
+                        vertex.position[2] -= 0.25;
+                    }
                 }
             }
         }
+        self.item_vertices.extend(
+            self.item_pages
+                .iter()
+                .flat_map(|page| page.vertices.iter().copied()),
+        );
         if !s.inventory_open {
             let cx = self.width / 2.;
             let cy = self.height / 2.;
@@ -457,32 +559,14 @@ impl HudGeometry {
         if !s.inventory_open
             && let Some(p) = s.target
         {
-            let matrix = camera.view_projection();
-            let project = |x: f32, y: f32, z: f32| {
-                let v = [x, y, z, 1.];
-                let r: [f32; 4] =
-                    std::array::from_fn(|row| (0..4).map(|col| matrix[col][row] * v[col]).sum());
-                (r[3] > 0.05).then(|| {
-                    [
-                        (r[0] / r[3] + 1.) * width as f32 / 2.,
-                        (1. - r[1] / r[3]) * height as f32 / 2.,
-                    ]
-                })
-            };
-            let points: [Option<[f32; 2]>; 8] = std::array::from_fn(|i| {
-                project(
-                    p.x as f32 + if i & 1 == 0 { -0.002 } else { 1.002 },
-                    p.y as f32 + if i & 2 == 0 { -0.002 } else { 1.002 },
-                    p.z as f32 + if i & 4 == 0 { -0.002 } else { 1.002 },
-                )
-            });
-            for i in 0..8 {
-                for bit in [1, 2, 4] {
-                    if i & bit == 0
-                        && let (Some(a), Some(b)) = (points[i], points[i | bit])
-                    {
-                        self.line(a, b);
-                    }
+            for (a, b) in selection_segments(p) {
+                for position in [a, b] {
+                    self.selection_vertices.push(Vertex {
+                        position,
+                        uv: [0.0; 2],
+                        shade: 1.0,
+                        color: [0.0; 3],
+                    });
                 }
             }
         }
@@ -531,30 +615,6 @@ impl HudGeometry {
             self.text(line, 5., 4. + i as f32 * 9. * scale, scale);
         }
         std::mem::swap(&mut self.vertices, &mut self.debug_vertices);
-    }
-    fn line(&mut self, a: [f32; 2], b: [f32; 2]) {
-        let dx = b[0] - a[0];
-        let dy = b[1] - a[1];
-        let length = dx.hypot(dy).max(0.001);
-        let n = [-dy / length, dx / length];
-        let points = [
-            [a[0] + n[0], a[1] + n[1]],
-            [b[0] + n[0], b[1] + n[1]],
-            [b[0] - n[0], b[1] - n[1]],
-            [a[0] - n[0], a[1] - n[1]],
-        ];
-        for i in [0, 1, 2, 0, 2, 3] {
-            self.vertices.push(Vertex {
-                position: [
-                    points[i][0] / self.width * 2. - 1.,
-                    1. - points[i][1] / self.height * 2.,
-                    0.,
-                ],
-                uv: [0.; 2],
-                shade: -1.,
-                color: [0.01; 3],
-            });
-        }
     }
     fn text(&mut self, text: &str, x: f32, y: f32, scale: f32) {
         for (i, c) in text.chars().enumerate() {
@@ -645,6 +705,43 @@ fn glyph(c: char) -> [u8; 7] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustcraft_engine_core::Vec3;
+
+    fn test_camera(position: Vec3) -> Camera {
+        Camera {
+            position,
+            yaw: 0.0,
+            pitch: 0.0,
+            aspect: 16.0 / 9.0,
+            fov_y: 70.0_f32.to_radians(),
+            near: 0.05,
+            far: 100.0,
+        }
+    }
+
+    #[test]
+    fn selection_geometry_is_world_space_expanded_and_camera_independent() {
+        let position = BlockPos { x: -2, y: 4, z: 9 };
+        let segments = selection_segments(position);
+        assert_eq!(segments.len(), 12);
+        assert_eq!(
+            segments[0],
+            ([-2.002, 3.998, 8.998], [-0.998, 3.998, 8.998])
+        );
+        assert!(
+            segments
+                .iter()
+                .flat_map(|(a, b)| a.iter().chain(b))
+                .all(|v| v.is_finite())
+        );
+        assert_eq!(SELECTION_EXPANSION, 0.002);
+        // The same topology is used at all camera poses; only the GPU projection/depth test varies.
+        let front = test_camera(Vec3::new(0.5, 0.5, -2.0));
+        let inside = test_camera(Vec3::new(0.5, 0.5, 0.5));
+        assert_ne!(front.view_projection(), inside.view_projection());
+        assert_eq!(selection_segments(position), segments);
+    }
+
     #[test]
     fn beta_inventory_layout_keeps_hotbar_on_bottom_row() {
         assert_eq!(inventory_slot_position(0), Some((8., 142.)));
@@ -701,7 +798,7 @@ mod tests {
     }
     #[test]
     fn inventory_hotbar_cursor_share_geometry_independent_of_world_camera() {
-        let t = TextureTile { x: 3, y: 2 };
+        let t = crate::AtlasRegion::grid_cell(crate::TextureHandle(0), 16, 16, 3, 2).unwrap();
         let slot = Slot {
             model: None,
             top: t,
@@ -748,6 +845,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn gui_block_keeps_top_side_and_bottom_atlas_pages() {
+        let regions = [
+            crate::AtlasRegion::full(crate::TextureHandle(1)),
+            crate::AtlasRegion::full(crate::TextureHandle(1)),
+            crate::AtlasRegion::full(crate::TextureHandle(1)),
+            crate::AtlasRegion::full(crate::TextureHandle(1)),
+            crate::AtlasRegion::full(crate::TextureHandle(0)),
+            crate::AtlasRegion::full(crate::TextureHandle(2)),
+        ];
+        let model = crate::inspection::BlockModel {
+            state: rustcraft_engine_core::BlockState::new(rustcraft_engine_core::BlockId(9)),
+            textures: regions,
+            tints: [[1.; 3]; 6],
+            rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+        };
+        let slot = Slot {
+            model: Some(model),
+            top: regions[crate::Face::Top as usize],
+            side: regions[crate::Face::North as usize],
+            bottom: regions[crate::Face::Bottom as usize],
+            tint: [1.; 3],
+            count: 1,
+            block_3d: true,
+        };
+        let mut snapshot = HudSnapshot::default();
+        snapshot.slots[0] = Some(slot);
+        let mut geometry = HudGeometry::default();
+        geometry.build(
+            &snapshot,
+            800,
+            600,
+            crate::diagnostic::Stage::Triangle.camera(800. / 600.),
+        );
+        assert_eq!(
+            geometry
+                .item_pages
+                .iter()
+                .map(|page| page.texture)
+                .collect::<Vec<_>>(),
+            [
+                crate::TextureHandle(0),
+                crate::TextureHandle(1),
+                crate::TextureHandle(2)
+            ]
+        );
+        assert_eq!(geometry.item_vertices.len(), 36);
+        assert_eq!(
+            geometry
+                .item_pages
+                .iter()
+                .map(|page| page.vertices.len())
+                .sum::<usize>(),
+            36
+        );
     }
     #[test]
     fn beta_gui_cube_projection_is_finite_and_non_degenerate() {

@@ -6,6 +6,7 @@ use rustcraft_mod_api::{
 };
 pub const AIR: BlockDefinition = BlockDefinition {
     solid: false,
+    targetable: false,
     material: Material::Invisible,
     item: None,
     breakable: false,
@@ -104,6 +105,25 @@ pub const LAMP: BlockDefinition = BlockDefinition {
     emission: 15,
     ..BlockDefinition::cube(15, "minecraft_b173:debug_lamp", "minecraft_b173:lamp")
 };
+pub const WATER: BlockDefinition = BlockDefinition {
+    solid: false,
+    targetable: false,
+    material: Material::Liquid,
+    sky_opacity: 1,
+    light_opacity: 1,
+    ..BlockDefinition::cube(16, "minecraft_b173:water", "minecraft_b173:water")
+};
+pub const COAL_ORE: BlockDefinition =
+    BlockDefinition::cube(17, "minecraft_b173:coal_ore", "minecraft_b173:coal_ore");
+pub const IRON_ORE: BlockDefinition =
+    BlockDefinition::cube(18, "minecraft_b173:iron_ore", "minecraft_b173:iron_ore");
+pub const GOLD_ORE: BlockDefinition =
+    BlockDefinition::cube(19, "minecraft_b173:gold_ore", "minecraft_b173:gold_ore");
+pub const DIAMOND_ORE: BlockDefinition = BlockDefinition::cube(
+    20,
+    "minecraft_b173:diamond_ore",
+    "minecraft_b173:diamond_ore",
+);
 pub const STICK_ITEM: ItemDefinition = ItemDefinition {
     id: rustcraft_engine_core::ItemId(100),
     name: "minecraft_b173:stick",
@@ -190,7 +210,7 @@ pub const STONE_SHOVEL: ItemDefinition = ItemDefinition {
         durability: 131,
     }),
 };
-pub const BLOCKS: [BlockDefinition; 16] = [
+pub const BLOCKS: [BlockDefinition; 21] = [
     AIR,
     STONE,
     GRASS,
@@ -207,6 +227,11 @@ pub const BLOCKS: [BlockDefinition; 16] = [
     BOOKSHELF,
     SANDSTONE,
     LAMP,
+    WATER,
+    COAL_ORE,
+    IRON_ORE,
+    GOLD_ORE,
+    DIAMOND_ORE,
 ];
 pub const DEVELOPMENT_LOADOUT: [&str; 9] = [
     "minecraft_b173:stone",
@@ -240,6 +265,11 @@ pub fn atlas_tile(resource: &str) -> Option<(u8, u8)> {
         "minecraft_b173:sandstone_side" => 192,
         "minecraft_b173:sandstone_bottom" => 208,
         "minecraft_b173:lamp" => 105,
+        "minecraft_b173:water" => 14,
+        "minecraft_b173:coal_ore" => 34,
+        "minecraft_b173:iron_ore" => 33,
+        "minecraft_b173:gold_ore" => 32,
+        "minecraft_b173:diamond_ore" => 50,
         _ => return None,
     };
     Some((tile % 16, tile / 16))
@@ -294,8 +324,8 @@ mod tests {
     fn module_registers_first_party_blocks() {
         let mut r = BlockRegistry::default();
         BlocksModule.register(&mut r).unwrap();
-        assert_eq!(r.definitions().len(), 16);
-        assert_eq!(r.items().len(), 22);
+        assert_eq!(r.definitions().len(), 21);
+        assert_eq!(r.items().len(), 27);
         for b in BLOCKS.into_iter().skip(1) {
             for f in 0..6 {
                 assert!(atlas_tile(b.textures.face(f)).is_some());

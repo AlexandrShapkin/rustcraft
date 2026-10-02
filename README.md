@@ -1,15 +1,17 @@
-# RustCraft B1.7.3 — bootstrap repository
+# RustCraft
 
-A performance-first Rust voxel sandbox whose default first-party gameplay is intentionally familiar
-to Minecraft Beta 1.7.3 players without requiring bug-for-bug or tick-for-tick compatibility.
+RustCraft is an extensible, performance-oriented voxel engine/runtime written in Rust. Minecraft
+Beta 1.7.3 is provided as a first-party game package and reference implementation; it is not the
+identity or compatibility target of the engine.
 
 The repository is structured as a platform plus first-party gameplay modules. Human players, bots,
 replays and tests share a semantic Agent/Controller boundary. Multiplayer servers define a content
 profile so clients and bots can automatically resolve the resources/gameplay packages they need.
 
-This bootstrap is intentionally small: it establishes contracts, crate boundaries, Codex workflow,
-reference-source handling and the first headless implementation target rather than pretending the
-whole game already exists.
+The product is pre-1.0 and under active development. The default client/server composition currently
+embeds `minecraft-b173`; `sandbox-test` proves that the generic engine, Game API, world, renderer and
+input path work without that package. See [the release notes](CHANGELOG.md) and
+[release guide](docs/RELEASE.md).
 
 ## Start
 
@@ -18,6 +20,7 @@ just doctor
 just refs-fetch          # optional but recommended for Beta/reference-heavy work
 just refs-status
 just bootstrap-check
+just version
 ```
 
 Put local proprietary/reference material in the documented ignored paths:
@@ -28,11 +31,24 @@ reference/assets/vanilla-b1.7.3/
 # or reference/assets/vanilla-b1.7.3.zip
 ```
 
+These assets are not distributed with RustCraft. To run the first-party Minecraft profile, supply
+a compatible local `terrain.png` with `RUSTCRAFT_TERRAIN_TEXTURE=/path/to/terrain.png`.
+
 Public third-party references are declared in `reference/sources.json` and cloned into the ignored
 `reference/external/` tree by `just refs-fetch`.
 
-Then start Codex from the repository root and give it `prompts/00-bootstrap.md` (or simply instruct
-it to read `AGENTS.md` and implement M0).
+For release/version/tag and platform archive details, see [the release guide](docs/RELEASE.md).
+
+RustCraft source is available under either MIT or Apache-2.0, at your option; see
+[LICENSE](LICENSE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE). This does
+not license Minecraft trademarks or proprietary game assets, third-party references, or user-supplied
+assets. RustCraft is not affiliated with Mojang or Microsoft.
+
+After the owner completes the GitHub repository rename, the canonical clone command is:
+
+```sh
+git clone https://github.com/AlexandrShapkin/rustcraft.git
+```
 
 ## Main entry points
 
