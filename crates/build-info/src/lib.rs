@@ -22,7 +22,7 @@ mod tests {
     #[test]
     fn build_identity_contains_product_and_platform_fields() {
         let identity = super::identity();
-        assert!(identity.starts_with("RustCraft 0.1.0-alpha.1 ("));
+        assert!(identity.starts_with(&format!("RustCraft {} (", env!("CARGO_PKG_VERSION"))));
         assert!(identity.contains(env!("RUSTCRAFT_BUILD_PROFILE")));
         assert!(identity.contains(env!("RUSTCRAFT_BUILD_TARGET")));
     }

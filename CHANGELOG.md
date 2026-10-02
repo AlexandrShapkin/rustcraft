@@ -7,6 +7,28 @@ history from milestone commits.
 
 Infrastructure and M4 work in progress; not a published release.
 
+## 0.1.0-alpha.2 — public CI portability prerelease
+
+### Fixed
+
+- Public mandatory tests use project-owned synthetic presentation resources and no longer require
+  proprietary Minecraft assets.
+- Windows persistence filesystem handling now supports directory durability policy and safe
+  replacement of existing files.
+
+### Compatibility
+
+- Ubuntu and Windows public CI jobs pass on the alpha.2 preparation base (`ed26050`).
+- M4 remains active and incomplete; this release preparation adds no gameplay or world-generation
+  functionality.
+
+### Known issues
+
+- The alpha.1 tag exists but its release workflow did not publish artifacts. It is left unchanged;
+  alpha.2 is prepared as a separate prerelease.
+- See alpha.1 known issues for current world-generation, travel/eviction, persistence-scope,
+  multiplayer and user-supplied asset limitations; those limitations remain applicable.
+
 ## 0.1.0-alpha.1 — first pre-1.0 alpha (prepared, unpublished)
 
 ### Added

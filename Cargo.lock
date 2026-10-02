@@ -1499,14 +1499,14 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-agent-api"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-engine-core",
 ]
 
 [[package]]
 name = "rustcraft-bot-api"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-agent-api",
  "rustcraft-engine-core",
@@ -1514,11 +1514,11 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-build-info"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "rustcraft-client"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "png",
  "pollster",
@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-content"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
  "png",
@@ -1548,11 +1548,11 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-engine-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "rustcraft-game-api"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
  "rustcraft-content",
@@ -1561,7 +1561,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-gameplay-blocks"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-engine-core",
  "rustcraft-mod-api",
@@ -1569,7 +1569,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-gameplay-flat-world"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-engine-core",
  "rustcraft-mod-api",
@@ -1578,7 +1578,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-minecraft-b173"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
  "rustcraft-content",
@@ -1593,14 +1593,14 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-mod-api"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-engine-core",
 ]
 
 [[package]]
 name = "rustcraft-render"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bytemuck",
  "png",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-render-profile"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "png",
  "rustcraft-content",
@@ -1623,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-runtime"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-agent-api",
  "rustcraft-bot-api",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-sandbox-test"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "pollster",
  "rustcraft-agent-api",
@@ -1648,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-server"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
  "rustcraft-agent-api",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "rustcraft-world"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "atomicwrites",
  "blake3",

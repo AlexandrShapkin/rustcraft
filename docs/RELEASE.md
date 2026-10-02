@@ -2,8 +2,9 @@
 
 RustCraft uses pre-1.0 Semantic Versioning. The authoritative Engine/Product SemVer is
 `[workspace.package].version` in the root `Cargo.toml`; `just version` prints it. The initial
-unpublished value is `0.1.0-alpha.1`: the repository has no release tags or reliable historical
-version mapping. Milestone IDs are implementation scope, not release-version components.
+version was `0.1.0-alpha.1`; the current release candidate is `0.1.0-alpha.2`. The alpha.1 tag's
+workflow failed before publishing artifacts and is intentionally left unchanged. Milestone IDs are
+implementation scope, not release-version components.
 
 These version domains are deliberately independent:
 
@@ -21,10 +22,10 @@ metadata; this does not couple content package versions to it.
 
 ## Tags and artifacts
 
-Formal tags use `v` plus the exact workspace version, for example `v0.1.0-alpha.1`. The tagged
+Formal tags use `v` plus the exact workspace version, for example `v0.1.0-alpha.2`. The tagged
 GitHub Actions workflow checks this equality before building Linux x86_64 and Windows x86_64
 archives, validates their contents, emits SHA-256 sidecars, and creates a GitHub Release. Ordinary
-commits do not publish. No tag or release has been created by this repository change.
+commits do not publish. The alpha.1 tag remains unchanged and has no successful published release.
 
 `just release-build` invokes the same `scripts/release.py` packaging path used by CI and places
 archives/checksums in ignored `target/release-dist/`. `just release-check` runs workspace CI and
@@ -75,6 +76,7 @@ The lease makes the push fail if the remote moved. Any other remote branch/tag t
 history must be deliberately rewritten or removed too. No push or publication is performed by this
 tooling.
 
-Before publication, review the final archives/notices, rename the repository, replace the private
-remote history if applicable, then create and push exactly `v0.1.0-alpha.1`. Product branding does
-not change save paths, semantic content IDs, generator IDs, or world compatibility identity.
+Before publication, review the final archives/notices and ensure the canonical repository/history
+are ready. After main CI passes for the release preparation commit, create and push the tag matching
+the workspace version. Product branding does not change save paths, semantic content IDs, generator
+IDs, or world compatibility identity.
