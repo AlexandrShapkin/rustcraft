@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+atomicwrites.workspace = true
 blake3.workspace = true
 flate2.workspace = true
 rustcraft-engine-core.workspace = true

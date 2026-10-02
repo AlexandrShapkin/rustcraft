@@ -473,8 +473,12 @@ is loaded as `rustcraft:legacy-player-payload` and migrated on its next checkpoi
 
 Durable component changes increment revision; one background worker has at most one in-flight
 checkpoint and one replaceable newest snapshot. The two-slot store overwrites the slot other than
-the newest valid checkpoint, syncs file data and the containing directory on Unix, and validates
-each slot with BLAKE3. An interrupted write leaves the previous revision available; startup picks
+the newest valid checkpoint, syncs file data and the containing directory where supported (Unix),
+and validates each slot with BLAKE3. Windows still syncs checkpoint file data; directory-entry
+sync is unsupported and is not claimed. Metadata/chunk replacement uses `atomicwrites`, whose
+Windows implementation calls replace-existing/write-through `MoveFileExW`, instead of relying on
+`std::fs::rename` overwrite semantics. An
+interrupted slot write leaves the previous revision available; startup picks
 the highest valid revision and reports fallback recovery. Checkpoint cadence defaults to two
 seconds and is clamped to 1–2 seconds (`RUSTCRAFT_PLAYER_AUTOSAVE_SECONDS`); this bounds expected
 recent-state loss to roughly that interval under normal scheduling, not arbitrary hardware cache

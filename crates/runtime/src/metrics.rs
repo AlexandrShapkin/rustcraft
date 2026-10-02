@@ -104,6 +104,7 @@ pub struct ProcessSnapshot {
 }
 pub struct ProcessSampler {
     last: Instant,
+    #[cfg(target_os = "linux")]
     previous: Option<(u64, u64)>,
     pub snapshot: ProcessSnapshot,
 }
@@ -111,6 +112,7 @@ impl Default for ProcessSampler {
     fn default() -> Self {
         Self {
             last: Instant::now() - std::time::Duration::from_secs(1),
+            #[cfg(target_os = "linux")]
             previous: None,
             snapshot: ProcessSnapshot::default(),
         }

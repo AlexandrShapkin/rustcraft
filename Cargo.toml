@@ -53,6 +53,7 @@ rustcraft-render = { path = "crates/render" }
 rustcraft-render-profile = { path = "crates/render-profile" }
 bytemuck = { version = "1.23", features = ["derive"] }
 png = "0.17"
+atomicwrites = "0.4.4"
 pollster = "0.4"
 wgpu = "26"
 winit = "0.30"

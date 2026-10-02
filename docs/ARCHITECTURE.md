@@ -220,8 +220,12 @@ semantic blocks and state-schema/family mismatches are explicit errors. Generato
 generation of absent chunks but does not prevent loading existing persisted chunks. Legacy metadata
 v1 is treated as the known semantic-key + `u16` variant schema v1 and migrated to v2 only after
 existing chunk palettes resolve successfully. Zlib/DEFLATE fast compression is selected only when
-smaller; all writes use create-new unique temporary files, file sync, atomic rename and
-parent-directory sync.
+smaller; metadata/chunk writes use a cross-platform atomic replacement primitive, sync the completed
+file, and sync the containing directory where supported. On Windows, directory sync is explicitly
+unsupported/no-op: file contents are synced and replacement uses the platform replace-existing,
+write-through operation, but RustCraft does not claim directory-entry power-loss durability there.
+`WorldStorage::flush` completes no background jobs itself; workers must be joined/drained by their
+owner, while flush syncs affected directory entries on platforms that support it.
 
 The client supports `--world NAME` (default `default`) and `RUSTCRAFT_WORLD_SEED`; compatible
 columns load, missing initial columns generate, and simulation mutations enter a separate

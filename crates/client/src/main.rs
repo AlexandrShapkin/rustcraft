@@ -14,7 +14,7 @@ use rustcraft_render_profile::{CompiledTextureRegistry, CompiledVoxelRenderRegis
 use rustcraft_runtime::{RuntimeBootstrap, Simulation};
 use std::{
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use winit::{
@@ -32,16 +32,29 @@ struct FirstPartyCompiled {
     destroy_stages: [AtlasRegion; 10],
 }
 
-static FIRST_PARTY_COMPILED: OnceLock<Result<FirstPartyCompiled, String>> = OnceLock::new();
+static FIRST_PARTY_COMPILED: OnceLock<Arc<FirstPartyCompiled>> = OnceLock::new();
+static FIRST_PARTY_COMPILE_LOCK: Mutex<()> = Mutex::new(());
 
-fn first_party_compiled() -> Result<&'static FirstPartyCompiled, String> {
-    FIRST_PARTY_COMPILED
-        .get_or_init(compile_first_party_resources)
-        .as_ref()
-        .map_err(Clone::clone)
+fn first_party_compiled() -> Result<Arc<FirstPartyCompiled>, String> {
+    if let Some(compiled) = FIRST_PARTY_COMPILED.get() {
+        return Ok(Arc::clone(compiled));
+    }
+    let _guard = FIRST_PARTY_COMPILE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(compiled) = FIRST_PARTY_COMPILED.get() {
+        return Ok(Arc::clone(compiled));
+    }
+    // Cache only success; bad local assets do not poison subsequent attempts.
+    let compiled = Arc::new(compile_first_party_resources()?);
+    let _ = FIRST_PARTY_COMPILED.set(Arc::clone(&compiled));
+    Ok(compiled)
 }
 
 fn compile_first_party_resources() -> Result<FirstPartyCompiled, String> {
+    #[cfg(test)]
+    let terrain = synthetic_test_terrain_path()?;
+    #[cfg(not(test))]
     let terrain = std::env::var_os("RUSTCRAFT_TERRAIN_TEXTURE")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -49,27 +62,48 @@ fn compile_first_party_resources() -> Result<FirstPartyCompiled, String> {
                 .join("../..")
                 .join("reference/assets/terrain.png")
         });
-    let package = rustcraft_minecraft_b173::legacy_resource_package(&terrain)
+    #[cfg(test)]
+    let cache_directory: Option<PathBuf> = None;
+    #[cfg(not(test))]
+    let cache_directory = Some(
+        std::env::var_os("RUSTCRAFT_RESOURCE_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("target/resource-cache/minecraft-b173")),
+    );
+    #[cfg(test)]
+    let atlas_policy = rustcraft_content::resources::AtlasPolicy::default();
+    #[cfg(not(test))]
+    let atlas_policy = first_party_atlas_policy()?;
+    compile_first_party_resources_from(&terrain, cache_directory.as_deref(), atlas_policy)
+}
+
+#[cfg(not(test))]
+fn first_party_atlas_policy() -> Result<rustcraft_content::resources::AtlasPolicy, String> {
+    let Some(value) = std::env::var_os("RUSTCRAFT_MAX_ATLAS_DIMENSION") else {
+        return Ok(rustcraft_content::resources::AtlasPolicy::default());
+    };
+    let maximum = value
+        .to_str()
+        .ok_or("RUSTCRAFT_MAX_ATLAS_DIMENSION is not UTF-8")?
+        .parse::<u32>()
+        .map_err(|error| format!("invalid RUSTCRAFT_MAX_ATLAS_DIMENSION: {error}"))?;
+    rustcraft_content::resources::AtlasPolicy::default()
+        .bounded_by_device_dimension(maximum)
+        .map_err(|error| format!("device-safe atlas policy: {error}"))
+}
+
+fn compile_first_party_resources_from(
+    terrain: &std::path::Path,
+    cache_directory: Option<&std::path::Path>,
+    atlas_policy: rustcraft_content::resources::AtlasPolicy,
+) -> Result<FirstPartyCompiled, String> {
+    let package = rustcraft_minecraft_b173::legacy_resource_package(terrain)
         .map_err(|error| format!("legacy minecraft resource import: {error}"))?;
-    let cache_directory = std::env::var_os("RUSTCRAFT_RESOURCE_CACHE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("target/resource-cache/minecraft-b173"));
-    let mut atlas_policy = rustcraft_content::resources::AtlasPolicy::default();
-    if let Some(value) = std::env::var_os("RUSTCRAFT_MAX_ATLAS_DIMENSION") {
-        let maximum = value
-            .to_str()
-            .ok_or("RUSTCRAFT_MAX_ATLAS_DIMENSION is not UTF-8")?
-            .parse::<u32>()
-            .map_err(|error| format!("invalid RUSTCRAFT_MAX_ATLAS_DIMENSION: {error}"))?;
-        atlas_policy = atlas_policy
-            .bounded_by_device_dimension(maximum)
-            .map_err(|error| format!("device-safe atlas policy: {error}"))?;
-    }
     let compiled = rustcraft_content::resources::compile_resources(
         &[package],
         atlas_policy,
         rustcraft_content::resources::ResourceLimits::default(),
-        Some(&cache_directory),
+        cache_directory,
     )
     .map_err(|error| format!("compile minecraft resources: {error}"))?;
     eprintln!("resource pipeline: {}", compiled.report());
@@ -136,6 +170,53 @@ fn compile_first_party_resources() -> Result<FirstPartyCompiled, String> {
         legacy_to_compiled,
         destroy_stages,
     })
+}
+
+#[cfg(test)]
+fn synthetic_test_terrain_path() -> Result<PathBuf, String> {
+    use std::fs;
+    let root = std::env::temp_dir().join(format!(
+        "rustcraft-minecraft-synthetic-fixture-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join("gui"))
+        .and_then(|_| fs::create_dir_all(root.join("mob")))
+        .map_err(|error| format!("create synthetic resource fixture: {error}"))?;
+    let write_png = |path: &std::path::Path, width: u32, height: u32, pixels: &[u8]| {
+        let file = std::fs::File::create(path)
+            .map_err(|error| format!("create fixture {}: {error}", path.display()))?;
+        let mut encoder = png::Encoder::new(file, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| format!("encode fixture header: {error}"))?;
+        writer
+            .write_image_data(pixels)
+            .map_err(|error| format!("encode fixture pixels: {error}"))
+    };
+    let mut terrain = vec![0; 256 * 256 * 4];
+    for y in 0..256usize {
+        for x in 0..256usize {
+            let tile_x = (x / 16) as u8;
+            let tile_y = (y / 16) as u8;
+            let checker = ((x % 16) ^ (y % 16)) as u8;
+            let offset = (y * 256 + x) * 4;
+            terrain[offset..offset + 4].copy_from_slice(&[
+                tile_x.wrapping_mul(17).wrapping_add(checker),
+                tile_y.wrapping_mul(31).wrapping_add(checker / 2),
+                tile_x.wrapping_add(tile_y).wrapping_mul(13),
+                255,
+            ]);
+        }
+    }
+    let gui = vec![0x80; 256 * 256 * 4];
+    let skin = vec![0xc0; 64 * 64 * 4];
+    write_png(&root.join("terrain.png"), 256, 256, &terrain)?;
+    write_png(&root.join("gui/inventory.png"), 256, 256, &gui)?;
+    write_png(&root.join("gui/gui.png"), 256, 256, &gui)?;
+    write_png(&root.join("mob/char.png"), 64, 64, &skin)?;
+    Ok(root.join("terrain.png"))
 }
 
 fn profile_fingerprint(profile: &rustcraft_game_api::CompiledGameProfile) -> String {
@@ -1897,7 +1978,7 @@ fn camera_is_underwater(simulation: &Simulation) -> bool {
         z: eye.z.floor() as i32,
     };
     let block = simulation.world.get(position);
-    let Some(compiled) = FIRST_PARTY_COMPILED.get().and_then(|r| r.as_ref().ok()) else {
+    let Ok(compiled) = first_party_compiled() else {
         return false;
     };
     let Some(id) = compiled

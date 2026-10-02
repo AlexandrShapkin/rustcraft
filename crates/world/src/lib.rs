@@ -755,6 +755,10 @@ impl WorldStorage {
         {
             return Err(WorldError::InvalidWorldName);
         }
+        if let Some(parent) = root.parent() {
+            sync_directory(parent)?;
+        }
+        sync_directory(&root)?;
         Ok(Self { root })
     }
 
@@ -836,7 +840,7 @@ impl WorldStorage {
             return Err(WorldError::InvalidWorldName);
         }
         if !directory_existed {
-            File::open(&self.root)?.sync_all()?;
+            sync_directory(&self.root)?;
         }
         let paths = [
             self.player_slot_path(&record.player_id, 0),
@@ -1129,8 +1133,15 @@ impl WorldStorage {
             .filter(|meta| meta.file_type().is_file())
             .map(|meta| meta.len())
     }
+    /// All committed files have already been `sync_all`'d. Flush syncs directory entries where
+    /// the platform exposes directory synchronization; it does not wait on asynchronous workers.
     pub fn flush(&self) -> Result<(), WorldError> {
-        File::open(&self.root)?.sync_all()?;
+        sync_directory(&self.root)?;
+        for child in [self.root.join("chunks"), self.root.join("players")] {
+            if child.is_dir() {
+                sync_directory(&child)?;
+            }
+        }
         Ok(())
     }
     fn chunk_path(&self, position: ChunkPos) -> PathBuf {
@@ -1513,40 +1524,31 @@ fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, WorldError> {
     Ok(data)
 }
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), WorldError> {
-    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let parent = path
         .parent()
         .ok_or(WorldError::InvalidData("missing parent"))?;
-    let mut temp = None;
-    for _ in 0..32 {
-        let id = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let candidate = parent.join(format!(".write-{}-{id}.tmp", std::process::id()));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => {
-                temp = Some((candidate, file));
-                break;
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(WorldError::Io(error)),
-        }
-    }
-    let (temp_path, mut file) = temp.ok_or(WorldError::InvalidData("temporary name exhaustion"))?;
-    let result = (|| {
-        file.write_all(data)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp_path, path)?;
-        File::open(parent)?.sync_all()?;
-        Ok::<_, io::Error>(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-    result.map_err(WorldError::Io)
+    atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+        .write(|file| file.write_all(data))
+        .map_err(|error| WorldError::Io(error.into()))?;
+    sync_directory(parent)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+// std does not provide a portable way to open/sync a directory on Windows. Files are still
+// flushed before atomic replacement; Windows directory-entry durability is not claimed here.
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn durable_write_slot(path: &Path, data: &[u8]) -> Result<(f64, f64), WorldError> {
@@ -1567,11 +1569,7 @@ fn durable_write_slot(path: &Path, data: &[u8]) -> Result<(f64, f64), WorldError
     if let Some(parent) = path.parent() {
         // Persist a newly created directory entry where directory sync is supported. Some
         // platforms reject opening directories; the checkpoint file itself is still synced.
-        match File::open(parent).and_then(|directory| directory.sync_all()) {
-            Ok(()) => {}
-            Err(error) if cfg!(unix) => return Err(WorldError::Io(error)),
-            Err(_) => {}
-        }
+        sync_directory(parent)?;
     }
     let sync_ms = sync_started.elapsed().as_secs_f64() * 1000.0;
     Ok((write_ms, sync_ms))
@@ -1942,6 +1940,60 @@ mod tests {
             WorldStorage::open(&root, "../escape"),
             Err(WorldError::InvalidWorldName)
         ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn metadata_and_chunk_overwrites_flush_and_reopen_portably() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "overwrite").unwrap();
+        let metadata = WorldMetadata {
+            seed: 1,
+            game_id: "sample:game".into(),
+            profile_fingerprint: "profile-a".into(),
+            persistence_schema_version: PERSISTED_STATE_SCHEMA_VERSION,
+            generator_id: "sample:flat".into(),
+            generator_version: 1,
+        };
+        storage.store_metadata(&metadata).unwrap();
+        let mut replacement = metadata.clone();
+        replacement.seed = 2;
+        replacement.profile_fingerprint = "profile-b".into();
+        storage.store_metadata(&replacement).unwrap();
+
+        let position = ChunkPos { x: -3, z: 5 };
+        let chunk = |variant| StoredChunk {
+            position,
+            sections: vec![StoredSection {
+                y: 0,
+                states: vec![("sample:stone".into(), variant); CHUNK_VOLUME],
+            }],
+        };
+        storage.store_chunk(&chunk(1)).unwrap();
+        storage.store_chunk(&chunk(2)).unwrap();
+        let make_player = |revision, value| PlayerRecord {
+            player_id: "local-player".into(),
+            revision,
+            components: vec![PlayerComponent {
+                id: "sample:player/state".into(),
+                schema_version: 1,
+                payload: vec![value],
+            }],
+            recovered_from_checkpoint: false,
+        };
+        storage.store_player(&make_player(1, 1)).unwrap();
+        storage.store_player(&make_player(2, 2)).unwrap();
+        storage.flush().unwrap();
+        drop(storage);
+
+        let reopened = WorldStorage::open(&root, "overwrite").unwrap();
+        assert_eq!(reopened.load_metadata().unwrap(), replacement);
+        assert_eq!(reopened.load_chunk(position).unwrap(), chunk(2));
+        assert_eq!(
+            reopened.load_player("local-player").unwrap(),
+            Some(make_player(2, 2))
+        );
+        reopened.flush().unwrap();
         let _ = fs::remove_dir_all(root);
     }
 
