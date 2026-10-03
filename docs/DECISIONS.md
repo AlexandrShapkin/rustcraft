@@ -668,3 +668,19 @@ redecorated. Biomes remain derived and unpersisted.
 Water lakes are static source voxels. Lava is deferred until a semantic block/resource/medium/light
 contract exists; dungeons are deferred until spawner, mob, chest and loot gameplay exists. These
 omissions are preferable to placeholder content that would expand M4 into unrelated systems.
+
+## D-044 — Developer control and Rhai adapters
+
+Status: accepted boundary; DX1 acceptance remains active.
+
+Game-neutral control owns registry/source/capability/snapshot/action/scenario contracts.
+Rhai 1.26.1 is a leaf adapter with per-session scopes, bounded AST execution and no dynamic
+filesystem imports. Native and scripted commands converge on semantic actions; first-party
+registration stays in minecraft-b173. Scenarios build explicit Rust steps rather than fake
+coroutines. Fixed pause leaves worker/event/render turns running. See SCRIPTING.md.
+
+DX1 workers use one bounded thread and request generations; publication stays on the owner thread.
+Scopes never cross consumer ownership. JobRef tracks real compile/bundle/PNG lifecycle, with bounded
+terminal retention. GPU mapping stays in render ownership with nonblocking publication; CPU PNG
+work stays in the tooling worker. This adds no GPU dependency to headless server or game policy to
+control. Native REPL parsing is limited to a 4 KiB console line; file compilation is background work.

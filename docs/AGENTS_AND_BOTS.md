@@ -53,3 +53,9 @@ Architecture should support controlled stepping for tests/replay/AI experiments:
 `observe N -> submit intent -> advance -> observe N+1`
 
 This also enables cheap load testing with large numbers of headless agents.
+
+## DX1 scenario controller
+
+An explicit temporary scenario lease overrides human/legacy diagnostic intent. Movement uses
+AgentIntent; terminal completion/cancellation releases intent. Teleport is a separate privileged
+action. The shared FixedControl gate aligns headless and graphical pause/step behavior.

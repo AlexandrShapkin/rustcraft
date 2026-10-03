@@ -238,3 +238,32 @@ resource-stress count="1000":
 
 minecraft-resource-report:
     cargo run -p rustcraft-client -- --resource-report
+
+# Explicit trusted developer tools; ordinary startup does not execute scripts.
+dev-client:
+    cargo run -p rustcraft-client -- --devtools
+
+script-check path="scripts":
+    cargo run -p rustcraft-server -- --script-check "{{path}}"
+
+scenario-headless path="scripts/scenarios/dx_smoke.rhai":
+    cargo run -p rustcraft-server -- --scenario "{{path}}"
+
+scenario-client path="scripts/scenarios/dx_smoke.rhai":
+    cargo run -p rustcraft-client -- --devtools --scenario "{{path}}"
+
+dx-smoke: script-check scenario-headless
+
+script-bench:
+    cargo run --release -p rustcraft-server -- --script-bench
+
+# Real-window DX service overhead; output target/dx-overhead.json.
+dx-overhead:
+    cargo run --release -p rustcraft-client -- --dx-overhead
+
+# Shared console/editor and async lifecycle regression gates.
+dx-test:
+    cargo test -p rustcraft-control -p rustcraft-scripting-rhai
+
+dx-console:
+    cargo run -p rustcraft-client -- --devtools --scenario scripts/scenarios/dx_console.rhai

@@ -195,6 +195,12 @@ The older multiplayer/content-resolution scope is moved to an inactive later roa
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and
 advanced renderer optimization are out of M4 scope.
 
+## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (active)
+
+Generic control and bounded Rhai sessions/scenarios now have shared headless/graphical composition.
+Same-source smoke and automatic graphical failure captures are demonstrated. Full DX1 acceptance
+remains open; see SCRIPTING.md and DEFECTS.md. M4 stays functionally complete with M4-009 conditional.
+
 ## M5 — multiplayer + server content resolution (future, inactive)
 
 - authoritative server;
@@ -205,7 +211,7 @@ advanced renderer optimization are out of M4 scope.
 - content cache/fetch/integrity;
 - headless remote bot transport.
 
-## M6 — third-party modding
+## M6 — third-party modding (future, inactive)
 
 - WASM runtime;
 - capability API;
@@ -214,7 +220,7 @@ advanced renderer optimization are out of M4 scope.
 - target-specific content;
 - quotas/profiling.
 
-## M7 — evidence-driven optimization campaign
+## M7 — evidence-driven optimization campaign (future, inactive)
 
 Evaluate data layouts, storage engines, SIMD, io_uring, allocators, PGO/BOLT and high-player-count
 partitioning only against representative benchmarks. R1 resource/render workloads should supply

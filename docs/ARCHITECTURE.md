@@ -422,3 +422,14 @@ The game resolves camera medium through the compiled voxel material and liquid s
 it supplies the water fog policy. Generic world shaders apply distance-dependent fog to opaque and
 translucent geometry without Minecraft block-ID checks. This presentation state does not affect
 authoritative voxels or persistence.
+
+## DX1 control tooling (active)
+
+`control` owns game-neutral semantic control; `scripting-rhai` is a leaf adapter.
+`minecraft-b173::control` owns first-party registration and the legacy simulation adapter.
+Client/server compose the same scenario program. See [SCRIPTING.md](SCRIPTING.md).
+
+DX1 async work has one bounded tooling worker (16 queued requests/replies), per-script request
+generations and owner-thread atomic AST/handler publication. JobRef is used for compile/reload,
+bundle writes and PNG writes, with cooperative scenario WaitJob. Render owns async GPU mapping;
+workers receive owned bytes, never simulation/renderer borrows. See SCRIPTING.md for the audit.

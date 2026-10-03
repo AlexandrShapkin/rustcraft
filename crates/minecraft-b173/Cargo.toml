@@ -19,3 +19,10 @@ rustcraft-gameplay-flat-world.workspace = true
 rustcraft-mod-api.workspace = true
 rustcraft-runtime.workspace = true
 rustcraft-world.workspace = true
+
+rustcraft-control.workspace = true
+serde_json.workspace = true
+rustcraft-agent-api.workspace = true
+
+[dev-dependencies]
+rustcraft-scripting-rhai.workspace = true

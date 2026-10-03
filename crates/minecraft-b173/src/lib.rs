@@ -331,3 +331,5 @@ mod tests {
         assert_eq!(flat.grass, blocks::GRASS.id);
     }
 }
+
+pub mod control;

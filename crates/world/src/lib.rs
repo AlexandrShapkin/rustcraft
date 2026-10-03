@@ -1416,6 +1416,18 @@ impl PersistenceDirtyTracker {
             self.failed += 1;
         }
     }
+    /// Bounded immutable tooling view. Dirty generations are not persisted schema revisions.
+    pub fn diagnostic_entries(
+        &self,
+        limit: usize,
+    ) -> impl Iterator<Item = (ChunkPos, u64, bool)> + '_ {
+        self.dirty
+            .iter()
+            .take(limit.min(32))
+            .map(|(&(x, z), &generation)| {
+                (ChunkPos { x, z }, generation, self.saving.contains(&(x, z)))
+            })
+    }
     pub fn dirty_count(&self) -> usize {
         self.dirty.len()
     }

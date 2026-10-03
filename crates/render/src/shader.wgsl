@@ -64,8 +64,8 @@ fn apply_world_fog(input: Out, rgba: vec4<f32>) -> vec4<f32> {
     if color.a < 0.05 { discard; }
     return vec4<f32>(color.rgb * input.color * input.shade, 0.5);
 }
-@fragment fn fs_selection(_input: Out) -> @location(0) vec4<f32> {
-    return vec4<f32>(0.0, 0.0, 0.0, 0.55);
+@fragment fn fs_selection(input: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(input.color, 0.55);
 }
 @vertex fn vs_hud(input: In) -> Out {
     var out: Out;

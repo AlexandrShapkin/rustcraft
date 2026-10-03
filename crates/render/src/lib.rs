@@ -984,6 +984,19 @@ pub struct MeshUploadStats {
     pub submit_ms: f64,
 }
 
+pub struct CapturedFrame {
+    pub path: std::path::PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+struct PendingCapture {
+    buffer: wgpu::Buffer,
+    rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    config: wgpu::SurfaceConfiguration,
+    path: std::path::PathBuf,
+    started: std::time::Instant,
+}
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -999,6 +1012,7 @@ pub struct Renderer {
     hud_geometry: hud::HudGeometry,
     hud_buffer: wgpu::Buffer,
     selection_buffer: wgpu::Buffer,
+    debug_boxes: Vec<(rustcraft_engine_core::Aabb, [f32; 3])>,
     page_binds: Vec<wgpu::BindGroup>,
     container_background: AtlasRegion,
     hud_texture: AtlasRegion,
@@ -1026,6 +1040,8 @@ pub struct Renderer {
     resident_section_count: usize,
     diagnostic: Option<diagnostic::Stage>,
     projection_logged: bool,
+    async_capture: bool,
+    pending_capture: Option<PendingCapture>,
     texture_bytes: usize,
     atlas_occupancy: f32,
     resource_cache_hit: bool,
@@ -1390,7 +1406,7 @@ impl Renderer {
         });
         let selection_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("world-space-selection-outline"),
-            size: 4096,
+            size: 65536,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1411,6 +1427,7 @@ impl Renderer {
             hud_geometry: hud::HudGeometry::default(),
             hud_buffer,
             selection_buffer,
+            debug_boxes: Vec::new(),
             page_binds,
             container_background: resources.container_background,
             hud_texture: resources.hud,
@@ -1438,6 +1455,8 @@ impl Renderer {
             resident_section_count: 0,
             diagnostic,
             projection_logged: false,
+            async_capture: false,
+            pending_capture: None,
             texture_bytes,
             atlas_occupancy: resources.occupancy,
             resource_cache_hit: resources.cache_hit,
@@ -1457,9 +1476,62 @@ impl Renderer {
     pub fn width(&self) -> u32 {
         self.config.width
     }
+    /// Transient bounded debug geometry, independent of world meshes and persistence.
+    pub fn set_debug_boxes(&mut self, boxes: &[rustcraft_engine_core::Aabb]) {
+        self.set_debug_boxes_colored(boxes, &[]);
+    }
+    pub fn set_debug_boxes_colored(
+        &mut self,
+        boxes: &[rustcraft_engine_core::Aabb],
+        colors: &[[f32; 3]],
+    ) {
+        self.debug_boxes.clear();
+        self.debug_boxes.extend(
+            boxes
+                .iter()
+                .take(64)
+                .enumerate()
+                .map(|(i, b)| (*b, colors.get(i).copied().unwrap_or([0.1, 0.8, 0.4]))),
+        );
+    }
     pub fn set_hud(&mut self, snapshot: &hud::HudSnapshot, camera: Camera) {
         self.hud_geometry
             .build(snapshot, self.width(), self.height(), camera);
+        for (bounds, color) in &self.debug_boxes {
+            let point = |i: usize| {
+                [
+                    if i & 1 == 0 {
+                        bounds.min.x
+                    } else {
+                        bounds.max.x
+                    },
+                    if i & 2 == 0 {
+                        bounds.min.y
+                    } else {
+                        bounds.max.y
+                    },
+                    if i & 4 == 0 {
+                        bounds.min.z
+                    } else {
+                        bounds.max.z
+                    },
+                ]
+            };
+            for corner in 0..8 {
+                for bit in [1, 2, 4] {
+                    if corner & bit == 0 {
+                        for position in [point(corner), point(corner | bit)] {
+                            self.hud_geometry.selection_vertices.push(Vertex {
+                                position,
+                                uv: [0.; 2],
+                                shade: 1.,
+                                color: *color,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         for vertex in &mut self.hud_geometry.player_vertices {
             vertex.uv = region_uv(self.player_skin, vertex.uv);
         }
@@ -1515,7 +1587,7 @@ impl Renderer {
         self.queue.write_buffer(&self.hud_buffer, 0, bytes);
         let selection_bytes = bytemuck::cast_slice(&self.hud_geometry.selection_vertices);
         assert!(
-            selection_bytes.len() <= 4096,
+            selection_bytes.len() <= 65536,
             "selection geometry capacity exceeded"
         );
         if !selection_bytes.is_empty() {
@@ -1857,6 +1929,71 @@ impl Renderer {
         self.render_capture(camera, None)
     }
 
+    /// DX capture coordinates mapping on the renderer thread, without a GPU Wait or blocking recv.
+    pub fn render_capture_async(
+        &mut self,
+        camera: Camera,
+        capture: Option<&Path>,
+    ) -> Result<(), wgpu::SurfaceError> {
+        self.async_capture = true;
+        let result = self.render_capture(
+            camera,
+            if self.pending_capture.is_none() {
+                capture
+            } else {
+                None
+            },
+        );
+        self.async_capture = false;
+        result
+    }
+    pub fn capture_pending(&self) -> bool {
+        self.pending_capture.is_some()
+    }
+    pub fn poll_capture(&mut self) -> Option<Result<CapturedFrame, String>> {
+        let pending = self.pending_capture.as_ref()?;
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        match pending.rx.try_recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                self.pending_capture.take();
+                return Some(Err(error.to_string()));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty)
+                if pending.started.elapsed().as_secs() < 30 =>
+            {
+                return None;
+            }
+            _ => {
+                self.pending_capture.take();
+                return Some(Err("capture mapping timeout/disconnected".into()));
+            }
+        }
+        let pending = self.pending_capture.take().unwrap();
+        let data = pending.buffer.slice(..).get_mapped_range();
+        let stride = (pending.config.width * 4).div_ceil(256) * 256;
+        let mut rgba =
+            Vec::with_capacity((pending.config.width * pending.config.height * 4) as usize);
+        for row in data.chunks(stride as usize) {
+            rgba.extend_from_slice(&row[..pending.config.width as usize * 4]);
+        }
+        if matches!(
+            pending.config.format,
+            wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Bgra8Unorm
+        ) {
+            for pixel in rgba.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+        }
+        drop(data);
+        pending.buffer.unmap();
+        Some(Ok(CapturedFrame {
+            path: pending.path,
+            width: pending.config.width,
+            height: pending.config.height,
+            rgba,
+        }))
+    }
     /// Optional one-frame development capture of the actual surface render.
     pub fn render_capture(
         &mut self,
@@ -2000,8 +2137,29 @@ impl Renderer {
             pipeline_switches,
         };
         let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
+        // Some GL surfaces cannot be copied. Use the same render passes/readback on a
+        // copyable attachment for that capture, then present the identical state normally.
+        let capture_attachment = (capture.is_some()
+            && !self.config.usage.contains(wgpu::TextureUsages::COPY_SRC))
+        .then(|| {
+            self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("surface-capture-attachment"),
+                size: wgpu::Extent3d {
+                    width: self.config.width,
+                    height: self.config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        });
+        let view = capture_attachment
+            .as_ref()
+            .unwrap_or(&output.texture)
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
@@ -2289,16 +2447,42 @@ impl Renderer {
             self.timing.as_ref().unwrap().resolve(&mut encoder);
         }
         let readback = capture.map(|_| {
-            diagnostic::copy_surface(&self.device, &mut encoder, &output.texture, &self.config)
+            let mut config = self.config.clone();
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+            diagnostic::copy_surface(
+                &self.device,
+                &mut encoder,
+                capture_attachment.as_ref().unwrap_or(&output.texture),
+                &config,
+            )
         });
         self.queue.submit(Some(encoder.finish()));
         if timed {
             self.timing.as_mut().unwrap().map();
         }
         if let (Some(path), Some(buffer)) = (capture, readback) {
-            diagnostic::save_capture(&self.device, buffer, &self.config, path);
+            if self.async_capture {
+                let (tx, rx) = std::sync::mpsc::channel();
+                buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| {
+                        let _ = tx.send(result);
+                    });
+                self.pending_capture = Some(PendingCapture {
+                    buffer,
+                    rx,
+                    config: self.config.clone(),
+                    path: path.to_owned(),
+                    started: std::time::Instant::now(),
+                });
+            } else {
+                diagnostic::save_capture(&self.device, buffer, &self.config, path);
+            }
         }
         output.present();
+        if capture_attachment.is_some() {
+            self.render_capture(camera, None)?;
+        }
         Ok(())
     }
 }

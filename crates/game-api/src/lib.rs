@@ -430,6 +430,10 @@ impl CommandBuffer {
         self.commands.len()
     }
 
+    pub fn drain(&mut self) -> impl Iterator<Item = WorldCommand> + '_ {
+        self.commands.drain(..)
+    }
+
     pub fn apply(&mut self, world: &mut World) -> usize {
         let count = self.commands.len();
         for command in self.commands.drain(..) {

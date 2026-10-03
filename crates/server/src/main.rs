@@ -17,6 +17,29 @@ fn main() {
     }
     rustcraft_minecraft_b173::validate_package()
         .expect("minecraft_b173 must register through the public Game API");
+    if let Some(index) = arguments.iter().position(|arg| arg == "--scenario") {
+        let path = arguments.get(index + 1).unwrap_or_else(|| {
+            eprintln!("--scenario requires PATH");
+            std::process::exit(2)
+        });
+        if let Err(error) = run_dx_scenario(path) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(index) = arguments.iter().position(|arg| arg == "--script-check") {
+        let path = arguments.get(index + 1).map_or("scripts", String::as_str);
+        if let Err(error) = rustcraft_scripting_rhai::check_scripts(std::path::Path::new(path)) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.iter().any(|arg| arg == "--script-bench") {
+        rustcraft_scripting_rhai::benchmark();
+        return;
+    }
     let smoke = arguments.iter().any(|arg| arg == "--smoke");
     if let Some(index) = arguments.iter().position(|arg| arg == "--world-info") {
         run_world_info(&arguments[index + 1..]);
@@ -1680,4 +1703,62 @@ fn run_smoke() {
         simulation.player.position.y,
         before.nearby_blocks.len()
     );
+}
+
+fn run_dx_scenario(path: &str) -> Result<(), String> {
+    let mut registry = rustcraft_control::engine_registry();
+    rustcraft_minecraft_b173::control::register_commands(&mut registry)?;
+    let mut tools =
+        rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), registry)?;
+    let blocks = rustcraft_minecraft_b173::blocks::BlocksModule;
+    let mut bootstrap = RuntimeBootstrap::new(ContentManifest { packages: vec![] });
+    bootstrap
+        .register_module(&blocks)
+        .map_err(|e| format!("{e:?}"))?;
+    let profile = rustcraft_minecraft_b173::compile_profile().map_err(|e| format!("{e:?}"))?;
+    let mut world = World::new(profile.default_state().block);
+    rustcraft_minecraft_b173::flat_world_module(&profile).generate(&mut world, -16, 16, -16, 16);
+    let mut simulation = Simulation::new(world, bootstrap.registry, Vec3::new(0.5, 3., 0.5));
+    let mut state = rustcraft_control::ControlState {
+        leased: true,
+        ..Default::default()
+    };
+    {
+        let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
+            simulation: &mut simulation,
+            state: &mut state,
+        };
+        tools.start(path, &mut host)?;
+    }
+    loop {
+        let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
+            simulation: &mut simulation,
+            state: &mut state,
+        };
+        if let Some(bundle) = tools.advance(&mut host, false)? {
+            println!("DX_RESULT {}", bundle.join("result.json").display());
+            let result = &tools.scenario.as_ref().unwrap().result;
+            return if result.status == "pass" {
+                Ok(())
+            } else {
+                Err(format!("scenario {}: {:?}", result.status, result.error))
+            };
+        }
+        while let Some(name) = state.captures.pop_front() {
+            use rustcraft_control::Host;
+            let snapshot = rustcraft_minecraft_b173::control::MinecraftHost {
+                simulation: &mut simulation,
+                state: &mut state,
+            }
+            .snapshot();
+            let directory = std::path::PathBuf::from("target/captures").join(format!(
+                "{name}-{}",
+                tools.scenario.as_ref().unwrap().result.run_id
+            ));
+            tools.write_snapshot(directory, snapshot)?;
+        }
+        for _ in 0..state.fixed.take_ticks(1) {
+            simulation.step(state.intent, 0.05);
+        }
+    }
 }

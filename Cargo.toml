@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/control",
+    "crates/scripting-rhai",
     "crates/build-info",
     "crates/engine-core",
     "crates/game-api",
@@ -34,6 +36,11 @@ unsafe_code = "forbid"
 all = "warn"
 
 [workspace.dependencies]
+rustcraft-control = { path = "crates/control" }
+rustcraft-scripting-rhai = { path = "crates/scripting-rhai" }
+rhai = { version = "=1.26.1", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 blake3 = "1.8"
 flate2 = { version = "1.1", default-features = true }
 semver = "1"

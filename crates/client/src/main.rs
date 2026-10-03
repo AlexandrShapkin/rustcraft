@@ -1,3 +1,4 @@
+mod devtools;
 mod render_tests;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
 use rustcraft_engine_core::{BlockId, Vec3};
@@ -327,6 +328,22 @@ impl Controller for LocalHumanController {
 }
 
 struct ClientApp {
+    devtools: Option<rustcraft_scripting_rhai::DevTools>,
+    control_state: rustcraft_control::ControlState,
+    scenario_path: Option<String>,
+    dx_capture: Option<PathBuf>,
+    dx_exit_pending: bool,
+    dx_capture_job: Option<rustcraft_control::JobRef>,
+    dx_capture_failure_recorded: bool,
+    dx_probe: Option<devtools::Probe>,
+    dx_abort_frame: Option<u64>,
+    dx_text: String,
+    dx_boxes: Vec<rustcraft_engine_core::Aabb>,
+    dx_colors: Vec<[f32; 3]>,
+    dx_snapshot_at: Instant,
+    dx_update_us: u128,
+    dx_update_max_us: u128,
+
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     simulation: Option<Simulation>,
@@ -1485,6 +1502,21 @@ impl ClientApp {
         Self {
             window: None,
             renderer: None,
+            devtools: None,
+            control_state: Default::default(),
+            scenario_path: None,
+            dx_capture: None,
+            dx_exit_pending: false,
+            dx_capture_job: None,
+            dx_capture_failure_recorded: false,
+            dx_probe: None,
+            dx_abort_frame: None,
+            dx_text: String::new(),
+            dx_boxes: Vec::new(),
+            dx_colors: Vec::new(),
+            dx_snapshot_at: Instant::now(),
+            dx_update_us: 0,
+            dx_update_max_us: 0,
             simulation: None,
             presentation: None,
             startup_result: None,
@@ -2531,6 +2563,13 @@ impl ClientApp {
                 rustcraft_agent_api::AgentIntent::default()
             } else {
                 self.controller.next_intent()
+            };
+            let intent = if self.control_state.leased {
+                self.control_state.intent
+            } else if self.devtools.as_ref().is_some_and(|d| d.console_open) {
+                Default::default()
+            } else {
+                intent
             };
             simulation.step(intent, 0.05);
             (
@@ -4573,12 +4612,15 @@ impl ClientApp {
                             .map(|compiled| compiled.destroy_stages[stage as usize])
                     }),
             );
+            renderer.set_debug_boxes_colored(&self.dx_boxes, &self.dx_colors);
             renderer.set_hud(
                 &rustcraft_render::hud::HudSnapshot {
                     slots,
                     selected: sim.inventory.selected(),
                     target: sim.target().map(|h| h.block),
-                    text: if self.debug {
+                    text: if !self.dx_text.is_empty() {
+                        &self.dx_text
+                    } else if self.debug {
                         &self.debug_overlay_text
                     } else {
                         ""
@@ -4623,14 +4665,31 @@ impl ClientApp {
                 deadline && mesh_idle && streaming_idle
             }
         });
-        let capture = if mesh_idle && (self.measure_seconds.is_none() || finished) {
+        let dx_capture_path = if renderer.capture_pending() {
+            None
+        } else {
+            self.dx_capture.clone()
+        };
+        let capture = if dx_capture_path.is_some() {
+            dx_capture_path.as_deref()
+        } else if mesh_idle && (self.measure_seconds.is_none() || finished) {
             self.capture.as_deref()
         } else {
             None
         };
         let render_present_started = Instant::now();
-        match renderer.render_capture(camera, capture) {
+        match if dx_capture_path.is_some() {
+            renderer.render_capture_async(camera, capture)
+        } else {
+            renderer.render_capture(camera, capture)
+        } {
             Ok(()) => {
+                if let Some(tools) = self.devtools.as_mut() {
+                    tools.frame += 1;
+                }
+                if dx_capture_path.is_some() {
+                    self.dx_capture.take();
+                }
                 if let Some(phase) = camera_motion_phase {
                     self.camera_motion_samples[phase] = Some((
                         renderer.submission_stats(),
@@ -4813,7 +4872,7 @@ impl ClientApp {
                         );
                     }
                 }
-                if capture.is_some() || finished {
+                if (capture.is_some() && dx_capture_path.is_none()) || finished {
                     event_loop.exit();
                 }
             }
@@ -5196,6 +5255,10 @@ impl ApplicationHandler for ClientApp {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                if self.devtools.is_some() && self.dev_key(&event) {
+                    return;
+                }
+
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if self.debug_key(code, event.state, event.repeat) {
                         // Client-only shortcut consumed before semantic gameplay input.
@@ -5318,13 +5381,48 @@ impl ApplicationHandler for ClientApp {
         self.last_frame = now;
         let budget = self.clock.advance(elapsed);
         self.responsiveness.due_ticks += budget.due_steps;
-        self.responsiveness.executed_ticks += u64::from(budget.steps);
         self.responsiveness.dropped_ticks +=
             budget.due_steps.saturating_sub(u64::from(budget.steps));
         self.responsiveness.dropped_seconds += budget.dropped_seconds;
-        self.metrics.steps = budget.steps;
         self.metrics.catch_up = budget.catch_up;
-        for _ in 0..budget.steps {
+        self.service_devtools_measured(_event_loop);
+        if self.dx_exit_pending
+            && self.dx_capture.is_none()
+            && !self.renderer.as_ref().is_some_and(|r| r.capture_pending())
+        {
+            if !self.dx_capture_failure_recorded {
+                let error = self.dx_capture_job.and_then(|id| {
+                    self.devtools
+                        .as_ref()
+                        .and_then(|d| match d.jobs.status(id) {
+                            Ok(rustcraft_control::JobStatus::Failed(e)) => Some(e.clone()),
+                            _ => None,
+                        })
+                });
+                if let Some(error) = error {
+                    self.dx_capture_failure_recorded = true;
+                    eprintln!("DX capture failed: {error}; partial bundle");
+                    self.dx_capture_job = self
+                        .devtools
+                        .as_mut()
+                        .and_then(|d| d.record_capture_failure(&error).ok().flatten());
+                }
+            }
+            let terminal = self.dx_capture_job.is_none_or(|id| {
+                self.devtools.as_ref().is_some_and(|d| {
+                    !matches!(d.jobs.status(id), Ok(rustcraft_control::JobStatus::Pending))
+                })
+            });
+            if terminal {
+                _event_loop.exit();
+                return;
+            }
+        }
+
+        let ticks = self.control_state.fixed.take_ticks(budget.steps);
+        self.responsiveness.executed_ticks += u64::from(ticks);
+        self.metrics.steps = ticks;
+        for _ in 0..ticks {
             self.fixed_step();
         }
         self.service_streaming_turn();
@@ -6007,6 +6105,16 @@ fn main() {
         std::env::var("RUSTCRAFT_WORLD_NAME").unwrap_or_else(|_| "default".to_owned());
     while let Some(flag) = args.next() {
         match flag.as_str() {
+            "--devtools" | "--dx-overhead" => {}
+            "--dx-abort-after-frames" => {
+                args.next().expect("--dx-abort-after-frames requires N");
+            }
+            "--scenario" => {
+                if args.next().is_none() {
+                    eprintln!("--scenario requires PATH");
+                    std::process::exit(2);
+                }
+            }
             "--survival" => {}
             "--stream-perf" => {}
             "--world-travel-test" => {}
@@ -6052,6 +6160,30 @@ fn main() {
     }
     let event_loop = EventLoop::new().expect("create event loop");
     let mut app = ClientApp::new(diagnostic, capture);
+    if std::env::args().any(|a| a == "--devtools" || a == "--scenario" || a == "--dx-overhead") {
+        let mut registry = rustcraft_control::engine_registry();
+        rustcraft_minecraft_b173::control::register_commands(&mut registry).expect("game commands");
+        app.devtools = Some(
+            rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), registry)
+                .unwrap_or_else(|e| {
+                    eprintln!("{e}");
+                    std::process::exit(2)
+                }),
+        );
+        let args = std::env::args().collect::<Vec<_>>();
+        if args.iter().any(|a| a == "--dx-overhead") {
+            app.dx_probe = Some(Default::default());
+        }
+        app.dx_abort_frame = args
+            .iter()
+            .position(|a| a == "--dx-abort-after-frames")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|n| n.parse().ok());
+        app.scenario_path = args
+            .iter()
+            .position(|a| a == "--scenario")
+            .and_then(|i| args.get(i + 1).cloned());
+    }
     app.world_name = world_name;
     app.survival_start = std::env::args().any(|a| a == "--survival");
     app.stream_perf = std::env::args().any(|a| a == "--stream-perf");
@@ -6062,6 +6194,13 @@ fn main() {
     app.camera_motion = std::env::args().any(|a| a == "--camera-motion");
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("client event loop failed: {error}");
+        std::process::exit(1);
+    }
+    if let Some(tools) = app.devtools.as_ref()
+        && let Some(run) = tools.scenario.as_ref()
+        && run.result.status != "pass"
+    {
+        eprintln!("DX scenario {} {:?}", run.result.status, run.result.error);
         std::process::exit(1);
     }
     if app.stream_perf {

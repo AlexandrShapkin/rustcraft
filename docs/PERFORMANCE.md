@@ -690,3 +690,18 @@ mesh tests verify both shared faces after neighbor arrival, and A→B/B→A/simu
 verify final seam order independence. Canonical generator hash remains
 `e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`; the independent streaming
 sample hash remains `384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807`.
+
+## DX1 developer tooling diagnostics
+
+See [DX1_REPORT.md](DX1_REPORT.md) for final measurements and acceptance. The full existing M4
+regression matrix passes without weakened thresholds or changed canonical hashes. The final
+client-stream-auto route visited 33 columns and returned, with dropped fixed time 0.050 seconds
+on llvmpipe GL; M4-009 representative-hardware acceptance remains conditional.
+The release scripting diagnostic measured 1,790 us compilation, 23,907 us for 1,000 cached query
+executions, 558 us for 1,000 command dispatches and 13,470 us for 1,000 scenario steps. A runaway
+loop stopped after 10,060 us with a deadline error. These are diagnostic observations, not speedup
+claims or a representative GPU benchmark.
+The isolated actual-client DX CPU service measurements averaged 4.31 us disabled, 208.52 us
+inactive, 271.50 us with a streaming page, 282.21 us with overlays, and 871.23 us with a lightweight
+cooperative scenario. Expensive domain/page updates are cached at 250 ms; capture/reload work
+is measured separately. No frame-pacing or renderer optimization campaign is part of this slice.

@@ -1,5 +1,5 @@
 [package]
-name = "rustcraft-runtime"
+name = "rustcraft-control"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,8 +11,5 @@ workspace = true
 
 [dependencies]
 rustcraft-agent-api.workspace = true
-rustcraft-bot-api.workspace = true
-rustcraft-mod-api.workspace = true
-rustcraft-content.workspace = true
-rustcraft-engine-core.workspace = true
-rustcraft-game-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true

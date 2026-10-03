@@ -31,3 +31,9 @@ code in `engine-core`, first ask whether a generic platform capability is missin
 
 Renderer backend, allocator implementation, storage backend and transport internals are
 infrastructure, not mods.
+
+## Local developer Rhai
+
+DX1 Rhai is an explicit local tooling adapter over semantic control, with capabilities,
+resource limits and controlled script roots. It exposes no raw filesystem/network/process APIs.
+It does not replace native first-party systems or the future WASM untrusted-mod runtime.

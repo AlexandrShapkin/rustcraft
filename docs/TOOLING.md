@@ -141,3 +141,13 @@ the mixed M0-M3 runtime. The game registers four `sandbox_test:` voxel definitio
 `game-api`, consumes generic controller intent, queues a `SetBlock` command, and writes a generated
 offscreen image to `target/sample-game/sandbox-test.png`. It uses no proprietary resources and is
 an architecture test rather than a second product.
+
+## DX1 developer commands
+
+`just dev-client`, `just script-check [PATH]`, `just scenario-headless [PATH]`,
+`just scenario-client [PATH]`, `just dx-smoke`, `just script-bench`.
+Both scenario recipes default to scripts/scenarios/dx_smoke.rhai. See [DEBUGGING.md](DEBUGGING.md).
+
+DX1 closure diagnostics: `just dx-test`, `just dx-console`, `just dx-overhead`.
+Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the explicit
+`--dx-abort-after-frames 100` client flag proves cooperative job/capture/abort with frame progress.

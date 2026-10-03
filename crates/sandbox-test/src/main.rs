@@ -321,6 +321,17 @@ fn schedule() -> Schedule<SandboxContext> {
 }
 
 fn main() {
+    let context = rustcraft_control::Context::read_only(rustcraft_control::Source::Script);
+    let mut runtime = rustcraft_scripting_rhai::RhaiRuntime::new(context, Default::default());
+    let result = runtime
+        .eval(
+            &mut rustcraft_scripting_rhai::RhaiSession::new("sandbox"),
+            "control_version()",
+            Default::default(),
+        )
+        .expect("game-neutral scripting");
+    assert_eq!(result.0, "1");
+
     let schedule = schedule();
     let profile = compile_profile(schedule.descriptors());
     let ids = RuntimeIds::resolve(&profile);

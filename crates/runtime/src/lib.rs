@@ -500,6 +500,19 @@ impl Simulation {
             });
         }
     }
+    /// Controlled developer/system mutation preserving lighting and all dirty domains.
+    /// Admission is validated by the composition adapter; work is one voxel per command.
+    pub fn apply_world_commands(&mut self, commands: &mut rustcraft_game_api::CommandBuffer) {
+        for command in commands.drain() {
+            match command {
+                rustcraft_game_api::WorldCommand::SetBlock { position, state } => {
+                    self.world.set_state(position, state);
+                    self.mark_dirty(position);
+                }
+            }
+        }
+    }
+
     pub fn step(&mut self, intent: AgentIntent, dt: f32) {
         // Transitional M0-M3 adapter. Platform/controller input is generic; this legacy
         // simulation still owns the Minecraft mapping until its systems move to the game package.

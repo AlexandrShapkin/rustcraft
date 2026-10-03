@@ -56,3 +56,16 @@ Severity:
 - P1: blocks build/current slice or violates a core contract — fix immediately.
 - P2: visible functional issue — may wait for the next defect batch.
 - P3: polish/cleanup/performance suspicion — backlog until relevant.
+
+## DX1 closure tracking
+
+Background compile/reload, stale publication, real job lifecycle/waits, asynchronous DX capture,
+bounded queries/pages, console automation, cancellation and lifecycle soak are implemented.
+Final local/graphical/overhead validation and public Ubuntu/Windows CI are tracked in DX1_REPORT.md.
+No owner save-deletion observation is recorded as a persistence defect. Optional subsequent breadth:
+new command-file discovery, more game commands, richer editor and remote/WASM adapters.
+
+Dependency hygiene (2026-10-04): cargo audit reports no vulnerabilities and unmaintained warnings
+RUSTSEC-2024-0436 (paste), RUSTSEC-2026-0249 (smartstring, Rhai transitive), and RUSTSEC-2026-0192
+(ttf-parser). Track upstream replacements/evaluation in dependency maintenance; DX1 does not
+randomly change accepted dependencies to suppress warnings.

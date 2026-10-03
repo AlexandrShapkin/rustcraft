@@ -21,3 +21,6 @@ rustcraft-minecraft-b173.workspace = true
 rustcraft-mod-api.workspace = true
 rustcraft-runtime.workspace = true
 rustcraft-world.workspace = true
+
+rustcraft-control.workspace = true
+rustcraft-scripting-rhai.workspace = true

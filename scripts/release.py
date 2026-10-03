@@ -167,6 +167,11 @@ def build(target: str | None = None) -> Path:
         shutil.copy2(source, stage / f"{binary}{suffix}")
         os.chmod(stage / f"{binary}{suffix}", 0o755)
 
+    for relative in ("scripts/dev/inspect_player.rhai", "scripts/commands/where.rhai", "scripts/scenarios/dx_smoke.rhai", "scripts/scenarios/dx_console.rhai", "scripts/scenarios/dx_responsive.rhai"):
+        destination = stage / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / relative, destination)
+    shutil.copyfile(ROOT / "docs" / "SCRIPTING.md", stage / "SCRIPTING.md")
     shutil.copyfile(ROOT / "README.md", stage / "README.md")
     shutil.copyfile(ROOT / "docs" / "RELEASE.md", stage / "RELEASE.md")
     shutil.copyfile(ROOT / "docs" / "RELEASE-RUNNING.md", stage / "RUNNING.md")
