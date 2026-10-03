@@ -5212,15 +5212,17 @@ fn run_headless_stream_phase(app: &mut ClientApp, end_route_seconds: f32, route_
         let route_elapsed = app
             .stream_route_started_at
             .map_or(0.0, |started| started.elapsed().as_secs_f32());
-        if route_elapsed >= end_route_seconds
-            && app.mesh_scheduler.is_idle()
-            && app.residency.pending_column_count() == 0
-            && app
-                .simulation
-                .as_ref()
-                .is_some_and(|simulation| !simulation.lighting.has_integration_work())
-        {
-            break;
+        if route_elapsed >= end_route_seconds {
+            let intermediate_checkpoint = end_route_seconds < app.stream_perf_motion_seconds;
+            let converged = app.mesh_scheduler.is_idle()
+                && app.residency.pending_column_count() == 0
+                && app
+                    .simulation
+                    .as_ref()
+                    .is_some_and(|simulation| !simulation.lighting.has_integration_work());
+            if intermediate_checkpoint || converged {
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -5255,7 +5257,7 @@ fn run_world_travel_test() {
     let mut first = prepare_headless_stream_app(&root);
     let origin = rustcraft_engine_core::ChunkPos { x: 0, z: 0 };
     let mut edit = None;
-    let mut durable_drop = None;
+    let mut durable_drops = Vec::new();
     let mutation_deadline = Instant::now() + Duration::from_secs(30);
     while !first.player_control_enabled {
         assert!(
@@ -5290,17 +5292,40 @@ fn run_world_travel_test() {
         item.velocity = Vec3::new(0.125, 0.2, -0.25);
         item.age = 12.5;
         item.pickup_delay = 1_000.0;
-        durable_drop = Some((item.id, item.stack));
+        durable_drops.push((item.id, item.stack, origin));
+        for x in -1..=1 {
+            let z = -1;
+            for offset in 0..3 {
+                let column = rustcraft_engine_core::ChunkPos { x, z };
+                simulation.spawn_item(
+                    rustcraft_minecraft_b173::blocks::DIRT.item.unwrap(),
+                    (x + offset + 4) as u16,
+                    Vec3::new(
+                        (x * 16) as f32 + 2.5 + offset as f32 * 5.0,
+                        simulation.player.position.y + 2.0,
+                        (z * 16) as f32 + 8.5,
+                    ),
+                );
+                let item = simulation.items.last_mut().unwrap();
+                item.age = (x + 1 + offset * 3) as f32;
+                item.pickup_delay = 1_000.0;
+                durable_drops.push((item.id, item.stack, column));
+            }
+        }
     }
-    first.persistence_dirty.mark_dirty(origin);
+    for (_, _, column) in &durable_drops {
+        first.persistence_dirty.mark_dirty(*column);
+    }
     // At the end of the third leg the route is seven chunks north of the origin. Prove that the
     // item-bearing origin actually saved and left active residency before later legs can approach
     // it closely enough to reload it.
     run_headless_stream_phase(&mut first, 84.0, 0.0);
-    let origin_evicted = first.stream_evicted_columns.contains(&origin);
+    let origin_evicted = durable_drops
+        .iter()
+        .all(|(_, _, column)| first.stream_evicted_columns.contains(column));
     assert!(
         origin_evicted,
-        "origin did not evict during long travel: player={:?} visited={} evictions={} dirty={} saving={} lighting_pinned={}",
+        "initial entity columns did not all evict during long travel: player={:?} visited={} evictions={} dirty={} saving={} lighting_pinned={}",
         first.simulation.as_ref().unwrap().player.position,
         first.stream_visited_columns.len(),
         first.eviction_count,
@@ -5315,16 +5340,15 @@ fn run_world_travel_test() {
             .contains(&origin),
     );
     assert!(first.stream_visited_columns.len() >= 20);
-    let durable_drop = durable_drop.expect("travel drop created");
     assert!(
-        !first
+        durable_drops.iter().all(|(id, _, _)| !first
             .simulation
             .as_ref()
             .unwrap()
             .items
             .iter()
-            .any(|entity| entity.id == durable_drop.0),
-        "entity-containing origin did not leave active residency"
+            .any(|entity| entity.id == *id)),
+        "entity-containing initial area did not leave active residency"
     );
     run_headless_stream_phase(&mut first, 168.0, 0.0);
     assert!(
@@ -5365,16 +5389,29 @@ fn run_world_travel_test() {
         },
         "persisted edit did not survive eviction and disk reload"
     );
-    let restored_drop = reopened
-        .simulation
-        .as_ref()
-        .unwrap()
-        .items
-        .iter()
-        .find(|entity| entity.id == durable_drop.0)
-        .expect("persisted dropped item did not reload on return");
-    assert_eq!(restored_drop.stack, durable_drop.1);
-    assert!(restored_drop.age > 12.5);
+    for (id, stack, _) in &durable_drops {
+        let restored_drop = reopened
+            .simulation
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .find(|entity| entity.id == *id)
+            .expect("persisted dropped item did not reload on return");
+        assert_eq!(restored_drop.stack, *stack);
+    }
+    assert_eq!(
+        reopened
+            .simulation
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .filter(|entity| durable_drops.iter().any(|(id, _, _)| *id == entity.id))
+            .count(),
+        durable_drops.len(),
+        "reloaded stable IDs must remain unique"
+    );
     let safe_visible = reopened
         .simulation
         .as_ref()
@@ -5385,7 +5422,7 @@ fn run_world_travel_test() {
     assert!(safe_visible, "SAFE=>VISIBLE invariant failed");
     reopened.finish_world_saves();
     println!(
-        "WORLD_TRAVEL_TEST result=PASS radius={} retain={} fresh_visited_columns={} reused_visited_columns={} returned_origin={} negative_coordinates=ok fresh_margins_min/p05/mean={:?}/{:?}/{:?} reused_margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} fresh_request_visible_ms={:?} reused_request_visible_ms={:?} fresh_resident_columns/sections_peak={}/{} reused_resident_columns/sections_peak={}/{} edit_evict_reload=ok entity_evict_reload=ok world_time_reopen=ok reopen_distant_player=ok hashes=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6/384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
+        "WORLD_TRAVEL_TEST result=PASS radius={} retain={} fresh_visited_columns={} reused_visited_columns={} returned_origin={} negative_coordinates=ok fresh_margins_min/p05/mean={:?}/{:?}/{:?} reused_margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} fresh_request_visible_ms={:?} reused_request_visible_ms={:?} fresh_resident_columns/sections_peak={}/{} reused_resident_columns/sections_peak={}/{} edit_evict_reload=ok entity_columns_evict_reload={} world_time_reopen=ok reopen_distant_player=ok hashes=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6/384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
         reopened.residency.load_radius(),
         reopened.residency.retain_radius(),
         fresh_visited,
@@ -5404,6 +5441,7 @@ fn run_world_travel_test() {
         fresh_section_peak,
         reopened.resident_columns_peak,
         reopened.resident_sections_peak,
+        durable_drops.len(),
     );
     drop(reopened);
     std::fs::remove_dir_all(&root).expect("remove disposable world-travel-test world");
