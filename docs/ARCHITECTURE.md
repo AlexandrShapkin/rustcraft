@@ -195,7 +195,7 @@ when capacity suffices, with a quarter-capacity shrink threshold. Debug metrics 
 snapshot/mesh estimates, logical GPU buffer bytes, retained GPU capacity estimates, and CPU upload
 submission time; none is presented as measured VRAM or transfer completion.
 
-## M4 world foundation (in progress)
+## M4 world foundation (functionally complete)
 
 `engine-core` remains policy-free: `ChunkBuilder` creates unpublished dense sections, and
 `World::publish_column` replaces a finished set of signed-Y sections at one publication boundary.

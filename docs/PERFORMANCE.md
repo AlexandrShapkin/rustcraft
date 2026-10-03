@@ -111,6 +111,26 @@ Peak residency was 286 columns / 2288 sections; approximately 80.4 MiB authorita
 114.5 MiB snapshots and 101.1/158.1 MiB logical/capacity meshes. Representative GPU acceptance
 remains conditional under M4-009; neither software run is AMD/Vulkan evidence.
 
+Final local validation passed: formatter, workspace all-target check/tests, all-target/all-feature
+Clippy with warnings denied, `bootstrap-check`, `ci`, `smoke`, `survival-scenario`, `sample-game`,
+`render-test-all`, `fidelity-m3`, `resource-stress 1000`, `render-scale`, `world-roundtrip`,
+`worldgen-bench`, `persistence-bench`, `world-stream-bench`, versioned `world-travel-test`,
+`client-stream-auto`, `world-state-roundtrip`, `entity-persistence-bench`, `release-check`, explicit
+v1/v2 regression/report/map commands and `git diff --check`. Mandatory tests use semantic states
+and public synthetic fixtures, not proprietary assets. `world-state-roundtrip` reports time
+99170, five entities before/three after pickup, and stable-ID/merge/cross-column/eviction/block-drop/
+delay/velocity/despawn/receipt/unknown-global success. Entity persistence measured 16/1000 records
+at 1892/118004 raw bytes and 284/7628 stored bytes; no persistence work was moved onto the event thread.
+
+Implementation commit `ef0db15312058fc58940d8189a4c3df27a05bf5e` passed
+[Ubuntu and Windows GitHub Actions](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37135831666),
+including the immutable v1 hash and final v2 semantic hash. M4-004 is closed and M4 is functionally
+complete; M4-009 representative-hardware quantitative evidence remains conditional. The older manual
+water-presentation walkthrough is not claimed: automated liquid geometry/culling, compiled-medium
+boundary and distance-fog tests cover the functional repair. Deferred lava/springs/dungeons/plants
+are explicit later first-party content scope. No subsequent milestone, version bump, tag or release
+was started by this pass.
+
 The project is performance-oriented, but optimization claims require evidence.
 
 Performance and frame-time stability rank above exact Beta fidelity after semantic correctness.

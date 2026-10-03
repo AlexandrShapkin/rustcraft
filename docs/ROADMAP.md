@@ -68,7 +68,7 @@ and input/cursor transitions.
 
 ### Architecture alignment gate before M4
 
-Status: complete. M3 and R1.2 are accepted; M4 is active.
+Status: complete. M3 and R1.2 are accepted; M4 is functionally complete (hardware evidence conditional).
 
 - public game-package registry, schedules, controlled mutation commands and `GameProfile` added;
 - `minecraft-b173` established as the first-party Game API client and composition boundary;
@@ -81,7 +81,7 @@ Status: complete. M3 and R1.2 are accepted; M4 is active.
 
 ### R1.0 — runtime identity and profile compilation foundation
 
-Status: complete; R1.1 and R1.2 are complete; M4 is active.
+Status: complete; R1.1 and R1.2 are complete; M4 is functionally complete (hardware evidence conditional).
 
 - owned validated semantic IDs with typed block/texture/package/resource keys;
 - deterministic `GameProfile` compilation by profile package order plus lexical block-key order
@@ -99,7 +99,7 @@ migrate.
 
 ### R1.1 — resource loading and atlas compilation
 
-Status: complete. Full validation passed on 2026-10-02. R1.2 is complete; M4 is active.
+Status: complete. Full validation passed on 2026-10-02. R1.2 is complete; M4 is functionally complete (hardware evidence conditional).
 
 - generic package discovery and deterministic later-package texture overrides;
 - semantic texture registry and direct indexed voxel render registry;
@@ -133,7 +133,7 @@ work in this milestone.
 
 ## M4 — world generation & persistence foundation
 
-Status: active. Generic storage, generator contracts, first-party generation, headless round-trip,
+Status: functionally complete. Generic storage, generator contracts, first-party generation, headless round-trip,
 and the first local-player residency/streaming slice are implemented. M4-001's synchronous startup
 barrier is closed. Autonomous production-controller and actual-client travel now close M4-002 and
 M4-010: a normal-speed route crosses straight, turn, diagonal, reverse and negative-coordinate
@@ -142,11 +142,13 @@ intent and no streaming-induced dropped ticks. M4-011 remains closed. M4-009 sch
 acceptance is closed with sub-second warm p95 request-to-visible; hardware frame-performance remains
 conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan. M4-003 is closed by
 versioned dropped-item and world-global persistence, ordered recovery tests, entity save/evict/
-reload travel coverage and two-slot clock checkpoints. M4 remains active only for the separately
-scoped M4-004 world-generation fidelity acceptance (plus the existing hardware-specific M4-009
-condition). M4-004's versioned overworld v2 now passes autonomous v1/v2 fresh/reused travel,
-two actual-client seed routes and full local validation; Ubuntu/Windows public CI gates final
-closure, not manual owner inspection.
+reload travel coverage and two-slot clock checkpoints. M4-004 is closed by versioned overworld v2,
+autonomous v1/v2 fresh/reused travel, two actual-client seed routes, full local validation and
+[Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37135831666).
+Only representative-hardware quantitative evidence remains conditional under M4-009. The older
+manual water-presentation walkthrough is not claimed; the functional repair is covered by liquid
+geometry/culling, compiled-medium boundary and distance-fog tests. That optional qualitative
+follow-up is not a new functional blocker. M5 and later milestones remain inactive.
 
 - generic chunk/section lifecycle and deterministic generation contracts;
 - game-owned generation policy, with Beta-like terrain policy confined to `minecraft-b173`;
@@ -187,7 +189,7 @@ biome-aware trees and deterministic static water lakes. Exact version resolution
 v1, including missing-column expansion; no automatic upgrade or Java seed parity is promised.
 First-time version-specific safe spawn handles ocean origins; saved players are never relocated.
 Lava, springs and dungeons remain explicit later first-party content scope, not placeholder
-features. M4-004 closure awaits the final automated acceptance/CI record below this foundation.
+features. M4-004's final autonomous acceptance and public CI are recorded in `docs/PERFORMANCE.md`.
 
 The older multiplayer/content-resolution scope is moved to an inactive later roadmap item. Network
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and
