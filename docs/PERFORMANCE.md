@@ -1,5 +1,116 @@
 # Performance strategy
 
+## M4-004 frozen overworld v2 measurements
+
+Release diagnostics use seed 731173 and the same 16-column `[-2,2)` canonical region, four existing
+generation workers and bounded admission. The final validation run measured v1 worker CPU at
+0.689 ms/column and v2 at 2.378 ms/column (11.030 / 38.049 ms total worker time). Wall time including
+semantic hashing and queue collection was 73.714 / 80.043 ms: 217 / 200 columns/s is
+**diagnostic throughput**, not pure generation
+throughput. V2 remains single-digit milliseconds per column without another pool or world caches.
+Stage timers wrap stages, not voxel operations. Temporary storage is eight dense sections plus
+small 16x16 height/biome arrays; cave halo four and ore/tree/lake halo one are travel-independent.
+
+Seven fixed seeds sample 2401 columns each (radius 24, 784x784 horizontal cells):
+
+| Seed | Height min/p05/p50/p95/max | Mean | Land fraction | Touched tree/lake origins | Cave blocks |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 42/47/58/73/79 | 58.95 | .257 | 1467/122 | 303312 |
+| 1 | 48/55/67/74/79 | 66.43 | .717 | 4298/464 | 376932 |
+| -1 | 44/50/63/71/76 | 61.94 | .390 | 3570/204 | 355390 |
+| 2147483647 | 48/55/64/71/76 | 63.67 | .464 | 1437/177 | 354965 |
+| -9223372036 | 45/51/61/80/89 | 62.60 | .365 | 1587/157 | 321278 |
+| 8675309 | 57/61/67/74/80 | 67.43 | .784 | 4678/342 | 379569 |
+| 731173 | 52/57/64/70/74 | 63.65 | .420 | 2536/125 | 398876 |
+
+Origin counters count each destination touched, not distinct global features. Aggregate land is
+.485, mean macro height 63.52, and all biomes occur: approximately ocean 38.4%, beach 17.2%,
+forest 17.2%, plains 16.9%, desert 7.8%, hills 2.6%. An oceanic origin is valid, not globally
+collapsed terrain. Seed 0 startup relocates to (11,-11), seed -1 to (-10,9). Per-seed ore counts
+are roughly coal 105k–123k, iron 209k–238k, gold 22k, diamond 9.8k–10.1k, with exclusive upper
+Y bands 120/64/32/16.
+
+Biome fractions over the same fixed samples (percent; macro biome, not observed water cover):
+
+| Seed | Ocean | Beach | Plains | Forest | Desert | Hills |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 66.83 | 10.01 | 9.89 | 8.21 | 3.69 | 1.35 |
+| 1 | 20.86 | 10.42 | 30.35 | 26.23 | 8.19 | 3.94 |
+| -1 | 45.18 | 20.61 | 6.84 | 26.24 | 0.25 | 0.88 |
+| 2147483647 | 34.59 | 24.95 | 18.01 | 8.70 | 13.04 | 0.71 |
+| -9223372036 | 55.35 | 10.41 | 8.57 | 8.13 | 8.26 | 9.29 |
+| 8675309 | 10.32 | 15.77 | 31.89 | 27.44 | 12.88 | 1.69 |
+| 731173 | 35.51 | 28.12 | 12.67 | 15.68 | 7.96 | 0.05 |
+
+Canonical-seed radius-24 stage totals for 2401 columns: climate 697.754 ms, terrain 653.556,
+surface 751.979, caves 709.477, ores 257.250, vegetation 145.131, lakes 8.022. These are release
+diagnostics, not representative-GPU claims. V2 streaming sample (seed 731173, column (4,2), semantic
+state encoding) is `da875570efd5ace7a12c73e883a458e7f5ebe95f21d45ef90841b72104cf5b8e`.
+Historical v1 stream sample `384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807`
+remains separately identified and is not the v1 canonical region lock.
+
+Travel acceptance uses normal Survival physics and semantic move/view/jump intent. The v1-era
+angle-only driver could fall into a static lake undercut and cannot assume swimming exists. The
+v2 diagnostic checks the first surface below an intended step, uses a bounded 33x33 local voxel
+path search around obstacles, and retraces a maximum 512-point, loop-erased physical breadcrumb
+path on return. Neither terrain nor player/residency position is rewritten. Script state is
+transient; the reopen test carries its route externally while restoring ordinary durable player,
+entity and clock state. Surface runs stop at route convergence or a hard 360-second deadline.
+Headless completion likewise requires idle presentation/residency work and a complete current
+3x3 Safe+Visible core, not an empty outer boundary-light queue. A regression proves pending outer
+lighting may coexist with that core, while removing any core mesh or Safe flag blocks completion.
+Final seam/convergence remains separately covered by lighting tests and `world-stream-bench`.
+Entity eviction evidence captures stable IDs at successful eviction of their **current** owner,
+not at historical spawn-column eviction. Already reloaded entities inside retention are valid.
+
+Four Survival routes passed fresh/reused travel: seed 731173 visited 35/26 columns, forest-start
+seed -9223372036 visited 35/31, ocean-origin seed 0 visited 37/34, and large seed 2147483647
+visited 29/28. All returned, successfully evicted and restored all ten tracked stable entities,
+preserved edits/time/player state, and kept minimum forward Safe/Visible at 0.5/1.0 columns.
+The canonical and large-seed routes crossed negative coordinates. Peaks across this suite were
+103 columns / 824 sections. The final canonical rerun measured fresh request-to-visible
+p50/p95/max 0.288/0.375/0.550 s and reused 0.301/2.316/2.488 s, with 100/101 resident-column peaks.
+An explicit frozen-v1 compatibility route also passed: 34 fresh / 32 reused columns, forward
+Safe/Visible minima 0.5/1.0, 100-column / 800-section peaks, all ten entities restored, and edits,
+player and clock preserved. V1 request-to-visible p50/p95/max was 0.281/0.333/0.385 s fresh and
+0.288/0.364/0.472 s reused. Its different dry spawn does not inherit the v2 canonical route's
+world-space negative-quadrant assertion; version-independent negative generation tests remain.
+The old 185-second graphical deadline gave only 41 seconds to return along a longer physical
+trace; both graphical diagnostic recipes now allow a bounded 360 seconds, stopping early on
+successful route/convergence. This changes neither movement speed nor acceptance assertions.
+`client-stream-auto` defaults its explicit diagnostic window to 320x240 (override with bounded
+`RUSTCRAFT_STREAM_WINDOW_SIZE=WIDTHxHEIGHT`); ordinary play and `stream-perf` retain 1280x720.
+It also defaults scoped llvmpipe workers to two (`LP_NUM_THREADS` is overridable and irrelevant to
+non-llvmpipe hardware drivers). Normal gameplay driver settings are not modified.
+The same adapter, GPU rendering, surface presentation, simulation and streaming paths run at either
+size. On llvmpipe/GL the 1280x662 drawable completed the v2 return but failed with 0.700 s of dropped
+ticks and render/present-dominated frame p95/p99/max 167/195/221 ms. Lower diagnostic resolution
+isolates software-rendering cost; it is not evidence of representative-hardware frame performance,
+and the tick/margin/input acceptance thresholds are unchanged.
+
+The isolated actual-client canonical v2 route passed on llvmpipe 23.1.1 / GL with X11,
+`vblank_mode=0`, `LP_NUM_THREADS=2`, and the 320x240 diagnostic window. It visited 33 columns,
+returned, released the startup core in 640 ms, and kept forward Safe/Visible minima at 0.5/1.0
+columns. Request-to-visible p50/p95/max was 0.483/0.919/2.110 s; oldest critical-stage backlog was
+4.699 s. Event-gap p95/max was 133.86/159.61 ms and frame p95/p99/max 135.18/145.34/158.63 ms,
+dominated by measured software render/present waits. TPS was 19.50 with **zero dropped ticks**;
+input-to-simulation p95/max was 97.39/131.19 ms and input-to-render 82.41/97.09 ms. These do not
+establish hardware frame performance or a universal <100 ms event bound. The unchanged automatic
+software-present attribution policy excludes measured external present waits, not streaming work.
+Resident peak was 284 columns / 2272 sections, including bounded lighting/eviction transitions;
+estimates were 79.9 MiB authoritative voxel/light, 113.7 MiB snapshots and 108.3/167.7 MiB logical/
+capacity meshes. The smaller headless peaks above must not be substituted for actual-client values.
+
+The same graphical profile passed ocean-origin seed 0: dry spawn column (11,-11), startup core
+767 ms, 35 columns visited and successful return. Forward Safe/Visible minima were 0.5/1.0;
+visibility p50/p95/max 0.487/0.969/1.440 s; critical backlog max 4.832 s. Event-gap p95/max was
+79.03/129.39 ms, frame p95/p99/max 79.07/91.55/130.05 ms, TPS 20.25. Dropped simulation time was
+0.100 s (the unchanged acceptance limit), not zero; software render/present was the measured long
+task. Input-to-simulation p95/max was 75.76/96.35 ms and input-to-render 78.11/90.80 ms.
+Peak residency was 286 columns / 2288 sections; approximately 80.4 MiB authoritative voxel/light,
+114.5 MiB snapshots and 101.1/158.1 MiB logical/capacity meshes. Representative GPU acceptance
+remains conditional under M4-009; neither software run is AMD/Vulkan evidence.
+
 The project is performance-oriented, but optimization claims require evidence.
 
 Performance and frame-time stability rank above exact Beta fidelity after semantic correctness.

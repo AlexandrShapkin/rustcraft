@@ -168,6 +168,20 @@ inspect-chunk saves_root world x z:
 worldgen-bench:
     cargo run --release -p rustcraft-server -- --worldgen-bench
 
+# Deterministic versioned terrain statistics. Arguments: generator version, seed, chunk radius.
+worldgen-report version="2" seed="731173" radius="6":
+    cargo run --release -p rustcraft-server -- --worldgen-report {{version}} {{seed}} {{radius}}
+
+# Project-owned text biome/height map beneath ignored target/.
+worldgen-map version="2" seed="731173" radius="6":
+    cargo run --release -p rustcraft-server -- --worldgen-map {{version}} {{seed}} {{radius}}
+
+worldgen-v1-regression:
+    cargo test -p rustcraft-minecraft-b173 worldgen::tests::generator_v1_canonical_region_is_frozen -- --exact
+
+worldgen-v2-test:
+    cargo test -p rustcraft-minecraft-b173 worldgen::v2::tests --lib
+
 persistence-bench:
     cargo run --release -p rustcraft-server -- --persistence-bench
 
@@ -182,12 +196,14 @@ world-travel-test:
 # Deterministic production-controller route in an isolated ignored test world.
 # Example: RUSTCRAFT_MESH_WORKERS=2 just stream-perf target/stream-perf-w2 stream-perf-w2
 stream-perf saves_dir="target/stream-perf-saves" world="stream-perf":
-    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=185 cargo run --release -p rustcraft-client -- --survival --stream-perf
+    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=360 cargo run --release -p rustcraft-client -- --survival --stream-perf
 
 # Bounded actual-client M4 acceptance. Uses the selected surface/GPU and exits non-zero when
 # terrain margin, input/event responsiveness, route coverage, or visibility latency fails.
+# The small correctness window and bounded llvmpipe workers avoid software-GPU overhead;
+# both settings are overridable for hardware measurements and leave ordinary play unchanged.
 client-stream-auto saves_dir="target/client-stream-auto-saves" world="client-stream-auto":
-    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=185 cargo run --release -p rustcraft-client -- --survival --stream-perf
+    RUSTCRAFT_SAVES_DIR={{saves_dir}} RUSTCRAFT_WORLD_NAME={{world}} RUSTCRAFT_F3=1 RUSTCRAFT_F3_TRACE=1 LP_NUM_THREADS=${LP_NUM_THREADS:-2} RUSTCRAFT_STREAM_WINDOW_SIZE=${RUSTCRAFT_STREAM_WINDOW_SIZE:-320x240} RUSTCRAFT_STREAM_PERF_SECONDS=168 RUSTCRAFT_MEASURE_SECONDS=360 cargo run --release -p rustcraft-client -- --survival --stream-perf
 
 # Print the sole authoritative Engine/Product SemVer.
 version:

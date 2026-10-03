@@ -114,6 +114,13 @@ mismatch is a compatibility error. Generator mismatch only blocks generating abs
 persisted chunks are independently loadable. Legacy metadata v1 is interpreted as persisted-state
 schema v1 and rewritten as metadata v2 after successful palette resolution.
 
+Minecraft generator resolution is game-owned and exact. Saved
+`minecraft_b173:overworld:v1` selects the frozen v1 implementation even after v2 becomes the
+new-world default; an unknown ID/version never falls forward. Generator identity is independent of
+the compiled profile fingerprint and persistence schema. V2 biome identity is Minecraft-owned and
+semantic in diagnostics, but derives from seed/version/coordinates rather than being persisted as
+profile-local handles or per-voxel strings.
+
 The generic storage container is versioned independently at world metadata, chunk-payload,
 world-global envelope, spatial entity and player-record boundaries. The generic player record is an opaque bounded, checksummed, atomic
 envelope keyed by a validated persistent player ID; the active game owns its versioned payload

@@ -33,6 +33,10 @@ fn main() {
         run_entity_persistence_bench();
     } else if arguments.iter().any(|arg| arg == "--worldgen-bench") {
         run_worldgen_bench();
+    } else if let Some(index) = arguments.iter().position(|arg| arg == "--worldgen-report") {
+        run_worldgen_report(&arguments[index + 1..], false);
+    } else if let Some(index) = arguments.iter().position(|arg| arg == "--worldgen-map") {
+        run_worldgen_report(&arguments[index + 1..], true);
     } else if arguments.iter().any(|arg| arg == "--persistence-bench") {
         run_persistence_bench();
     } else if arguments.iter().any(|arg| arg == "--world-stream-bench") {
@@ -91,6 +95,18 @@ fn run_world_info(arguments: &[String]) {
                 component.payload.len()
             );
         }
+    }
+    if let Some(record) = storage
+        .load_player(rustcraft_minecraft_b173::player_persistence::LOCAL_PLAYER_ID)
+        .unwrap()
+    {
+        let player =
+            rustcraft_minecraft_b173::player_persistence::decode(&record, &persistence_registry())
+                .unwrap();
+        println!(
+            "  player_position={:?} yaw={} pitch={} revision={}",
+            player.position, player.yaw, player.pitch, record.revision
+        );
     }
 }
 
@@ -593,76 +609,337 @@ fn run_entity_persistence_bench() {
 }
 
 fn run_worldgen_bench() {
-    use rustcraft_world::{ChunkGenerator, GenerationScheduler};
-    use std::{
-        sync::Arc,
-        time::{Duration, Instant},
-    };
-    let generator: Arc<dyn ChunkGenerator> =
-        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld());
+    use rustcraft_world::GenerationScheduler;
+    use std::time::{Duration, Instant};
     let positions = (-2..2)
         .flat_map(|z| (-2..2).map(move |x| ChunkPos { x, z }))
         .collect::<Vec<_>>();
-    let mut scheduler = GenerationScheduler::new(4, 4);
-    let started = Instant::now();
-    for (i, position) in positions.iter().copied().enumerate() {
-        scheduler
-            .request(generator.clone(), 731_173, position, i as u64 + 1)
-            .unwrap();
+    for version in [1, 2] {
+        let generator = rustcraft_minecraft_b173::worldgen::resolve_overworld_generator(
+            rustcraft_minecraft_b173::worldgen::OVERWORLD_GENERATOR_ID,
+            version,
+        )
+        .unwrap();
+        let mut scheduler = GenerationScheduler::new(4, positions.len());
+        let started = Instant::now();
+        for (i, position) in positions.iter().copied().enumerate() {
+            scheduler
+                .request(generator.clone(), 731_173, position, i as u64 + 1)
+                .unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut generated = Vec::new();
+        while generated.len() < positions.len() && Instant::now() < deadline {
+            generated.extend(scheduler.take_ready());
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            generated.len(),
+            positions.len(),
+            "worldgen v{version} benchmark timed out"
+        );
+        generated.sort_by_key(|column| (column.position.x, column.position.z));
+        let mut legacy_hash = blake3::Hasher::new();
+        let mut semantic_hash = blake3::Hasher::new();
+        let mut section_count = 0usize;
+        let mut estimated_bytes = 0usize;
+        for column in &generated {
+            legacy_hash.update(&column.position.x.to_le_bytes());
+            legacy_hash.update(&column.position.z.to_le_bytes());
+            semantic_hash.update(&column.position.x.to_le_bytes());
+            semantic_hash.update(&column.position.z.to_le_bytes());
+            let mut sections = column.sections.as_ref().unwrap().iter().collect::<Vec<_>>();
+            sections.sort_by_key(|(y, _)| *y);
+            for (y, chunk) in sections {
+                section_count += 1;
+                estimated_bytes += std::mem::size_of_val(chunk.states());
+                legacy_hash.update(&y.to_le_bytes());
+                semantic_hash.update(&y.to_le_bytes());
+                for state in chunk.states() {
+                    legacy_hash.update(&state.block.0.to_le_bytes());
+                    legacy_hash.update(&state.variant.to_le_bytes());
+                    rustcraft_minecraft_b173::worldgen::update_semantic_state_hash(
+                        &mut semantic_hash,
+                        *state,
+                    );
+                }
+            }
+        }
+        let elapsed = started.elapsed().as_secs_f64();
+        let worker_ms = scheduler.metrics().generation_total_ms;
+        println!(
+            "worldgen-bench profile={} generator={}:v{} workers=4 seed=731173 chunks={} sections={} wall_ms={:.3} worker_generation_ms={:.3} ms_per_column={:.3} chunks_per_s={:.2} estimated_authoritative_bytes={} canonical_hash={} semantic_hash={} legacy_handle_hash={}",
+            if cfg!(debug_assertions) {
+                "dev"
+            } else {
+                "release"
+            },
+            generator.id(),
+            generator.version(),
+            positions.len(),
+            section_count,
+            elapsed * 1000.0,
+            worker_ms,
+            worker_ms / positions.len() as f64,
+            positions.len() as f64 / elapsed,
+            estimated_bytes,
+            if version == 1 {
+                legacy_hash.clone().finalize().to_hex()
+            } else {
+                semantic_hash.clone().finalize().to_hex()
+            },
+            semantic_hash.finalize().to_hex(),
+            legacy_hash.finalize().to_hex(),
+        );
     }
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let mut generated = Vec::new();
-    while generated.len() < positions.len() && Instant::now() < deadline {
-        generated.extend(scheduler.take_ready());
-        std::thread::yield_now();
+}
+
+fn run_worldgen_report(arguments: &[String], emit_map: bool) {
+    use rustcraft_minecraft_b173::worldgen::{
+        Biome, MinecraftOverworldGeneratorV2, OVERWORLD_GENERATOR_ID, minecraft_overworld,
+        minecraft_overworld_v2,
+    };
+    use rustcraft_world::ChunkGenerator;
+    use std::{collections::BTreeMap, time::Instant};
+
+    let version = arguments
+        .first()
+        .map_or(Ok(2), |value| value.parse::<u32>())
+        .expect("worldgen report version must be u32");
+    let seed = arguments
+        .get(1)
+        .map_or(Ok(731_173), |value| value.parse::<i64>())
+        .expect("worldgen report seed must be i64");
+    let radius = arguments
+        .get(2)
+        .map_or(Ok(6), |value| value.parse::<i32>())
+        .expect("worldgen report radius must be i32")
+        .clamp(1, 24);
+    let v1 = minecraft_overworld();
+    let v2 = minecraft_overworld_v2();
+    let spawn_column = rustcraft_minecraft_b173::worldgen::initial_spawn_column(seed, version);
+    let generator: &dyn ChunkGenerator = match version {
+        1 => &v1,
+        2 => &v2,
+        _ => panic!("unsupported worldgen report version {version}"),
+    };
+    let mut columns = Vec::new();
+    let mut generation_ms = Vec::new();
+    let mut heights = Vec::new();
+    let mut biome_counts = BTreeMap::<&'static str, u64>::new();
+    let mut block_counts = BTreeMap::<u32, u64>::new();
+    let mut stage = rustcraft_minecraft_b173::worldgen::V2GenerationMetrics::default();
+    let mut canonical = blake3::Hasher::new();
+    for x in -radius..=radius {
+        for z in -radius..=radius {
+            let position = ChunkPos { x, z };
+            let started = Instant::now();
+            let sections = if version == 2 {
+                let (sections, metrics) = v2.generate_with_metrics(seed, position).unwrap();
+                stage.climate += metrics.climate;
+                stage.terrain += metrics.terrain;
+                stage.surface += metrics.surface;
+                stage.caves += metrics.caves;
+                stage.ores += metrics.ores;
+                stage.vegetation += metrics.vegetation;
+                stage.structures += metrics.structures;
+                stage.cave_blocks += metrics.cave_blocks;
+                for (target, value) in stage.ore_blocks.iter_mut().zip(metrics.ore_blocks) {
+                    *target += value;
+                }
+                stage.trees += metrics.trees;
+                stage.lakes += metrics.lakes;
+                sections
+            } else {
+                generator.generate(seed, position).unwrap()
+            };
+            generation_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            canonical.update(&position.x.to_le_bytes());
+            canonical.update(&position.z.to_le_bytes());
+            for (section_y, chunk) in &sections {
+                canonical.update(&section_y.to_le_bytes());
+                for state in chunk.states() {
+                    rustcraft_minecraft_b173::worldgen::update_semantic_state_hash(
+                        &mut canonical,
+                        *state,
+                    );
+                    *block_counts.entry(state.block.0).or_default() += 1;
+                }
+            }
+            for local_z in 0..16_i32 {
+                for local_x in 0..16_i32 {
+                    let world_x = x * 16 + local_x;
+                    let world_z = z * 16 + local_z;
+                    heights.push(if version == 2 {
+                        MinecraftOverworldGeneratorV2::terrain_height(seed, world_x, world_z)
+                    } else {
+                        report_surface_height(&sections, local_x, local_z)
+                    });
+                    let biome = if version == 2 {
+                        MinecraftOverworldGeneratorV2::biome(seed, world_x, world_z).name()
+                    } else {
+                        "legacy_unclassified"
+                    };
+                    *biome_counts.entry(biome).or_default() += 1;
+                }
+            }
+            columns.push((position, sections));
+        }
     }
-    assert_eq!(
-        generated.len(),
-        positions.len(),
-        "worldgen benchmark timed out"
+    heights.sort_unstable();
+    generation_ms.sort_by(f64::total_cmp);
+    let percentile = |values: &[f64], fraction: f64| {
+        values[((values.len() as f64 * fraction).ceil() as usize)
+            .saturating_sub(1)
+            .min(values.len() - 1)]
+    };
+    let height_percentile = |fraction: f64| {
+        heights[((heights.len() as f64 * fraction).ceil() as usize)
+            .saturating_sub(1)
+            .min(heights.len() - 1)]
+    };
+    let land = heights.iter().filter(|height| **height > 64).count();
+    let mean_height =
+        heights.iter().map(|height| f64::from(*height)).sum::<f64>() / heights.len() as f64;
+    println!(
+        "worldgen-report generator={}:v{} seed={} spawn_column=({}, {}) chunks={} sample_blocks={} semantic_hash={} height=min:{}/p05:{}/p50:{}/p95:{}/max:{}/mean:{:.2} land_fraction={:.3} ocean_fraction={:.3} generation_ms=p50:{:.3}/p95:{:.3}/max:{:.3}",
+        OVERWORLD_GENERATOR_ID,
+        version,
+        seed,
+        spawn_column.x,
+        spawn_column.z,
+        columns.len(),
+        heights.len(),
+        canonical.finalize().to_hex(),
+        heights[0],
+        height_percentile(0.05),
+        height_percentile(0.50),
+        height_percentile(0.95),
+        heights[heights.len() - 1],
+        mean_height,
+        land as f64 / heights.len() as f64,
+        1.0 - land as f64 / heights.len() as f64,
+        percentile(&generation_ms, 0.50),
+        percentile(&generation_ms, 0.95),
+        generation_ms.last().copied().unwrap_or_default(),
     );
-    generated.sort_by_key(|column| (column.position.x, column.position.z));
-    let mut hash = blake3::Hasher::new();
-    let mut section_count = 0usize;
-    let mut estimated_bytes = 0usize;
-    for column in &generated {
-        hash.update(&column.position.x.to_le_bytes());
-        hash.update(&column.position.z.to_le_bytes());
-        let mut sections = column.sections.as_ref().unwrap().iter().collect::<Vec<_>>();
-        sections.sort_by_key(|(y, _)| *y);
-        for (y, chunk) in sections {
-            section_count += 1;
-            estimated_bytes += std::mem::size_of_val(chunk.states());
-            hash.update(&y.to_le_bytes());
-            for state in chunk.states() {
-                hash.update(&state.block.0.to_le_bytes());
-                hash.update(&state.variant.to_le_bytes());
+    println!("  biomes={biome_counts:?}");
+    println!(
+        "  blocks coal={} iron={} gold={} diamond={} logs={} leaves={} water={} sand={} gravel={}",
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::COAL_ORE.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::IRON_ORE.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::GOLD_ORE.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::DIAMOND_ORE.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::LOG.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::LEAVES.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::WATER.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::SAND.id.0)
+            .copied()
+            .unwrap_or(0),
+        block_counts
+            .get(&rustcraft_minecraft_b173::blocks::GRAVEL.id.0)
+            .copied()
+            .unwrap_or(0),
+    );
+    if version == 2 {
+        println!(
+            "  stages_ms climate={:.3} terrain={:.3} surface={:.3} caves={:.3} ores={:.3} vegetation={:.3} structures={:.3} cave_blocks={} ore_blocks={:?} tree_origins={} lake_origins={}",
+            stage.climate.as_secs_f64() * 1000.0,
+            stage.terrain.as_secs_f64() * 1000.0,
+            stage.surface.as_secs_f64() * 1000.0,
+            stage.caves.as_secs_f64() * 1000.0,
+            stage.ores.as_secs_f64() * 1000.0,
+            stage.vegetation.as_secs_f64() * 1000.0,
+            stage.structures.as_secs_f64() * 1000.0,
+            stage.cave_blocks,
+            stage.ore_blocks,
+            stage.trees,
+            stage.lakes,
+        );
+    }
+    if emit_map {
+        let mut map = String::new();
+        map.push_str(&format!(
+            "# {}:v{} seed={} one character per four blocks\n",
+            OVERWORLD_GENERATOR_ID, version, seed
+        ));
+        for z in (-radius * 16..=(radius + 1) * 16 - 1).step_by(4) {
+            for x in (-radius * 16..=(radius + 1) * 16 - 1).step_by(4) {
+                let character = if version == 2 {
+                    match MinecraftOverworldGeneratorV2::biome(seed, x, z) {
+                        Biome::Ocean => '~',
+                        Biome::Beach => '.',
+                        Biome::Plains => ',',
+                        Biome::Forest => 'F',
+                        Biome::Desert => 'D',
+                        Biome::Hills => '^',
+                    }
+                } else if report_v1_height(seed, x, z) <= 64 {
+                    '~'
+                } else {
+                    '#'
+                };
+                map.push(character);
+            }
+            map.push('\n');
+        }
+        let path = std::path::PathBuf::from("target").join(format!(
+            "worldgen-map-v{}-{}.txt",
+            version,
+            seed.to_string().replace('-', "neg")
+        ));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, map).unwrap();
+        println!("  map={}", path.display());
+    }
+}
+
+fn report_surface_height(sections: &[(i32, rustcraft_engine_core::Chunk)], x: i32, z: i32) -> i32 {
+    let air = rustcraft_minecraft_b173::blocks::AIR.id;
+    let water = rustcraft_minecraft_b173::blocks::WATER.id;
+    let leaves = rustcraft_minecraft_b173::blocks::LEAVES.id;
+    let log = rustcraft_minecraft_b173::blocks::LOG.id;
+    for (section_y, chunk) in sections.iter().rev() {
+        for local_y in (0..16_u8).rev() {
+            let block = chunk.state((x as u8, local_y, z as u8)).block;
+            if block != air && block != water && block != leaves && block != log {
+                return section_y * 16 + i32::from(local_y);
             }
         }
     }
-    let elapsed = started.elapsed().as_secs_f64();
-    let worker_ms = scheduler.metrics().generation_total_ms;
-    println!(
-        "worldgen-bench profile={} workers=4 seed=731173 chunks={} sections={} wall_ms={:.3} worker_generation_ms={:.3} chunks_per_s={:.2} estimated_authoritative_bytes={} hash={}",
-        if cfg!(debug_assertions) {
-            "dev"
-        } else {
-            "release"
-        },
-        positions.len(),
-        section_count,
-        elapsed * 1000.0,
-        worker_ms,
-        positions.len() as f64 / elapsed,
-        estimated_bytes,
-        hash.finalize().to_hex()
-    );
+    0
+}
+
+fn report_v1_height(seed: i64, x: i32, z: i32) -> i32 {
+    rustcraft_minecraft_b173::worldgen::v1_terrain_height(seed, x, z)
 }
 
 fn run_persistence_bench() {
     use rustcraft_world::{ChunkGenerator, WorldStorage};
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
-    let generator = rustcraft_minecraft_b173::worldgen::minecraft_overworld();
+    let generator = rustcraft_minecraft_b173::worldgen::minecraft_overworld_v2();
     let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
     let root = std::env::temp_dir().join(format!(
         "rustcraft-m4-persist-bench-{}-{}",
@@ -748,7 +1025,7 @@ fn run_world_stream_bench() {
 
     let seed = 731_173;
     let generator: Arc<dyn ChunkGenerator> =
-        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld());
+        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld_v2());
     let resolver: Arc<dyn SemanticBlockResolver> =
         Arc::new(rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver);
     let root = std::env::temp_dir().join(format!(
@@ -1076,7 +1353,7 @@ fn run_world_stream_bench() {
     let elapsed = started.elapsed().as_secs_f64() * 1000.0;
     storage.flush().unwrap();
     println!(
-        "world-stream-bench profile={} centers={} generated={} loaded={} misses={} load_workers=1 generation_workers=1 initial_light_workers={} max_resident={} max_pending_inflight={} max_initial_light_backlog={} max_lighting_boundary_queue={} evicted={} save_before_evict={} load_ms={:.3} worker_generation_ms={:.3} initial_light_jobs={} initial_light_queue_wait_sum_ms={:.3} initial_light_queue_p50/p95/max_ms={:?} initial_light_worker_elapsed_sum_ms={:.3} initial_light_worker_p50/p95/max_ms={:?} initial_light_columns_per_sec={:.2} initial_light_direct_voxels={} initial_light_emitters={} initial_light_propagation_nodes={} publication_ms={:.3} publication_max_ms={:.3} boundary_light_scanned={} boundary={} boundary_qpush/pop={}/{} boundary_light_writes={} light_dirty_sections={} render_dirty_sections={} wall_ms={:.3} separated_revisit_edits={} negative_coordinates=ok sample_chunk_state_hash={}",
+        "world-stream-bench profile={} centers={} generated={} loaded={} misses={} load_workers=1 generation_workers=1 initial_light_workers={} max_resident={} max_pending_inflight={} max_initial_light_backlog={} max_lighting_boundary_queue={} evicted={} save_before_evict={} load_ms={:.3} worker_generation_ms={:.3} initial_light_jobs={} initial_light_queue_wait_sum_ms={:.3} initial_light_queue_p50/p95/max_ms={:?} initial_light_worker_elapsed_sum_ms={:.3} initial_light_worker_p50/p95/max_ms={:?} initial_light_columns_per_sec={:.2} initial_light_direct_voxels={} initial_light_emitters={} initial_light_propagation_nodes={} publication_ms={:.3} publication_max_ms={:.3} boundary_light_scanned={} boundary={} boundary_qpush/pop={}/{} boundary_light_writes={} light_dirty_sections={} render_dirty_sections={} wall_ms={:.3} separated_revisit_edits={} negative_coordinates=ok generator=minecraft_b173:overworld:v2 sample_chunk_semantic_hash={}",
         if cfg!(debug_assertions) {
             "dev"
         } else {
@@ -1158,7 +1435,7 @@ fn run_world_roundtrip() {
 
     let profile = rustcraft_minecraft_b173::compile_profile().unwrap();
     let generator: Arc<dyn ChunkGenerator> =
-        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld());
+        Arc::new(rustcraft_minecraft_b173::worldgen::minecraft_overworld_v2());
     let root = std::env::temp_dir().join(format!(
         "rustcraft-m4-roundtrip-{}-{}",
         std::process::id(),
@@ -1285,8 +1562,7 @@ fn canonical_chunk_hash(sections: &[(i32, rustcraft_engine_core::Chunk)]) -> bla
     for (y, chunk) in sections {
         hasher.update(&y.to_le_bytes());
         for state in chunk.states() {
-            hasher.update(&state.block.0.to_le_bytes());
-            hasher.update(&state.variant.to_le_bytes());
+            rustcraft_minecraft_b173::worldgen::update_semantic_state_hash(&mut hasher, *state);
         }
     }
     hasher.finalize()

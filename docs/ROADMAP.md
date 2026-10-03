@@ -143,7 +143,10 @@ acceptance is closed with sub-second warm p95 request-to-visible; hardware frame
 conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan. M4-003 is closed by
 versioned dropped-item and world-global persistence, ordered recovery tests, entity save/evict/
 reload travel coverage and two-slot clock checkpoints. M4 remains active only for the separately
-scoped M4-004 world-generation fidelity work (plus the existing hardware-specific M4-009 condition).
+scoped M4-004 world-generation fidelity acceptance (plus the existing hardware-specific M4-009
+condition). M4-004's versioned overworld v2 now passes autonomous v1/v2 fresh/reused travel,
+two actual-client seed routes and full local validation; Ubuntu/Windows public CI gates final
+closure, not manual owner inspection.
 
 - generic chunk/section lifecycle and deterministic generation contracts;
 - game-owned generation policy, with Beta-like terrain policy confined to `minecraft-b173`;
@@ -160,7 +163,8 @@ scoped M4-004 world-generation fidelity work (plus the existing hardware-specifi
 
 Current baseline: `rustcraft-world` has versioned/checksummed semantic chunk and player-record files,
 bounded load/generation/save worker pools, stale request/result and save rejection, compression
-metrics, and a portable filesystem backend. Minecraft generation version 1, semantic local-player
+metrics, and a portable filesystem backend. Frozen Minecraft generation version 1 plus new-world
+default version 2, semantic local-player
 persistence and named client create/open are integrated. Static liquid presentation includes
 compiled-medium underwater fog. Client startup now assembles its minimum safe neighborhood on a
 cancellable background worker while the window remains responsive; the ready neighborhood is
@@ -177,8 +181,13 @@ pass. Desired/Retained use predictable Chebyshev squares; a connected complete 3
 gates control, `SAFE => VISIBLE`, and eventual boundary-light work cannot redefine that frontier.
 Hardware-specific M4-009 performance evidence remains conditional. Dropped-entity/world-time
 persistence is accepted by `world-state-roundtrip`, codec/corruption/recovery tests and the
-entity-bearing long-travel route. Planned M4-004 generation-fidelity work remains open and was not
-started in this pass.
+entity-bearing long-travel route. M4-004 now adds smooth climate, six meaningful derived biomes,
+continental/rolling/hill terrain, contextual coasts and surfaces, curved caves, depth-bounded ores,
+biome-aware trees and deterministic static water lakes. Exact version resolution keeps v1 worlds
+v1, including missing-column expansion; no automatic upgrade or Java seed parity is promised.
+First-time version-specific safe spawn handles ocean origins; saved players are never relocated.
+Lava, springs and dungeons remain explicit later first-party content scope, not placeholder
+features. M4-004 closure awaits the final automated acceptance/CI record below this foundation.
 
 The older multiplayer/content-resolution scope is moved to an inactive later roadmap item. Network
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and

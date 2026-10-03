@@ -204,11 +204,45 @@ versioned storage, semantic palettes, persistence dirty generations and bounded 
 does not depend on Minecraft block definitions. The flat generator and `sandbox-test` both compile
 against the same generator contract.
 
-`minecraft-b173::worldgen` currently supplies the first game policy: a fixed 128-block overworld,
-sea-level water, surface/bedrock rules, coordinate-seeded cave/ore/tree features and a narrow legacy
-block-handle adapter while the simulation still uses M0-M3 IDs. Feature origins are sampled from a
-deterministic neighborhood halo and clipped to each output column. Generation returns authoritative
-sections only; it does not build render snapshots or meshes.
+`minecraft-b173::worldgen` owns two exact implementations of the first game policy under semantic
+ID `minecraft_b173:overworld`. Version 1 is frozen for existing worlds and retains its canonical
+output. Version 2 is the new-world default: a fixed 128-block overworld with sea level 64, smooth
+temperature/moisture climate, derived ocean/beach/plains/forest/desert/hills classes, continental
+height plus rolling/hill fields, contextual surface replacement, curved caves, bounded ore veins,
+biome-aware trees and static water lakes. Biomes remain derived from seed/version/coordinates and
+are not persisted. Both versions use a narrow legacy block-handle adapter while the simulation
+still uses M0-M3 IDs.
+
+Existing metadata resolves the exact `(generator ID, version)` through the Minecraft package before
+any missing column is scheduled. Unknown IDs/versions are explicit compatibility errors; there is
+no latest-version fallback and no automatic v1-to-v2 conversion. New metadata records v2. Every v2
+random decision is domain-separated by seed, generator version, stage/feature identity, origin
+coordinate and feature index. Bounded origin halos are clipped into each destination column, so
+request order and worker completion cannot alter caves, veins, canopies or lakes. Generation
+returns authoritative sections only; it does not build lighting, render snapshots or meshes.
+
+Canonical v1 retains its historical handle-based lock, while v2 hashes semantic block keys and
+variants: seed 731173, columns X/Z in `[-2,2)`, X-major/Z-minor order, sorted section Y, dense voxel
+order, BLAKE3 over little-endian coordinates and `(u32 key byte length, UTF-8 key, u16 variant)`.
+V1 is `e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`;
+v2 is `4e134fa137fa5477fc3d28c9a610afd14019b0d0304246e43cd9940deb4684e7`.
+Caves evaluate a four-column halo: maximum tunnel travel 49 blocks plus radius below 3.3 requires
+four, not two, origin columns. A wider-halo reference test guards against truncated border caves.
+Ores, trees and lakes use one-column halos; all temporary work remains column/halo bounded.
+
+First-time spawn selection is also Minecraft policy. It searches a bounded coordinate grid for a
+dry v1/v2 surface, centers the initial 3x3 residency core there, then validates the highest local
+voxel surface for stable support and headroom. Existing persisted players are never relocated and
+the chosen position becomes ordinary player persistence. If the bounded startup neighborhood
+contains no safe fresh spawn, opening fails explicitly instead of falling back to an underwater
+player; existing terrain is preserved. The legacy new-v1-world sandbox is added only when both
+of its origin columns already belong to the generated startup neighborhood. It must not create
+partial columns at origin when a dry spawn was relocated elsewhere; a six-seed regression checks
+that residency and valid spawn survive decoration. Existing worlds are never redecorated.
+Authored diagnostic fixtures retain their independent startup policy. Generated water/lakes are static source
+voxels; flowing fluids and swimming remain later gameplay. Lava and dungeons are deliberately
+deferred because the current content profile lacks a complete lava medium/emission contract and
+dungeons' spawner/chest/mob/loot semantics.
 
 World files use `world.rcw` metadata and one signed-coordinate `.rcc` file per chunk column. The
 container has an explicit world-format version, metadata schema version, chunk-payload version,

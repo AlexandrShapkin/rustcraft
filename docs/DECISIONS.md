@@ -422,7 +422,7 @@ version-tagged and is bypassed when output is not smaller.
 
 ## D-033 — M4 generation uses coordinate-derived policy streams
 
-Status: accepted for Minecraft overworld generator version 1.
+Status: accepted for Minecraft overworld generator versions 1 and 2.
 
 The generic `ChunkGenerator` takes only seed and signed `ChunkPos`, returns completed sections, and
 must be independent of scheduling order. Minecraft policy samples domain-separated coordinate
@@ -430,6 +430,10 @@ hashes for terrain, bedrock, caves, ores and tree origins; cross-column features
 neighborhood of deterministic origins and clip to the requested column. The target is coherent,
 recognizable Beta terrain rather than Java seed parity. Generator semantic changes require a new
 stored generator version or explicit migration; terrain must not silently change on regeneration.
+Version 1 is permanently frozen by canonical hash
+`e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6`.
+Version 2 extends the contract with independent climate, terrain, surface, cave, ore, vegetation
+and lake domains; no stage consumes a shared mutable stream.
 
 ## D-034 — Static liquids retain a distinct compiled presentation class
 
@@ -637,3 +641,30 @@ coalescing worker checkpoints at the player autosave cadence and flushes on grac
 The unexpected-failure loss window is the latest successful checkpoint (normally about two
 seconds); platform sync claims remain those of D-032/D-036. Lighting, streaming, rendering and
 controller state remain derived or transient and are never serialized.
+
+## D-043 — New worlds use versioned Beta-recognizable overworld v2
+
+Status: accepted for M4-004.
+
+Keep `minecraft_b173:overworld` version 1 as an exact supported implementation for all existing v1
+worlds. Resolve saved generator ID/version through the Minecraft package; never substitute latest,
+never auto-upgrade, and fail contextually when the exact implementation is unavailable. New worlds
+persist version 2. Generator output does not change chunk payload version because materialized
+semantic `BlockState` storage is unchanged.
+
+V2 deliberately uses a smooth 2D continental/rolling/hill height model plus bounded 3D carving
+rather than Beta's full historical density/RNG pipeline. Temperature and moisture derive a small
+meaningful biome set: ocean, beach, plains, forest, desert and hills. Surface replacement,
+curved/branching caves, clipped ore segments, simple oak trees and ellipsoid water lakes each use
+fixed coordinate-origin halos. The design is Java-seed-incompatible but deterministic across
+request order, worker count and negative coordinates.
+
+First-time spawn selection is version-specific game policy: search a bounded dry coordinate grid,
+center the startup core there, then require the highest local surface to provide stable support and
+headroom. Existing players retain persisted positions. Legacy v1's authored origin sandbox is
+allowed only when its two columns are already resident in that startup core: relocation must not
+create a competing partial origin world and an unsafe fallback spawn. Existing worlds are never
+redecorated. Biomes remain derived and unpersisted.
+Water lakes are static source voxels. Lava is deferred until a semantic block/resource/medium/light
+contract exists; dungeons are deferred until spawner, mob, chest and loot gameplay exists. These
+omissions are preferable to placeholder content that would expand M4 into unrelated systems.

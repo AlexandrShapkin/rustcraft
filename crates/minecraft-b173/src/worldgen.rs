@@ -3,6 +3,18 @@
 
 use rustcraft_engine_core::{BlockId, BlockState, Chunk, ChunkBuilder, ChunkPos};
 use rustcraft_world::{ChunkGenerator, SemanticBlockResolver, WorldError};
+use std::sync::Arc;
+
+mod v2;
+pub use v2::{
+    Biome, Climate, MinecraftOverworldGeneratorV2, V2GenerationMetrics, minecraft_overworld_v2,
+    select_safe_spawn,
+};
+
+pub const OVERWORLD_GENERATOR_ID: &str = "minecraft_b173:overworld";
+pub const OVERWORLD_V1_VERSION: u32 = 1;
+pub const OVERWORLD_V2_VERSION: u32 = 2;
+pub const DEFAULT_OVERWORLD_VERSION: u32 = OVERWORLD_V2_VERSION;
 
 const HEIGHT: i32 = 128;
 const SEA_LEVEL: i32 = 64;
@@ -58,6 +70,19 @@ impl SemanticBlockResolver for MinecraftLegacyBlockResolver {
     }
 }
 
+/// Canonical game-owned semantic state encoding for diagnostics/regression hashes. Runtime dense
+/// handles are resolved before hashing and therefore never become the v2 determinism contract.
+pub fn update_semantic_state_hash(hasher: &mut blake3::Hasher, state: BlockState) {
+    let key = super::blocks::BLOCKS
+        .iter()
+        .find(|definition| definition.id == state.block)
+        .map(|definition| definition.name)
+        .expect("generated Minecraft state resolves to a semantic BlockKey");
+    hasher.update(&(key.len() as u32).to_le_bytes());
+    hasher.update(key.as_bytes());
+    hasher.update(&state.variant.to_le_bytes());
+}
+
 pub fn minecraft_overworld() -> MinecraftOverworldGenerator {
     use super::blocks as b;
     MinecraftOverworldGenerator::new(OverworldBlocks {
@@ -85,10 +110,10 @@ impl MinecraftOverworldGenerator {
 
 impl ChunkGenerator for MinecraftOverworldGenerator {
     fn id(&self) -> &str {
-        "minecraft_b173:overworld"
+        OVERWORLD_GENERATOR_ID
     }
     fn version(&self) -> u32 {
-        1
+        OVERWORLD_V1_VERSION
     }
 
     fn generate(&self, seed: i64, position: ChunkPos) -> Result<Vec<(i32, Chunk)>, WorldError> {
@@ -155,6 +180,63 @@ impl ChunkGenerator for MinecraftOverworldGenerator {
     }
 }
 
+/// Resolve the exact persisted Minecraft generator identity. There is intentionally no
+/// "nearest" or latest-version fallback because mixing algorithms creates permanent seams.
+pub fn resolve_overworld_generator(
+    generator_id: &str,
+    version: u32,
+) -> Result<Arc<dyn ChunkGenerator>, String> {
+    if generator_id != OVERWORLD_GENERATOR_ID {
+        return Err(format!(
+            "unsupported Minecraft generator {generator_id}:v{version}; expected {OVERWORLD_GENERATOR_ID}"
+        ));
+    }
+    match version {
+        OVERWORLD_V1_VERSION => Ok(Arc::new(minecraft_overworld())),
+        OVERWORLD_V2_VERSION => Ok(Arc::new(minecraft_overworld_v2())),
+        _ => Err(format!(
+            "unsupported Minecraft generator {generator_id}:v{version}; supported versions are 1 and 2"
+        )),
+    }
+}
+
+pub fn default_overworld_generator() -> Arc<dyn ChunkGenerator> {
+    resolve_overworld_generator(OVERWORLD_GENERATOR_ID, DEFAULT_OVERWORLD_VERSION)
+        .expect("compiled default Minecraft generator is registered")
+}
+
+/// Select a bounded first-time startup column using the exact generator version's game policy.
+/// The resulting player position itself is persisted by the existing player record.
+pub fn initial_spawn_column(seed: i64, version: u32) -> ChunkPos {
+    for radius in 0..=64_i32 {
+        for grid_z in -radius..=radius {
+            for grid_x in -radius..=radius {
+                if radius != 0 && grid_x.abs().max(grid_z.abs()) != radius {
+                    continue;
+                }
+                let x = grid_x * 8;
+                let z = grid_z * 8;
+                let suitable = match version {
+                    OVERWORLD_V1_VERSION => terrain_height(seed, x, z) > SEA_LEVEL + 2,
+                    OVERWORLD_V2_VERSION => {
+                        let biome = MinecraftOverworldGeneratorV2::biome(seed, x, z);
+                        let height = MinecraftOverworldGeneratorV2::terrain_height(seed, x, z);
+                        height > SEA_LEVEL + 2 && !matches!(biome, Biome::Ocean | Biome::Beach)
+                    }
+                    _ => false,
+                };
+                if suitable {
+                    return ChunkPos {
+                        x: x.div_euclid(16),
+                        z: z.div_euclid(16),
+                    };
+                }
+            }
+        }
+    }
+    ChunkPos { x: 0, z: 0 }
+}
+
 fn set_world(sections: &mut [ChunkBuilder], x: i32, y: i32, z: i32, block: BlockId) {
     set_world_state(sections, x, y, z, BlockState::new(block));
 }
@@ -171,6 +253,12 @@ fn terrain_height(seed: i64, x: i32, z: i32) -> i32 {
     let hills = value_noise_2d(seed, x, z, 28, 0x7465727261696e02) * 5.0;
     let detail = value_noise_2d(seed, x, z, 11, 0x7465727261696e03) * 2.0;
     (62.0 + broad + hills + detail).round().clamp(45.0, 91.0) as i32
+}
+
+/// Diagnostic access to the frozen v1 height policy. Generation callers should resolve the
+/// versioned `ChunkGenerator` instead.
+pub fn v1_terrain_height(seed: i64, x: i32, z: i32) -> i32 {
+    terrain_height(seed, x, z)
 }
 
 fn bedrock_top(seed: i64, x: i32, z: i32) -> i32 {
@@ -477,5 +565,31 @@ mod tests {
             *hasher.finalize().as_bytes()
         };
         assert_eq!(generate(1), generate(4));
+    }
+
+    #[test]
+    fn generator_v1_canonical_region_is_frozen() {
+        let generator = generator();
+        let mut hasher = blake3::Hasher::new();
+        for x in -2..2 {
+            for z in -2..2 {
+                let position = ChunkPos { x, z };
+                hasher.update(&x.to_le_bytes());
+                hasher.update(&z.to_le_bytes());
+                let mut sections = generator.generate(731_173, position).unwrap();
+                sections.sort_by_key(|(y, _)| *y);
+                for (y, chunk) in sections {
+                    hasher.update(&y.to_le_bytes());
+                    for state in chunk.states() {
+                        hasher.update(&state.block.0.to_le_bytes());
+                        hasher.update(&state.variant.to_le_bytes());
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            hasher.finalize().to_hex().as_str(),
+            "e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6"
+        );
     }
 }
