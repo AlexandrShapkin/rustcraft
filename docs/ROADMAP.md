@@ -140,7 +140,10 @@ M4-010: a normal-speed route crosses straight, turn, diagonal, reverse and negat
 frontiers with nonzero Safe/Visible margin, bounded residency, persistence/revisit, continuous view
 intent and no streaming-induced dropped ticks. M4-011 remains closed. M4-009 scheduler/correctness
 acceptance is closed with sub-second warm p95 request-to-visible; hardware frame-performance remains
-conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan.
+conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan. M4-003 is closed by
+versioned dropped-item and world-global persistence, ordered recovery tests, entity save/evict/
+reload travel coverage and two-slot clock checkpoints. M4 remains active only for the separately
+scoped M4-004 world-generation fidelity work (plus the existing hardware-specific M4-009 condition).
 
 - generic chunk/section lifecycle and deterministic generation contracts;
 - game-owned generation policy, with Beta-like terrain policy confined to `minecraft-b173`;
@@ -148,6 +151,9 @@ conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan.
 - generic player-record envelopes with game-owned versioned durable player codecs;
 - component-versioned player records with opaque unknown-component preservation and two-slot crash recovery;
 - semantic item-stack persistence and startup neighborhoods centered on restored player position;
+- chunk-v3 spatial entity envelopes with stable identity, game-owned codecs and v2 migration;
+- two-slot world-global components with a durable paused-offline simulation clock;
+- ordered pickup and cross-column entity recovery with bounded receipts/tombstones;
 - bounded asynchronous generation/load/save with explicit dirty/save generations;
 - client and headless create/generate/edit/save/reopen workflows;
 - deterministic, order/worker-count-independent generation and persistence benchmarks.
@@ -169,8 +175,10 @@ and completed meshes are uploaded nearest-camera first. The canonical fixed-
 region worldgen hash remains unchanged. Headless streaming stress and edited-column revisit tests
 pass. Desired/Retained use predictable Chebyshev squares; a connected complete 3x3 Safe+Visible core
 gates control, `SAFE => VISIBLE`, and eventual boundary-light work cannot redefine that frontier.
-Hardware-specific M4-009 performance evidence remains conditional, as do
-dropped-entity/world-time persistence and planned M4 generation-fidelity work.
+Hardware-specific M4-009 performance evidence remains conditional. Dropped-entity/world-time
+persistence is accepted by `world-state-roundtrip`, codec/corruption/recovery tests and the
+entity-bearing long-travel route. Planned M4-004 generation-fidelity work remains open and was not
+started in this pass.
 
 The older multiplayer/content-resolution scope is moved to an inactive later roadmap item. Network
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and

@@ -10,28 +10,586 @@ use rustcraft_runtime::survival::GameMode;
 use rustcraft_runtime::{RuntimeBootstrap, Simulation, run_controller};
 
 fn main() {
-    if std::env::args().any(|argument| argument == "--version") {
+    let arguments = std::env::args().collect::<Vec<_>>();
+    if arguments.iter().any(|argument| argument == "--version") {
         println!("{}", rustcraft_build_info::identity());
         return;
     }
     rustcraft_minecraft_b173::validate_package()
         .expect("minecraft_b173 must register through the public Game API");
-    let smoke = std::env::args().any(|arg| arg == "--smoke");
-    if std::env::args().any(|arg| arg == "--world-roundtrip") {
+    let smoke = arguments.iter().any(|arg| arg == "--smoke");
+    if let Some(index) = arguments.iter().position(|arg| arg == "--world-info") {
+        run_world_info(&arguments[index + 1..]);
+    } else if let Some(index) = arguments.iter().position(|arg| arg == "--inspect-chunk") {
+        run_chunk_info(&arguments[index + 1..]);
+    } else if arguments.iter().any(|arg| arg == "--world-roundtrip") {
         run_world_roundtrip();
-    } else if std::env::args().any(|arg| arg == "--worldgen-bench") {
+    } else if arguments.iter().any(|arg| arg == "--world-state-roundtrip") {
+        run_world_state_roundtrip();
+    } else if arguments
+        .iter()
+        .any(|arg| arg == "--entity-persistence-bench")
+    {
+        run_entity_persistence_bench();
+    } else if arguments.iter().any(|arg| arg == "--worldgen-bench") {
         run_worldgen_bench();
-    } else if std::env::args().any(|arg| arg == "--persistence-bench") {
+    } else if arguments.iter().any(|arg| arg == "--persistence-bench") {
         run_persistence_bench();
-    } else if std::env::args().any(|arg| arg == "--world-stream-bench") {
+    } else if arguments.iter().any(|arg| arg == "--world-stream-bench") {
         run_world_stream_bench();
     } else if smoke {
         run_smoke();
-    } else if std::env::args().any(|arg| arg == "--survival") {
+    } else if arguments.iter().any(|arg| arg == "--survival") {
         run_survival();
     } else {
         println!("rustcraft server bootstrap; run with --smoke for the headless scenario");
     }
+}
+
+fn run_world_info(arguments: &[String]) {
+    let [root, world, ..] = arguments else {
+        panic!("usage: --world-info <saves-root> <world>");
+    };
+    let storage = rustcraft_world::WorldStorage::open(root, world).unwrap();
+    let metadata = storage.load_metadata().unwrap();
+    let global = storage.load_world_state().unwrap();
+    let (global_revision, world_time, component_count, recovered) =
+        global.as_ref().map_or((0, 0, 0, false), |record| {
+            let time = rustcraft_minecraft_b173::world_persistence::decode_world_state(record)
+                .map(|(time, _)| time)
+                .unwrap_or_default();
+            (
+                record.revision,
+                time,
+                record.components.len(),
+                record.recovered_from_checkpoint,
+            )
+        });
+    println!(
+        "world={} root={} world_format={} metadata_format={} persistence_schema={} game={} seed={} generator={}:v{} global_envelope={} global_revision={} world_time_ticks={} global_components={} recovered_previous={}",
+        world,
+        storage.root().display(),
+        rustcraft_world::WORLD_FORMAT_VERSION,
+        rustcraft_world::WORLD_METADATA_VERSION,
+        metadata.persistence_schema_version,
+        metadata.game_id,
+        metadata.seed,
+        metadata.generator_id,
+        metadata.generator_version,
+        rustcraft_world::WORLD_STATE_RECORD_VERSION,
+        global_revision,
+        world_time,
+        component_count,
+        recovered,
+    );
+    if let Some(global) = global {
+        for component in global.components {
+            println!(
+                "  global_component={} schema={} payload_bytes={}",
+                component.id,
+                component.schema_version,
+                component.payload.len()
+            );
+        }
+    }
+}
+
+fn run_chunk_info(arguments: &[String]) {
+    let [root, world, x, z, ..] = arguments else {
+        panic!("usage: --inspect-chunk <saves-root> <world> <x> <z>");
+    };
+    let position = ChunkPos {
+        x: x.parse().expect("chunk x must be i32"),
+        z: z.parse().expect("chunk z must be i32"),
+    };
+    let storage = rustcraft_world::WorldStorage::open(root, world).unwrap();
+    let chunk = storage.load_chunk(position).unwrap();
+    let palette_entries = chunk
+        .sections
+        .iter()
+        .map(|section| {
+            section
+                .states
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        })
+        .sum::<usize>();
+    println!(
+        "world={} chunk=({}, {}) chunk_format={} sections={} palette_entries={} voxel_states={} spatial_entities={} tombstones={} file_bytes={}",
+        world,
+        position.x,
+        position.z,
+        rustcraft_world::CHUNK_FORMAT_VERSION,
+        chunk.sections.len(),
+        palette_entries,
+        chunk
+            .sections
+            .iter()
+            .map(|section| section.states.len())
+            .sum::<usize>(),
+        chunk.spatial_records.len(),
+        chunk.spatial_tombstones.len(),
+        storage.chunk_file_bytes(position).unwrap_or_default(),
+    );
+    for record in chunk.spatial_records {
+        println!(
+            "  entity={} type={} schema={} revision={} payload_bytes={}",
+            record.entity_id,
+            record.entity_type,
+            record.schema_version,
+            record.entity_revision,
+            record.payload.len()
+        );
+    }
+}
+
+fn persisted_column(
+    simulation: &Simulation,
+    position: ChunkPos,
+) -> (
+    rustcraft_world::StoredChunk,
+    rustcraft_runtime::EntityColumnSnapshot,
+) {
+    let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
+    let sections = simulation
+        .world
+        .section_positions()
+        .filter(|(candidate, _)| *candidate == position)
+        .filter_map(|(_, y)| {
+            simulation
+                .world
+                .section(position, y)
+                .cloned()
+                .map(|chunk| (y, chunk))
+        })
+        .collect::<Vec<_>>();
+    let records = simulation
+        .items
+        .iter()
+        .filter(|entity| entity.column() == position)
+        .map(|entity| {
+            rustcraft_minecraft_b173::world_persistence::encode_item_entity(
+                entity,
+                &simulation.registry,
+            )
+            .unwrap()
+        })
+        .collect();
+    let snapshot = simulation.entity_column_snapshot(position);
+    let tombstones = snapshot
+        .tombstones
+        .iter()
+        .map(
+            |(entity_id, source, entity_revision)| rustcraft_world::SpatialTombstone {
+                entity_id: *entity_id,
+                entity_revision: *entity_revision,
+                source: *source,
+            },
+        )
+        .collect();
+    (
+        rustcraft_world::WorldStorage::encode_runtime_column(
+            position, sections, &resolver, records, tombstones,
+        )
+        .unwrap(),
+        snapshot,
+    )
+}
+
+fn store_simulation_column(
+    storage: &rustcraft_world::WorldStorage,
+    simulation: &mut Simulation,
+    position: ChunkPos,
+) -> rustcraft_world::ChunkEncodingMetrics {
+    let (stored, snapshot) = persisted_column(simulation, position);
+    let metrics = storage.store_chunk_measured(&stored).unwrap();
+    let _ = simulation.note_entity_column_persisted(&snapshot);
+    metrics
+}
+
+fn activate_stored_column(
+    storage: &rustcraft_world::WorldStorage,
+    simulation: &mut Simulation,
+    world_name: &str,
+    position: ChunkPos,
+) {
+    let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
+    let column = storage.load_runtime_column(position, &resolver).unwrap();
+    simulation
+        .publish_column(position, column.sections, false)
+        .unwrap();
+    let entities = column
+        .spatial_records
+        .iter()
+        .map(|record| {
+            rustcraft_minecraft_b173::world_persistence::decode_item_entity(
+                record,
+                &simulation.registry,
+                world_name,
+                position,
+            )
+            .unwrap()
+        })
+        .collect();
+    let tombstones = column
+        .spatial_tombstones
+        .iter()
+        .map(|tombstone| {
+            (
+                tombstone.entity_id,
+                tombstone.source,
+                tombstone.entity_revision,
+            )
+        })
+        .collect::<Vec<_>>();
+    simulation
+        .activate_entity_column(position, entities, &tombstones)
+        .unwrap();
+}
+
+fn persistence_registry() -> rustcraft_mod_api::BlockRegistry {
+    use rustcraft_mod_api::GameplayModule;
+    let mut registry = rustcraft_mod_api::BlockRegistry::default();
+    BlocksModule.register(&mut registry).unwrap();
+    registry
+}
+
+fn run_world_state_roundtrip() {
+    use rustcraft_engine_core::ItemId;
+    use rustcraft_world::{WorldStateComponent, WorldStorage};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let root = std::env::temp_dir().join(format!(
+        "rustcraft-m4-world-state-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let world_name = "roundtrip";
+    let storage = WorldStorage::open(&root, world_name).unwrap();
+    let registry = persistence_registry();
+    let mut world = World::new(rustcraft_minecraft_b173::blocks::AIR.id);
+    world.set(BlockPos { x: 0, y: 0, z: 0 }, STONE.id);
+    world.set(BlockPos { x: 16, y: 0, z: 0 }, STONE.id);
+    let edited = BlockPos { x: 2, y: 1, z: 2 };
+    world.set(edited, STONE.id);
+    let mut simulation = Simulation::new_with_entity_namespace(
+        world,
+        registry.clone(),
+        Vec3::new(100.5, 10.0, 100.5),
+        0x004d_3430_3033,
+    );
+    simulation.set_mode(GameMode::Survival);
+    simulation.time = 98_765;
+
+    simulation.spawn_item(ItemId(1), 3, Vec3::new(8.25, 4.5, 2.75));
+    simulation.items[0].velocity = Vec3::new(0.125, -0.25, 0.5);
+    simulation.items[0].age = 219.5;
+    simulation.items[0].pickup_delay = 1.25;
+    simulation.spawn_item(ItemId(3), 2, Vec3::new(15.85, 4.0, 8.0));
+    simulation.items[1].velocity = Vec3::new(4.0, 0.0, 0.0);
+    simulation.items[1].pickup_delay = 10.0;
+    simulation.spawn_item(ItemId(4), 2, Vec3::new(5.0, 4.0, 12.0));
+    simulation.spawn_item(ItemId(4), 3, Vec3::new(5.4, 4.0, 12.0));
+    let merge_ids = [simulation.items[2].id, simulation.items[3].id];
+    for entity in &mut simulation.items[2..] {
+        entity.pickup_delay = 10.0;
+    }
+    simulation.step(AgentIntent::default(), 0.0); // production merge path
+    assert_eq!(
+        simulation
+            .items
+            .iter()
+            .filter(|entity| entity.stack.item == ItemId(4))
+            .map(|entity| u32::from(entity.stack.count))
+            .sum::<u32>(),
+        5
+    );
+    let merge_survivors = simulation
+        .items
+        .iter()
+        .filter(|entity| merge_ids.contains(&entity.id))
+        .map(|entity| entity.id)
+        .collect::<Vec<_>>();
+    assert_eq!(merge_survivors.len(), 1);
+    assert!(simulation.break_block(edited));
+    let block_drop_id = simulation.items.last().unwrap().id;
+    simulation.spawn_item(ItemId(5), 1, Vec3::new(10.5, 4.0, 10.5));
+    let near_despawn_id = simulation.items.last().unwrap().id;
+    simulation.items.last_mut().unwrap().age = 299.92;
+    simulation.items.last_mut().unwrap().pickup_delay = 10.0;
+
+    let source = ChunkPos { x: 0, z: 0 };
+    let destination = ChunkPos { x: 1, z: 0 };
+    store_simulation_column(&storage, &mut simulation, source);
+    let moving_id = simulation.items[1].id;
+    simulation.step(AgentIntent::default(), 0.05); // crosses x=16 through normal physics
+    assert_eq!(
+        simulation
+            .items
+            .iter()
+            .find(|entity| entity.id == moving_id)
+            .unwrap()
+            .column(),
+        destination
+    );
+    let moving_after_cross = *simulation
+        .items
+        .iter()
+        .find(|entity| entity.id == moving_id)
+        .unwrap();
+    // Destination-before-source plus stable-ID tombstone is the cross-file crash protocol.
+    store_simulation_column(&storage, &mut simulation, destination);
+    store_simulation_column(&storage, &mut simulation, source);
+    store_simulation_column(&storage, &mut simulation, destination); // prune acknowledged marker
+
+    let unknown = WorldStateComponent {
+        id: "test:world/future".into(),
+        schema_version: 9,
+        payload: vec![9, 8, 7],
+    };
+    storage
+        .store_world_state(
+            &rustcraft_minecraft_b173::world_persistence::encode_world_state(
+                simulation.time,
+                1,
+                std::slice::from_ref(&unknown),
+            ),
+        )
+        .unwrap();
+    let player =
+        rustcraft_minecraft_b173::player_persistence::encode_revision(&simulation, 1, &[]).unwrap();
+    storage.store_player(&player).unwrap();
+
+    let expected_ids = simulation
+        .items
+        .iter()
+        .map(|entity| entity.id)
+        .collect::<std::collections::HashSet<_>>();
+    simulation.evict_entity_column(source);
+    simulation.evict_entity_column(destination);
+    simulation.world.remove_column(source);
+    simulation.world.remove_column(destination);
+    assert!(simulation.items.is_empty());
+
+    let mut restored = Simulation::new_with_entity_namespace(
+        World::new(rustcraft_minecraft_b173::blocks::AIR.id),
+        registry.clone(),
+        Vec3::ZERO,
+        0x004d_3430_3034,
+    );
+    activate_stored_column(&storage, &mut restored, world_name, source);
+    activate_stored_column(&storage, &mut restored, world_name, destination);
+    assert_eq!(
+        restored
+            .items
+            .iter()
+            .map(|entity| entity.id)
+            .collect::<std::collections::HashSet<_>>(),
+        expected_ids
+    );
+    let restored_moving = restored
+        .items
+        .iter()
+        .find(|entity| entity.id == moving_id)
+        .unwrap();
+    assert_eq!(restored_moving.velocity, moving_after_cross.velocity);
+    assert_eq!(restored_moving.position, moving_after_cross.position);
+    assert_eq!(restored_moving.age, moving_after_cross.age);
+    assert_eq!(
+        restored_moving.pickup_delay,
+        moving_after_cross.pickup_delay
+    );
+    assert_eq!(
+        restored
+            .items
+            .iter()
+            .filter(|entity| merge_ids.contains(&entity.id))
+            .count(),
+        1,
+        "consumed merge participant resurrected"
+    );
+    assert_eq!(
+        restored.world.get(edited),
+        rustcraft_minecraft_b173::blocks::AIR.id
+    );
+    let global = storage.load_world_state().unwrap().unwrap();
+    let (time, preserved) =
+        rustcraft_minecraft_b173::world_persistence::decode_world_state(&global).unwrap();
+    assert_eq!(time, simulation.time);
+    assert_eq!(preserved, vec![unknown.clone()]);
+    restored.time = time;
+
+    restored.player.position = Vec3::new(100.5, 10.0, 100.5);
+    restored.step(AgentIntent::default(), 0.04);
+    assert!(
+        !restored
+            .items
+            .iter()
+            .any(|entity| entity.id == near_despawn_id),
+        "near-threshold entity did not despawn after reopen"
+    );
+    store_simulation_column(&storage, &mut restored, source);
+
+    let picked = *restored
+        .items
+        .iter()
+        .find(|entity| entity.id == block_drop_id)
+        .expect("block-break drop survived reopen");
+    assert!(picked.pickup_delay > 0.0);
+    restored.player.position = picked.position;
+    restored.step(AgentIntent::default(), 0.05);
+    assert!(
+        restored.items.iter().any(|entity| entity.id == picked.id),
+        "pickup succeeded before persisted delay expired"
+    );
+    restored.step(AgentIntent::default(), 0.25);
+    assert!(!restored.items.iter().any(|entity| entity.id == picked.id));
+    assert!(
+        restored
+            .pickup_receipts()
+            .iter()
+            .any(|receipt| receipt.entity_id == picked.id)
+    );
+    let receipt_player =
+        rustcraft_minecraft_b173::player_persistence::encode_revision(&restored, 2, &[]).unwrap();
+    storage.store_player(&receipt_player).unwrap(); // inventory+receipt first
+    restored.commit_pickup_receipts(&[picked.id]);
+    store_simulation_column(&storage, &mut restored, picked.column());
+    let pruned_player =
+        rustcraft_minecraft_b173::player_persistence::encode_revision(&restored, 3, &[]).unwrap();
+    storage.store_player(&pruned_player).unwrap();
+
+    restored.time += 400;
+    storage
+        .store_world_state(
+            &rustcraft_minecraft_b173::world_persistence::encode_world_state(
+                restored.time,
+                2,
+                std::slice::from_ref(&unknown),
+            ),
+        )
+        .unwrap();
+    let player_record = storage
+        .load_player(rustcraft_minecraft_b173::player_persistence::LOCAL_PLAYER_ID)
+        .unwrap()
+        .unwrap();
+    let player_state =
+        rustcraft_minecraft_b173::player_persistence::decode(&player_record, &registry).unwrap();
+    assert!(player_state.pickup_receipts.is_empty());
+    assert!(
+        player_state
+            .inventory
+            .slots()
+            .iter()
+            .flatten()
+            .any(|stack| stack.item == picked.stack.item && stack.count >= picked.stack.count)
+    );
+    let mut verified = Simulation::new_with_entity_namespace(
+        World::new(rustcraft_minecraft_b173::blocks::AIR.id),
+        registry.clone(),
+        Vec3::ZERO,
+        0x004d_3430_3035,
+    );
+    activate_stored_column(&storage, &mut verified, world_name, source);
+    activate_stored_column(&storage, &mut verified, world_name, destination);
+    assert!(
+        !verified
+            .items
+            .iter()
+            .any(|entity| { entity.id == picked.id || entity.id == near_despawn_id })
+    );
+    assert_eq!(
+        verified.world.get(edited),
+        rustcraft_minecraft_b173::blocks::AIR.id
+    );
+    let final_global = storage.load_world_state().unwrap().unwrap();
+    let (final_time, final_unknown) =
+        rustcraft_minecraft_b173::world_persistence::decode_world_state(&final_global).unwrap();
+    assert_eq!(final_time, restored.time);
+    assert!(final_time > time);
+    assert_eq!(final_unknown, vec![unknown]);
+
+    println!(
+        "world-state-roundtrip: time={} entities_before={} entities_after_pickup={} stable_ids=ok merge=ok cross_column=ok eviction_reload=ok block_break_drop=ok pickup_delay=ok velocity_restore=ok despawn_reopen=ok inventory_receipt=ok unknown_global=preserved",
+        final_time,
+        expected_ids.len(),
+        restored.items.len()
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+fn run_entity_persistence_bench() {
+    use rustcraft_engine_core::ItemId;
+    use rustcraft_world::WorldStorage;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    let root = std::env::temp_dir().join(format!(
+        "rustcraft-m4-entity-bench-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let storage = WorldStorage::open(&root, "bench").unwrap();
+    for count in [16usize, 1_000] {
+        let mut simulation = Simulation::new_with_entity_namespace(
+            World::new(rustcraft_minecraft_b173::blocks::AIR.id),
+            persistence_registry(),
+            Vec3::ZERO,
+            count as u64 + 1,
+        );
+        for index in 0..count {
+            simulation.spawn_item(
+                ItemId(1),
+                1,
+                Vec3::new(
+                    0.125 + (index % 16) as f32 * 0.9,
+                    4.0 + (index / 256) as f32,
+                    0.125 + ((index / 16) % 16) as f32 * 0.9,
+                ),
+            );
+        }
+        let position = ChunkPos { x: 0, z: 0 };
+        let encode_started = Instant::now();
+        let (chunk, _) = persisted_column(&simulation, position);
+        let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
+        let write_started = Instant::now();
+        let metrics = storage.store_chunk_measured(&chunk).unwrap();
+        let write_ms = write_started.elapsed().as_secs_f64() * 1000.0;
+        let read_started = Instant::now();
+        let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
+        let loaded = storage.load_runtime_column(position, &resolver).unwrap();
+        let decoded = loaded
+            .spatial_records
+            .iter()
+            .map(|record| {
+                rustcraft_minecraft_b173::world_persistence::decode_item_entity(
+                    record,
+                    &simulation.registry,
+                    "bench",
+                    position,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let read_decode_ms = read_started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(decoded.len(), count);
+        println!(
+            "entity-persistence-bench records={} raw_bytes={} stored_bytes={} compression={} encode_ms={:.3} write_sync_ms={:.3} read_decode_ms={:.3}",
+            count,
+            metrics.raw_payload_bytes,
+            metrics.stored_file_bytes,
+            metrics.compression_method,
+            encode_ms,
+            write_ms,
+            read_decode_ms
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 fn run_worldgen_bench() {
@@ -298,14 +856,14 @@ fn run_world_stream_bench() {
                     continue;
                 }
                 match completion.result.expect("stream chunk load succeeded") {
-                    Some(sections) => {
+                    Some(column) => {
                         initial_lighting
                             .submit(rustcraft_runtime::lighting::InitialLightingRequest {
                                 position: completion.request.position,
                                 token: completion.request.token,
                                 priority: residency.priority_key(completion.request.position),
                                 default_block: simulation.world.empty_block(),
-                                sections,
+                                sections: column.sections,
                                 registry: initial_lighting_registry.clone(),
                                 persist_new: false,
                             })

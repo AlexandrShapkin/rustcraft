@@ -13,6 +13,39 @@ pub struct BlockId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemId(pub u32);
 
+/// Stable identity for a durable spatial entity.
+///
+/// The high half identifies one process/session allocation namespace and the low half is a
+/// monotonic counter inside that namespace. Runtime collection indexes and addresses are never
+/// persistence identities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EntityId(pub u128);
+
+impl EntityId {
+    pub const NIL: Self = Self(0);
+
+    #[must_use]
+    pub const fn from_parts(namespace: u64, counter: u64) -> Self {
+        Self((namespace as u128) << 64 | counter as u128)
+    }
+
+    #[must_use]
+    pub const fn namespace(self) -> u64 {
+        (self.0 >> 64) as u64
+    }
+
+    #[must_use]
+    pub const fn counter(self) -> u64 {
+        self.0 as u64
+    }
+}
+
+impl std::fmt::Display for EntityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:032x}", self.0)
+    }
+}
+
 /// Compact state handle. Variant bits are reserved for orientation/properties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockState {

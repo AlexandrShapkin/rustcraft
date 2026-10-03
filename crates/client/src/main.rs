@@ -365,6 +365,21 @@ struct ClientApp {
     stream_generation_allowed: bool,
     persistence_dirty: rustcraft_world::PersistenceDirtyTracker,
     save_scheduler: rustcraft_world::SaveScheduler,
+    pending_spatial_columns: HashMap<
+        rustcraft_engine_core::ChunkPos,
+        (
+            Vec<rustcraft_world::SpatialRecord>,
+            Vec<rustcraft_world::SpatialTombstone>,
+        ),
+    >,
+    entity_save_snapshots: HashMap<(i32, i32, u64), rustcraft_runtime::EntityColumnSnapshot>,
+    entity_records_loaded: u64,
+    entity_records_saved: u64,
+    entity_encode_bytes: u64,
+    entity_encode_ms: f64,
+    entity_decode_ms: f64,
+    entity_save_before_evict: u64,
+    entity_evictions_blocked: u64,
     world_name: String,
     saves_directory: PathBuf,
     worldgen_metrics: rustcraft_world::GenerationMetrics,
@@ -398,7 +413,19 @@ struct ClientApp {
     player_encode_ms_last: f64,
     player_checkpoint_ms_last: f64,
     player_save_scheduler: rustcraft_world::PlayerSaveScheduler,
+    player_checkpoint_receipts: HashMap<u64, Vec<rustcraft_engine_core::EntityId>>,
     player_autosave_writes: u64,
+    last_world_state_autosave: Instant,
+    world_state_autosave_interval: Duration,
+    world_state_components: Option<Vec<rustcraft_world::WorldStateComponent>>,
+    unknown_world_state_components: Vec<rustcraft_world::WorldStateComponent>,
+    world_state_revision: u64,
+    world_state_persisted_revision: u64,
+    world_state_dirty: bool,
+    latest_world_state_record: Option<rustcraft_world::WorldStateRecord>,
+    world_state_save_scheduler: rustcraft_world::WorldStateSaveScheduler,
+    world_state_checkpoint_ms_last: f64,
+    restored_world_time: u64,
     gpu_metrics: Option<gpu_metrics::Provider>,
     measure_seconds: Option<f64>,
     survival_start: bool,
@@ -860,6 +887,16 @@ struct WorldStartupPayload {
     latest_player_record: Option<rustcraft_world::PlayerRecord>,
     player_encode_ms_last: f64,
     player_checkpoint_ms_last: f64,
+    last_world_state_autosave: Instant,
+    world_state_components: Option<Vec<rustcraft_world::WorldStateComponent>>,
+    unknown_world_state_components: Vec<rustcraft_world::WorldStateComponent>,
+    world_state_revision: u64,
+    world_state_persisted_revision: u64,
+    world_state_dirty: bool,
+    latest_world_state_record: Option<rustcraft_world::WorldStateRecord>,
+    world_state_checkpoint_ms_last: f64,
+    entity_records_loaded: u64,
+    entity_decode_ms: f64,
     stream_generator: Option<std::sync::Arc<dyn rustcraft_world::ChunkGenerator>>,
     world_seed: i64,
     stream_generation_allowed: bool,
@@ -870,6 +907,94 @@ struct WorldStartupPayload {
 }
 
 impl ClientApp {
+    fn activate_pending_spatial_columns(
+        &mut self,
+        simulation: &mut Simulation,
+    ) -> Result<(), String> {
+        let pending = std::mem::take(&mut self.pending_spatial_columns);
+        for (position, (records, tombstones)) in pending {
+            let decode_started = Instant::now();
+            let record_count = records.len();
+            let entities = records
+                .iter()
+                .map(|record| {
+                    rustcraft_minecraft_b173::world_persistence::decode_item_entity(
+                        record,
+                        &simulation.registry,
+                        &self.world_name,
+                        position,
+                    )
+                    .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let tombstones = tombstones
+                .iter()
+                .map(|tombstone| {
+                    (
+                        tombstone.entity_id,
+                        tombstone.source,
+                        tombstone.entity_revision,
+                    )
+                })
+                .collect::<Vec<_>>();
+            simulation
+                .activate_entity_column(position, entities, &tombstones)
+                .map_err(|error| {
+                    format!(
+                        "world {} column ({},{}) spatial activation: {error}",
+                        self.world_name, position.x, position.z
+                    )
+                })?;
+            self.entity_records_loaded = self
+                .entity_records_loaded
+                .saturating_add(record_count as u64);
+            self.entity_decode_ms += decode_started.elapsed().as_secs_f64() * 1000.0;
+        }
+        Ok(())
+    }
+
+    fn activate_pending_spatial_column(
+        &mut self,
+        position: rustcraft_engine_core::ChunkPos,
+    ) -> Result<(), String> {
+        let Some((records, tombstones)) = self.pending_spatial_columns.remove(&position) else {
+            return Ok(());
+        };
+        let decode_started = Instant::now();
+        let record_count = records.len();
+        let simulation = self.simulation.as_mut().ok_or("simulation unavailable")?;
+        let entities = records
+            .iter()
+            .map(|record| {
+                rustcraft_minecraft_b173::world_persistence::decode_item_entity(
+                    record,
+                    &simulation.registry,
+                    &self.world_name,
+                    position,
+                )
+                .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tombstones = tombstones
+            .iter()
+            .map(|tombstone| {
+                (
+                    tombstone.entity_id,
+                    tombstone.source,
+                    tombstone.entity_revision,
+                )
+            })
+            .collect::<Vec<_>>();
+        simulation
+            .activate_entity_column(position, entities, &tombstones)
+            .map_err(str::to_owned)?;
+        self.entity_records_loaded = self
+            .entity_records_loaded
+            .saturating_add(record_count as u64);
+        self.entity_decode_ms += decode_started.elapsed().as_secs_f64() * 1000.0;
+        Ok(())
+    }
+
     fn autonomous_stream_report(&self) -> Result<String, String> {
         let mut failures = Vec::new();
         if !self.stream_route_completed {
@@ -1043,6 +1168,18 @@ impl ClientApp {
             latest_player_record: self.latest_player_record.take(),
             player_encode_ms_last: self.player_encode_ms_last,
             player_checkpoint_ms_last: self.player_checkpoint_ms_last,
+            last_world_state_autosave: self.last_world_state_autosave,
+            world_state_components: self.world_state_components.take(),
+            unknown_world_state_components: std::mem::take(
+                &mut self.unknown_world_state_components,
+            ),
+            world_state_revision: self.world_state_revision,
+            world_state_persisted_revision: self.world_state_persisted_revision,
+            world_state_dirty: self.world_state_dirty,
+            latest_world_state_record: self.latest_world_state_record.take(),
+            world_state_checkpoint_ms_last: self.world_state_checkpoint_ms_last,
+            entity_records_loaded: self.entity_records_loaded,
+            entity_decode_ms: self.entity_decode_ms,
             stream_generator: self.stream_generator.take(),
             world_seed: self.world_seed,
             stream_generation_allowed: self.stream_generation_allowed,
@@ -1125,6 +1262,16 @@ impl ClientApp {
                 self.latest_player_record = payload.latest_player_record;
                 self.player_encode_ms_last = payload.player_encode_ms_last;
                 self.player_checkpoint_ms_last = payload.player_checkpoint_ms_last;
+                self.last_world_state_autosave = payload.last_world_state_autosave;
+                self.world_state_components = payload.world_state_components;
+                self.unknown_world_state_components = payload.unknown_world_state_components;
+                self.world_state_revision = payload.world_state_revision;
+                self.world_state_persisted_revision = payload.world_state_persisted_revision;
+                self.world_state_dirty = payload.world_state_dirty;
+                self.latest_world_state_record = payload.latest_world_state_record;
+                self.world_state_checkpoint_ms_last = payload.world_state_checkpoint_ms_last;
+                self.entity_records_loaded = payload.entity_records_loaded;
+                self.entity_decode_ms = payload.entity_decode_ms;
                 self.stream_generator = payload.stream_generator;
                 self.world_seed = payload.world_seed;
                 self.stream_generation_allowed = payload.stream_generation_allowed;
@@ -1231,6 +1378,15 @@ impl ClientApp {
             stream_generation_allowed: true,
             persistence_dirty: Default::default(),
             save_scheduler: rustcraft_world::SaveScheduler::new(1, 8),
+            pending_spatial_columns: HashMap::new(),
+            entity_save_snapshots: HashMap::new(),
+            entity_records_loaded: 0,
+            entity_records_saved: 0,
+            entity_encode_bytes: 0,
+            entity_encode_ms: 0.0,
+            entity_decode_ms: 0.0,
+            entity_save_before_evict: 0,
+            entity_evictions_blocked: 0,
             world_name: "default".to_owned(),
             saves_directory: std::env::var_os("RUSTCRAFT_SAVES_DIR")
                 .map(PathBuf::from)
@@ -1272,7 +1428,24 @@ impl ClientApp {
             player_encode_ms_last: 0.0,
             player_checkpoint_ms_last: 0.0,
             player_save_scheduler: rustcraft_world::PlayerSaveScheduler::new(),
+            player_checkpoint_receipts: HashMap::new(),
             player_autosave_writes: 0,
+            last_world_state_autosave: Instant::now(),
+            world_state_autosave_interval: Duration::from_secs(
+                std::env::var("RUSTCRAFT_WORLD_AUTOSAVE_SECONDS")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(2),
+            ),
+            world_state_components: None,
+            unknown_world_state_components: Vec::new(),
+            world_state_revision: 0,
+            world_state_persisted_revision: 0,
+            world_state_dirty: false,
+            latest_world_state_record: None,
+            world_state_save_scheduler: rustcraft_world::WorldStateSaveScheduler::new(),
+            world_state_checkpoint_ms_last: 0.0,
+            restored_world_time: 0,
             gpu_metrics: None,
             measure_seconds: std::env::var("RUSTCRAFT_MEASURE_SECONDS")
                 .ok()
@@ -1407,8 +1580,10 @@ impl ClientApp {
             None
         };
         let player_restored = restored.is_some();
-        let simulation =
+        let mut simulation =
             initialize_simulation(world, bootstrap.registry, restored, self.survival_start);
+        simulation.time = self.restored_world_time;
+        self.activate_pending_spatial_columns(&mut simulation)?;
         if player_restored {
             eprintln!(
                 "restored durable player state from world {}",
@@ -1547,6 +1722,43 @@ impl ClientApp {
             );
         }
         let restored = decoded.map(|(state, _)| state);
+
+        let world_state = storage.load_world_state().map_err(|error| {
+            format!(
+                "global state in world {}: {error}",
+                storage.root().display()
+            )
+        })?;
+        self.world_state_revision = world_state.as_ref().map_or(0, |record| record.revision);
+        self.world_state_persisted_revision = self.world_state_revision;
+        self.world_state_components = world_state.as_ref().map(|record| record.components.clone());
+        self.latest_world_state_record = world_state.clone();
+        if let Some(record) = world_state.as_ref() {
+            let (world_time, unknown) =
+                rustcraft_minecraft_b173::world_persistence::decode_world_state(record).map_err(
+                    |error| {
+                        format!(
+                            "global-state compatibility error in world {}: {error}",
+                            storage.root().display()
+                        )
+                    },
+                )?;
+            self.restored_world_time = world_time;
+            self.unknown_world_state_components = unknown;
+            self.world_state_dirty = false;
+            if record.recovered_from_checkpoint {
+                eprintln!(
+                    "recovered world-global state from checkpoint revision {}",
+                    record.revision
+                );
+            }
+        } else {
+            // A pre-M4-003 world has no global record and starts at the game-defined default.
+            self.restored_world_time = 0;
+            self.unknown_world_state_components.clear();
+            self.world_state_dirty = true;
+            self.last_world_state_autosave = Instant::now() - self.world_state_autosave_interval;
+        }
         self.startup_metadata_player_ms = metadata_player_started.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "player persistence read: revision={} components={} bytes={} read_ms={player_read_ms:.3} decode_ms={:.3}",
@@ -1608,9 +1820,13 @@ impl ClientApp {
             for completion in load_scheduler.take_ready(positions.len()) {
                 completed_loads += 1;
                 match completion.result {
-                    Ok(Some(sections)) => {
+                    Ok(Some(column)) => {
+                        self.pending_spatial_columns.insert(
+                            completion.request.position,
+                            (column.spatial_records, column.spatial_tombstones),
+                        );
                         world
-                            .publish_column(completion.request.position, sections)
+                            .publish_column(completion.request.position, column.sections)
                             .map_err(str::to_owned)?;
                         loaded_from_disk += 1;
                     }
@@ -1741,6 +1957,21 @@ impl ClientApp {
     fn service_player_autosave(&mut self) {
         for completion in self.player_save_scheduler.take_completed() {
             if completion.result.is_ok() {
+                let completed_revisions = self
+                    .player_checkpoint_receipts
+                    .keys()
+                    .copied()
+                    .filter(|revision| *revision <= completion.revision)
+                    .collect::<Vec<_>>();
+                let mut durable_receipts = Vec::new();
+                for revision in completed_revisions {
+                    if let Some(receipts) = self.player_checkpoint_receipts.remove(&revision) {
+                        durable_receipts.extend(receipts);
+                    }
+                }
+                if let Some(simulation) = self.simulation.as_mut() {
+                    simulation.commit_pickup_receipts(&durable_receipts);
+                }
                 self.player_persisted_revision =
                     self.player_persisted_revision.max(completion.revision);
                 self.player_dirty = self.player_revision > self.player_persisted_revision;
@@ -1778,10 +2009,82 @@ impl ClientApp {
         };
         match self.player_save_scheduler.submit(storage, record) {
             Ok(()) => {
+                if let Some(simulation) = self.simulation.as_ref() {
+                    self.player_checkpoint_receipts.insert(
+                        self.player_revision,
+                        simulation
+                            .pickup_receipts()
+                            .into_iter()
+                            .map(|receipt| receipt.entity_id)
+                            .collect(),
+                    );
+                }
                 self.last_player_autosave = Instant::now();
                 self.player_autosave_writes = self.player_autosave_writes.saturating_add(1);
             }
             Err(error) => eprintln!("player checkpoint submission failed: {error}"),
+        }
+    }
+
+    fn service_world_state_autosave(&mut self) {
+        for completion in self.world_state_save_scheduler.take_completed() {
+            if completion.result.is_ok() {
+                self.world_state_persisted_revision =
+                    self.world_state_persisted_revision.max(completion.revision);
+                self.world_state_dirty =
+                    self.world_state_revision > self.world_state_persisted_revision;
+                self.world_state_checkpoint_ms_last = completion.elapsed_ms;
+            } else if let Err(error) = completion.result {
+                self.world_state_dirty = true;
+                self.world_state_checkpoint_ms_last = completion.elapsed_ms;
+                eprintln!(
+                    "world-global checkpoint revision {} failed; state remains dirty: {error}",
+                    completion.revision
+                );
+            }
+        }
+        self.refresh_world_state_snapshot();
+        if !self.world_state_dirty
+            || self.last_world_state_autosave.elapsed() < self.world_state_autosave_interval
+        {
+            return;
+        }
+        let (Some(storage), Some(record)) = (
+            self.world_storage.clone(),
+            self.latest_world_state_record.clone(),
+        ) else {
+            return;
+        };
+        match self.world_state_save_scheduler.submit(storage, record) {
+            Ok(()) => self.last_world_state_autosave = Instant::now(),
+            Err(error) => eprintln!("world-global checkpoint submission failed: {error}"),
+        }
+    }
+
+    fn refresh_world_state_snapshot(&mut self) {
+        let Some(simulation) = self.simulation.as_ref() else {
+            return;
+        };
+        let mut record = rustcraft_minecraft_b173::world_persistence::encode_world_state(
+            simulation.time,
+            self.world_state_revision.max(1),
+            &self.unknown_world_state_components,
+        );
+        if self
+            .world_state_components
+            .as_ref()
+            .is_none_or(|components| components != &record.components)
+        {
+            self.world_state_revision = self.world_state_revision.saturating_add(1).max(1);
+            record.revision = self.world_state_revision;
+            self.world_state_components = Some(record.components.clone());
+            self.latest_world_state_record = Some(record);
+            self.world_state_dirty = true;
+        } else if self.latest_world_state_record.is_none() {
+            self.world_state_revision = self.world_state_revision.max(1);
+            record.revision = self.world_state_revision;
+            self.latest_world_state_record = Some(record);
+            self.world_state_dirty = true;
         }
     }
 
@@ -1942,6 +2245,7 @@ impl ClientApp {
         }
         self.service_world_saves(persistence_dirty);
         self.service_player_autosave();
+        self.service_world_state_autosave();
         self.snapshot_dirty_sections.extend(dirty);
         self.responsiveness
             .record_long_task("fixed_step", tick_started.elapsed(), 1);
@@ -2339,10 +2643,7 @@ impl ClientApp {
         let Some(simulation) = self.simulation.as_ref() else {
             return ('N', "not-desired");
         };
-        let pinned = simulation.items.iter().any(|item| {
-            (item.position.x.floor() as i32).div_euclid(16) == position.x
-                && (item.position.z.floor() as i32).div_euclid(16) == position.z
-        });
+        let pinned = simulation.lighting.integrating_column() == Some(position);
         if pinned {
             return ('P', "pinned");
         }
@@ -2675,6 +2976,14 @@ impl ClientApp {
             }
             self.residency.published(request.position, request.token);
             self.mark_column_voxel_ready(request.position, request.token, sections);
+            if let Err(error) = self.activate_pending_spatial_column(request.position) {
+                let _ = self.residency.set_phase(request, ResidencyPhase::Failed);
+                eprintln!(
+                    "activate spatial records for column ({},{}): {error}",
+                    request.position.x, request.position.z
+                );
+                continue;
+            }
             if persist_new {
                 self.persistence_dirty.mark_dirty(request.position);
                 self.generated_chunks += 1;
@@ -2716,11 +3025,17 @@ impl ClientApp {
                 continue;
             }
             match completion.result {
-                Ok(Some(sections)) => {
-                    match self.queue_initial_lighting(completion.request, sections, false) {
+                Ok(Some(column)) => {
+                    self.pending_spatial_columns.insert(
+                        completion.request.position,
+                        (column.spatial_records, column.spatial_tombstones),
+                    );
+                    match self.queue_initial_lighting(completion.request, column.sections, false) {
                         Ok(()) => publications += 1,
                         Err(sections) => {
                             let _ = sections;
+                            self.pending_spatial_columns
+                                .remove(&completion.request.position);
                             self.residency.defer(completion.request);
                             self.request_started_at
                                 .remove(&(completion.request.position, completion.request.token));
@@ -2867,14 +3182,8 @@ impl ClientApp {
             .world
             .column_positions()
             .collect::<std::collections::HashSet<_>>();
-        let mut pinned = simulation
-            .items
-            .iter()
-            .map(|item| rustcraft_engine_core::ChunkPos {
-                x: (item.position.x.floor() as i32).div_euclid(16),
-                z: (item.position.z.floor() as i32).div_euclid(16),
-            })
-            .collect::<std::collections::HashSet<_>>();
+        // Persistable dropped items follow save-before-evict and no longer pin terrain forever.
+        let mut pinned = std::collections::HashSet::new();
         if let Some(active_boundary) = simulation.lighting.integrating_column() {
             pinned.insert(active_boundary);
         }
@@ -2988,17 +3297,46 @@ impl ClientApp {
             let dx = i64::from(position.x) - i64::from(center.x);
             let dz = i64::from(position.z) - i64::from(center.z);
             let still_near = dx.abs().max(dz.abs()) <= i64::from(retain_radius);
-            let pinned_now = simulation.items.iter().any(|item| {
-                (item.position.x.floor() as i32).div_euclid(16) == position.x
-                    && (item.position.z.floor() as i32).div_euclid(16) == position.z
-            }) || simulation.lighting.integrating_column() == Some(position);
+            let pinned_now = simulation.lighting.integrating_column() == Some(position);
             if still_near || pinned_now {
+                if still_near {
+                    self.simulation
+                        .as_mut()
+                        .expect("running simulation")
+                        .unfreeze_entity_column(position);
+                }
                 continue;
+            }
+            let froze_entities = self
+                .simulation
+                .as_mut()
+                .expect("running simulation")
+                .freeze_entity_column(position);
+            if froze_entities {
+                self.entity_save_before_evict = self.entity_save_before_evict.saturating_add(1);
+            }
+            for dirty_position in self
+                .simulation
+                .as_mut()
+                .expect("running simulation")
+                .take_persistence_dirty_chunks()
+            {
+                self.persistence_dirty.mark_dirty(dirty_position);
             }
             if self.persistence_dirty.is_dirty(position)
                 || self.persistence_dirty.is_saving(position)
             {
                 self.eviction_blocked_dirty += 1;
+                if !self
+                    .simulation
+                    .as_ref()
+                    .expect("running simulation")
+                    .entity_column_snapshot(position)
+                    .entities
+                    .is_empty()
+                {
+                    self.entity_evictions_blocked = self.entity_evictions_blocked.saturating_add(1);
+                }
                 continue;
             }
             self.simulation
@@ -3018,6 +3356,10 @@ impl ClientApp {
                     continue;
                 }
             };
+            self.simulation
+                .as_mut()
+                .unwrap()
+                .evict_entity_column(position);
             if removed.is_empty() {
                 // Empty persisted/generated columns are still resident and must be evictable.
                 self.simulation
@@ -3051,7 +3393,6 @@ impl ClientApp {
     }
 
     fn service_world_saves(&mut self, dirty: Vec<rustcraft_engine_core::ChunkPos>) {
-        use rustcraft_world::WorldStorage;
         for position in dirty {
             self.persistence_dirty.mark_dirty(position);
         }
@@ -3067,6 +3408,24 @@ impl ClientApp {
             }
             self.persistence_dirty
                 .complete_save(completion.token, success);
+            if success
+                && let Some(snapshot) = self.entity_save_snapshots.remove(&(
+                    completion.token.position.x,
+                    completion.token.position.z,
+                    completion.token.generation,
+                ))
+            {
+                self.entity_records_saved = self
+                    .entity_records_saved
+                    .saturating_add(snapshot.entities.len() as u64);
+                if self
+                    .simulation
+                    .as_mut()
+                    .is_some_and(|simulation| simulation.note_entity_column_persisted(&snapshot))
+                {
+                    self.player_dirty = true;
+                }
+            }
         }
         let (Some(storage), Some(simulation)) =
             (self.world_storage.as_ref(), self.simulation.as_ref())
@@ -3079,27 +3438,26 @@ impl ClientApp {
         let Some(token) = self.persistence_dirty.begin_save(position) else {
             return;
         };
-        let sections = simulation
-            .world
-            .section_positions()
-            .filter(|(candidate, _)| *candidate == position)
-            .filter_map(|(_, y)| {
-                simulation
-                    .world
-                    .section(position, y)
-                    .cloned()
-                    .map(|chunk| (y, chunk))
-            })
-            .collect::<Vec<_>>();
-        let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
-        let result = WorldStorage::encode_runtime_chunk(position, sections, &resolver)
-            .map_err(|error| error.to_string())
-            .and_then(|chunk| {
+        let entity_encode_started = Instant::now();
+        let result =
+            encode_simulation_column(simulation, position).and_then(|(chunk, snapshot)| {
+                self.entity_encode_bytes = self.entity_encode_bytes.saturating_add(
+                    chunk
+                        .spatial_records
+                        .iter()
+                        .map(|record| record.payload.len() as u64)
+                        .sum::<u64>(),
+                );
+                self.entity_save_snapshots
+                    .insert((position.x, position.z, token.generation), snapshot);
                 self.save_scheduler
                     .submit(storage.clone(), token, chunk)
                     .map_err(|error| error.to_string())
             });
+        self.entity_encode_ms += entity_encode_started.elapsed().as_secs_f64() * 1000.0;
         if let Err(error) = result {
+            self.entity_save_snapshots
+                .remove(&(position.x, position.z, token.generation));
             eprintln!(
                 "unable to queue world save for ({},{}): {error}",
                 position.x, position.z
@@ -3109,13 +3467,49 @@ impl ClientApp {
     }
 
     fn finish_world_saves(&mut self) {
-        use rustcraft_world::WorldStorage;
         let Some(storage) = self.world_storage.clone() else {
             return;
         };
         if let Some(simulation) = self.simulation.as_mut() {
+            for position in simulation.entity_column_positions() {
+                self.persistence_dirty.mark_dirty(position);
+            }
             for position in simulation.take_persistence_dirty_chunks() {
                 self.persistence_dirty.mark_dirty(position);
+            }
+        }
+        self.refresh_world_state_snapshot();
+        if self.world_state_dirty
+            && let Some(record) = self.latest_world_state_record.clone()
+        {
+            if let Err(error) = self
+                .world_state_save_scheduler
+                .submit(storage.clone(), record.clone())
+            {
+                eprintln!("world shutdown global-state submission failed: {error}");
+            } else {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                while self.world_state_persisted_revision < record.revision
+                    && Instant::now() < deadline
+                {
+                    for completion in self.world_state_save_scheduler.take_completed() {
+                        if completion.result.is_ok() {
+                            self.world_state_persisted_revision =
+                                self.world_state_persisted_revision.max(completion.revision);
+                        } else if let Err(error) = completion.result {
+                            eprintln!("world shutdown global-state save failed: {error}");
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                self.world_state_dirty =
+                    self.world_state_persisted_revision < self.world_state_revision;
+                if self.world_state_dirty {
+                    eprintln!(
+                        "world shutdown could not durably persist global revision {} (last {})",
+                        self.world_state_revision, self.world_state_persisted_revision
+                    );
+                }
             }
         }
         if let Err(error) = self.refresh_player_snapshot() {
@@ -3129,11 +3523,38 @@ impl ClientApp {
             {
                 eprintln!("world shutdown player save submission failed: {error}");
             } else {
+                if let Some(simulation) = self.simulation.as_ref() {
+                    self.player_checkpoint_receipts.insert(
+                        record.revision,
+                        simulation
+                            .pickup_receipts()
+                            .into_iter()
+                            .map(|receipt| receipt.entity_id)
+                            .collect(),
+                    );
+                }
                 let deadline = Instant::now() + Duration::from_secs(60);
                 while self.player_persisted_revision < record.revision && Instant::now() < deadline
                 {
                     for completion in self.player_save_scheduler.take_completed() {
                         if completion.result.is_ok() {
+                            let completed_revisions = self
+                                .player_checkpoint_receipts
+                                .keys()
+                                .copied()
+                                .filter(|revision| *revision <= completion.revision)
+                                .collect::<Vec<_>>();
+                            let mut durable_receipts = Vec::new();
+                            for revision in completed_revisions {
+                                if let Some(receipts) =
+                                    self.player_checkpoint_receipts.remove(&revision)
+                                {
+                                    durable_receipts.extend(receipts);
+                                }
+                            }
+                            if let Some(simulation) = self.simulation.as_mut() {
+                                simulation.commit_pickup_receipts(&durable_receipts);
+                            }
                             self.player_persisted_revision =
                                 self.player_persisted_revision.max(completion.revision);
                         } else if let Err(error) = completion.result {
@@ -3163,6 +3584,11 @@ impl ClientApp {
                 }
             }
         }
+        if let Some(simulation) = self.simulation.as_mut() {
+            for position in simulation.take_persistence_dirty_chunks() {
+                self.persistence_dirty.mark_dirty(position);
+            }
+        }
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
         while self.persistence_dirty.metrics().saves_in_flight > 0 && Instant::now() < deadline {
             for completion in self.save_scheduler.take_completed() {
@@ -3172,6 +3598,18 @@ impl ClientApp {
                 }
                 self.persistence_dirty
                     .complete_save(completion.token, success);
+                if success
+                    && let Some(snapshot) = self.entity_save_snapshots.remove(&(
+                        completion.token.position.x,
+                        completion.token.position.z,
+                        completion.token.generation,
+                    ))
+                    && self.simulation.as_mut().is_some_and(|simulation| {
+                        simulation.note_entity_column_persisted(&snapshot)
+                    })
+                {
+                    self.player_dirty = true;
+                }
             }
             std::thread::yield_now();
         }
@@ -3186,22 +3624,21 @@ impl ClientApp {
             let Some(simulation) = self.simulation.as_ref() else {
                 break;
             };
-            let sections = simulation
-                .world
-                .section_positions()
-                .filter(|(candidate, _)| *candidate == position)
-                .filter_map(|(_, y)| {
-                    simulation
-                        .world
-                        .section(position, y)
-                        .cloned()
-                        .map(|chunk| (y, chunk))
-                })
-                .collect::<Vec<_>>();
-            let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
-            let result = WorldStorage::encode_runtime_chunk(position, sections, &resolver)
-                .and_then(|chunk| storage.store_chunk_measured(&chunk).map(|_| ()));
-            self.persistence_dirty.complete_save(token, result.is_ok());
+            let result = encode_simulation_column(simulation, position)
+                .map_err(rustcraft_world::WorldError::Compatibility)
+                .and_then(|(chunk, snapshot)| {
+                    storage.store_chunk_measured(&chunk).map(|_| snapshot)
+                });
+            let success = result.is_ok();
+            if let Ok(snapshot) = &result
+                && self
+                    .simulation
+                    .as_mut()
+                    .is_some_and(|simulation| simulation.note_entity_column_persisted(snapshot))
+            {
+                self.player_dirty = true;
+            }
+            self.persistence_dirty.complete_save(token, success);
             if let Err(error) = result {
                 eprintln!(
                     "world shutdown save failed for ({},{}): {error}",
@@ -3501,6 +3938,7 @@ impl ClientApp {
                 let persistence = self.persistence_dirty.metrics();
                 let saves = self.save_scheduler.metrics();
                 let player_saves = self.player_save_scheduler.metrics();
+                let world_state_saves = self.world_state_save_scheduler.metrics();
                 let loads = self.load_scheduler.metrics();
                 let stream_gen = self.generation_scheduler.metrics();
                 let center = rustcraft_engine_core::ChunkPos {
@@ -3559,6 +3997,39 @@ impl ClientApp {
                     player_saves.requests, player_saves.coalesced, player_saves.pending,
                     player_saves.in_flight, player_saves.successes, player_saves.failures,
                     self.player_encode_ms_last, self.player_checkpoint_ms_last,
+                ));
+                let entity_columns = sim
+                    .items
+                    .iter()
+                    .map(|entity| entity.column())
+                    .collect::<HashSet<_>>();
+                self.debug_text.push_str(&format!(
+                    "\nWORLD_STATE revision={} persisted={} dirty={} requests={} coalesced={} pending={} inflight={} successes={} failures={} checkpoint_ms={:.3}\nENTITIES resident={} resident_columns={} loaded={} saved={} encode_payload_bytes={} encode_ms={:.3} decode_ms={:.3} pickup_receipts={} entity_dirty_columns={} save_before_evict={} evictions_blocked={} spatial_format={}",
+                    self.world_state_revision,
+                    self.world_state_persisted_revision,
+                    self.world_state_dirty,
+                    world_state_saves.requests,
+                    world_state_saves.coalesced,
+                    world_state_saves.pending,
+                    world_state_saves.in_flight,
+                    world_state_saves.successes,
+                    world_state_saves.failures,
+                    self.world_state_checkpoint_ms_last,
+                    sim.items.len(),
+                    entity_columns.len(),
+                    self.entity_records_loaded,
+                    self.entity_records_saved,
+                    self.entity_encode_bytes,
+                    self.entity_encode_ms,
+                    self.entity_decode_ms,
+                    sim.pickup_receipts().len(),
+                    entity_columns
+                        .iter()
+                        .filter(|position| self.persistence_dirty.is_dirty(**position))
+                        .count(),
+                    self.entity_save_before_evict,
+                    self.entity_evictions_blocked,
+                    rustcraft_world::CHUNK_FORMAT_VERSION,
                 ));
                 self.debug_text.push_str(&format!(
                     "\nLIGHT_INIT queued={} in_flight={} outstanding={} completed={} stale={} coalesced={} columns_per_sec={:.2} queue_ms={:?} worker_elapsed_ms={:?} direct_voxels={} emitters={} propagation_nodes={}",
@@ -3716,7 +4187,9 @@ impl ClientApp {
                         // Entity age is simulation seconds; Beta RenderItem consumes ticks.
                         age: e.age * 20.0 + self.clock.alpha(),
                         count: e.stack.count,
-                        hover_start: (e.id as f32 * 0.61803395).fract(),
+                        hover_start: (((e.id.0 as u64) ^ ((e.id.0 >> 64) as u64)) as f32
+                            * 0.61803395)
+                            .fract(),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -4626,6 +5099,64 @@ fn initialize_simulation(
     simulation
 }
 
+fn encode_simulation_column(
+    simulation: &Simulation,
+    position: rustcraft_engine_core::ChunkPos,
+) -> Result<
+    (
+        rustcraft_world::StoredChunk,
+        rustcraft_runtime::EntityColumnSnapshot,
+    ),
+    String,
+> {
+    let sections = simulation
+        .world
+        .section_positions()
+        .filter(|(candidate, _)| *candidate == position)
+        .filter_map(|(_, y)| {
+            simulation
+                .world
+                .section(position, y)
+                .cloned()
+                .map(|chunk| (y, chunk))
+        })
+        .collect::<Vec<_>>();
+    let spatial_records = simulation
+        .items
+        .iter()
+        .filter(|entity| entity.column() == position)
+        .map(|entity| {
+            rustcraft_minecraft_b173::world_persistence::encode_item_entity(
+                entity,
+                &simulation.registry,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let snapshot = simulation.entity_column_snapshot(position);
+    let spatial_tombstones = snapshot
+        .tombstones
+        .iter()
+        .map(
+            |(entity_id, source, entity_revision)| rustcraft_world::SpatialTombstone {
+                entity_id: *entity_id,
+                entity_revision: *entity_revision,
+                source: *source,
+            },
+        )
+        .collect();
+    let resolver = rustcraft_minecraft_b173::worldgen::MinecraftLegacyBlockResolver;
+    let stored = rustcraft_world::WorldStorage::encode_runtime_column(
+        position,
+        sections,
+        &resolver,
+        spatial_records,
+        spatial_tombstones,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((stored, snapshot))
+}
+
 fn camera_is_underwater(simulation: &Simulation) -> bool {
     let eye = Vec3::new(
         simulation.player.position.x,
@@ -4724,6 +5255,7 @@ fn run_world_travel_test() {
     let mut first = prepare_headless_stream_app(&root);
     let origin = rustcraft_engine_core::ChunkPos { x: 0, z: 0 };
     let mut edit = None;
+    let mut durable_drop = None;
     let mutation_deadline = Instant::now() + Duration::from_secs(30);
     while !first.player_control_enabled {
         assert!(
@@ -4748,10 +5280,23 @@ fn run_world_travel_test() {
                 variant: 77,
             },
         );
-        first.persistence_dirty.mark_dirty(origin);
         edit = Some(position);
+        simulation.spawn_item(
+            rustcraft_minecraft_b173::blocks::DIRT.item.unwrap(),
+            5,
+            Vec3::new(8.5, simulation.player.position.y + 2.0, 8.5),
+        );
+        let item = simulation.items.last_mut().unwrap();
+        item.velocity = Vec3::new(0.125, 0.2, -0.25);
+        item.age = 12.5;
+        item.pickup_delay = 1_000.0;
+        durable_drop = Some((item.id, item.stack));
     }
-    run_headless_stream_phase(&mut first, 168.0, 0.0);
+    first.persistence_dirty.mark_dirty(origin);
+    // At the end of the third leg the route is seven chunks north of the origin. Prove that the
+    // item-bearing origin actually saved and left active residency before later legs can approach
+    // it closely enough to reload it.
+    run_headless_stream_phase(&mut first, 84.0, 0.0);
     let origin_evicted = first.stream_evicted_columns.contains(&origin);
     assert!(
         origin_evicted,
@@ -4770,6 +5315,18 @@ fn run_world_travel_test() {
             .contains(&origin),
     );
     assert!(first.stream_visited_columns.len() >= 20);
+    let durable_drop = durable_drop.expect("travel drop created");
+    assert!(
+        !first
+            .simulation
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .any(|entity| entity.id == durable_drop.0),
+        "entity-containing origin did not leave active residency"
+    );
+    run_headless_stream_phase(&mut first, 168.0, 0.0);
     assert!(
         first
             .stream_visited_columns
@@ -4788,11 +5345,13 @@ fn run_world_travel_test() {
     let fresh_visible_latency = first.render_visible_latency_ms.summary();
     let fresh_resident_peak = first.resident_columns_peak;
     let fresh_section_peak = first.resident_sections_peak;
+    let saved_world_time = first.simulation.as_ref().unwrap().time;
     first.finish_world_saves();
     drop(first);
 
     let mut reopened = prepare_headless_stream_app(&root);
     let restored = reopened.simulation.as_ref().unwrap().player.position;
+    assert_eq!(reopened.simulation.as_ref().unwrap().time, saved_world_time);
     assert!((restored.x - distant_position.x).abs() < 0.25);
     assert!((restored.z - distant_position.z).abs() < 0.25);
     run_headless_stream_phase(&mut reopened, 196.0, 168.0);
@@ -4806,6 +5365,16 @@ fn run_world_travel_test() {
         },
         "persisted edit did not survive eviction and disk reload"
     );
+    let restored_drop = reopened
+        .simulation
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .find(|entity| entity.id == durable_drop.0)
+        .expect("persisted dropped item did not reload on return");
+    assert_eq!(restored_drop.stack, durable_drop.1);
+    assert!(restored_drop.age > 12.5);
     let safe_visible = reopened
         .simulation
         .as_ref()
@@ -4816,7 +5385,7 @@ fn run_world_travel_test() {
     assert!(safe_visible, "SAFE=>VISIBLE invariant failed");
     reopened.finish_world_saves();
     println!(
-        "WORLD_TRAVEL_TEST result=PASS radius={} retain={} fresh_visited_columns={} reused_visited_columns={} returned_origin={} negative_coordinates=ok fresh_margins_min/p05/mean={:?}/{:?}/{:?} reused_margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} fresh_request_visible_ms={:?} reused_request_visible_ms={:?} fresh_resident_columns/sections_peak={}/{} reused_resident_columns/sections_peak={}/{} edit_evict_reload=ok reopen_distant_player=ok hashes=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6/384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
+        "WORLD_TRAVEL_TEST result=PASS radius={} retain={} fresh_visited_columns={} reused_visited_columns={} returned_origin={} negative_coordinates=ok fresh_margins_min/p05/mean={:?}/{:?}/{:?} reused_margins_current/min/p05/mean={:?}/{:?}/{:?}/{:?} fresh_request_visible_ms={:?} reused_request_visible_ms={:?} fresh_resident_columns/sections_peak={}/{} reused_resident_columns/sections_peak={}/{} edit_evict_reload=ok entity_evict_reload=ok world_time_reopen=ok reopen_distant_player=ok hashes=e0d1f83c16b281124b7a9c190f667d7eddaa8b2f35ef5ef98ccb4bab434c1bb6/384029af6b21ecf82326bbee468eee62c1353b0af70b9148a4947dee7192a807",
         reopened.residency.load_radius(),
         reopened.residency.retain_radius(),
         fresh_visited,
@@ -5132,6 +5701,7 @@ mod tests {
         sim.player.pitch = 0.35;
         sim.inventory.select(6);
         sim.mode = rustcraft_runtime::survival::GameMode::Survival;
+        sim.time = 456_789;
         let mut app = ClientApp::new(None, None);
         app.simulation = Some(sim);
         app.world_storage = Some(storage.clone());
@@ -5152,6 +5722,11 @@ mod tests {
             restored.mode,
             rustcraft_runtime::survival::GameMode::Survival
         );
+        let global = storage.load_world_state().unwrap().unwrap();
+        let (world_time, unknown) =
+            rustcraft_minecraft_b173::world_persistence::decode_world_state(&global).unwrap();
+        assert_eq!(world_time, 456_789);
+        assert!(unknown.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -5202,7 +5777,7 @@ mod tests {
                 .iter()
                 .map(|c| c.payload.len())
                 .sum::<usize>(),
-            65
+            67
         );
         assert_eq!(app.player_autosave_writes, 1);
         let deadline = Instant::now() + Duration::from_secs(3);

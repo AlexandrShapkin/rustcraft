@@ -114,19 +114,29 @@ mismatch is a compatibility error. Generator mismatch only blocks generating abs
 persisted chunks are independently loadable. Legacy metadata v1 is interpreted as persisted-state
 schema v1 and rewritten as metadata v2 after successful palette resolution.
 
-The generic storage container is versioned independently at world metadata, chunk-payload and
-player-record boundaries. The generic player record is an opaque bounded, checksummed, atomic
+The generic storage container is versioned independently at world metadata, chunk-payload,
+world-global envelope, spatial entity and player-record boundaries. The generic player record is an opaque bounded, checksummed, atomic
 envelope keyed by a validated persistent player ID; the active game owns its versioned payload
 codec. Minecraft v1 persists position/orientation, mode, all inventory slots, selected hotbar slot,
 cursor transaction stack, and crafting grid using semantic item names plus count/damage. Runtime
-`ItemId` handles are resolved on load and never stored as persistent identity. A missing record in
+`ItemId` handles are resolved on load and never stored as persistent identity. Dropped items use
+the semantic entity type `minecraft_b173:entity/item`, a stable 128-bit EntityId and the same
+semantic ItemKey/count/damage contract; unknown entity types, unknown item keys and unsupported
+known schemas are explicit compatibility errors. Generic chunk v3 storage sees only bounded opaque
+spatial records and tombstones, never Minecraft stack fields. A missing record in
 an older world means initialize the normal first-time player; missing semantic items in an existing
 record are explicit compatibility errors. Chunk compression is tagged per payload and bounded on
 decode.
 
-PERSISTED: world metadata, authoritative voxel columns, and current durable local-player state.
-DERIVED/REBUILT: lighting, render snapshots, meshes, GPU state, collision contacts, raycasts and
-input/UI interpolation. NOT YET PERSISTED: dropped item entities, other entities and world time.
+The world-global `RCSTATE` v1 envelope similarly stores sorted independently versioned opaque
+components. Minecraft's `minecraft_b173:world/clock` v1 stores simulation ticks and pauses while
+closed. Unknown global components are preserved opaquely; unsupported known versions fail.
+
+PERSISTED: world metadata, authoritative voxel columns, current dropped item entities, world time,
+pickup recovery receipts and current durable local-player state. DERIVED/REBUILT: lighting, item
+render bob/orientation, render snapshots, meshes, GPU state, collision contacts and raycasts.
+TRANSIENT: mining progress, residency/scheduler queues, lifecycle tokens, input/controller intent
+and UI interpolation. No other current gameplay entity/global systems exist to persist.
 
 Voxel presentation keeps authored material and interaction semantics through profile compilation.
 `Liquid` is distinct from ordinary translucent material: it selects blended section/page submission

@@ -484,7 +484,8 @@ seconds and is clamped to 1–2 seconds (`RUSTCRAFT_PLAYER_AUTOSAVE_SECONDS`); t
 recent-state loss to roughly that interval under normal scheduling, not arbitrary hardware cache
 failure. Graceful shutdown waits for the latest dirty revision. First-ready chunks center on the
 saved position. Velocity/contact reset, AABB/camera are derived, and mining/input/UI/render state
-is transient; dropped entities and world time remain outside this persistence slice.
+is transient. M4-003 adds pickup receipts as a fourth Minecraft-owned player component; D-042
+defines the separate spatial and world-global domains.
 
 ## D-037 — Product identity and release versions are independent of game packages
 
@@ -530,9 +531,9 @@ corrupt data never does. When persisted generator identity differs, stored colum
 while absent columns cannot be generated under the incompatible policy.
 
 Unavailable columns block movement and ray traversal rather than masquerading as air. Dirty columns
-remain resident until their current save generation completes successfully. Columns containing
-non-persisted dropped-item entities are pinned; this is an explicit temporary bound until entity
-persistence is addressed. Eviction removes lighting/world state and invalidates render snapshots,
+remain resident until their current save generation completes successfully. Persistable
+dropped-item entities now take a frozen atomic column snapshot and no longer pin terrain. Eviction
+removes lighting/world state and invalidates render snapshots,
 mesh jobs and resident GPU sections. Startup creates the window first, then uses a cancellable
 background bootstrap to obtain a minimum safe neighborhood centered on the restored player. This is
 not general multiplayer interest management or an unbounded travel protocol.
@@ -598,5 +599,41 @@ Authoritative residency no longer implies simulation availability. A complete ce
 be both locally authoritative and render-ready before control starts. Thereafter Safe grows only
 by complete 3x3 neighborhoods overlapping the existing connected Safe set. Visible is presentation
 readiness and may lead Safe; Safe can never lead Visible. Retained is radius hysteresis plus explicit
-persistence, active-light and entity pins, none of which alter the player frontier. Boundary light
+persistence and active-light pins, none of which alter the player frontier. Boundary light
 is eventual convergence and may remesh changed sections without gating collision or presentation.
+
+## D-042 — Durable state is split into column, world-global and player domains
+
+Status: accepted for M4-003.
+
+Generic storage owns framing, bounds, semantic type/component IDs, revisions, checksums, atomic
+writes and spatial association; the active game owns payload meaning and codecs. This avoids a
+reflective ECS serializer and keeps Minecraft item/time policy outside engine storage.
+
+Spatial records are embedded in chunk payload v3 rather than placed in a global entity file or
+sidecar. Block mutation and a drop in the same column share one atomic snapshot,
+save-before-evict needs one dirty generation, corruption is column-local, and future region
+storage can relocate the complete column unit. Payload v2 remains readable as zero entities.
+Minecraft's item codec uses a stable 128-bit EntityId, semantic entity type and ItemKey, and all
+current authoritative item fields. Production IDs combine a per-session 64-bit namespace with a
+monotonic 64-bit counter; deterministic tests inject the namespace. New sessions use new
+namespaces, so a lagging global checkpoint cannot collide with existing IDs.
+
+Cross-column motion uses destination-before-source persistence. The destination record carries a
+tombstone naming the old source; stable ID plus entity revision selects one newest active copy in
+either load order. Source cleanup follows destination success, then destination cleanup removes
+the bounded tombstone. Merge is restricted to one owning column, so count conservation is atomic.
+
+Player pickup is an ordered cross-domain transfer: inventory change and a bounded pickup receipt
+are one player checkpoint, its successful completion authorizes source-column removal, and source
+success authorizes receipt pruning. Receipts suppress stale source copies during recovery. The
+guarantee is idempotent recovery without endlessly repeatable duplication or silent permanent
+loss, not instantaneous atomic commit across two files.
+
+World-global state is a separate two-slot `RCSTATE` v1 envelope of sorted independently versioned
+opaque components. `minecraft_b173:world/clock` v1 stores simulation ticks and pauses offline.
+Unknown components are preserved byte-for-byte; unsupported known schemas fail. One bounded
+coalescing worker checkpoints at the player autosave cadence and flushes on graceful shutdown.
+The unexpected-failure loss window is the latest successful checkpoint (normally about two
+seconds); platform sync claims remain those of D-032/D-036. Lighting, streaming, rendering and
+controller state remain derived or transient and are never serialized.

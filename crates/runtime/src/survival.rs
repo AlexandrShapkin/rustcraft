@@ -1,5 +1,5 @@
 use crate::inventory::ItemStack;
-use rustcraft_engine_core::{Aabb, BlockId, ItemId, Vec3, World};
+use rustcraft_engine_core::{Aabb, BlockId, EntityId, ItemId, Vec3, World};
 use rustcraft_mod_api::{BlockRegistry, ToolCategory, ToolTier};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,7 +10,9 @@ pub enum GameMode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ItemEntity {
-    pub id: u64,
+    pub id: EntityId,
+    /// Monotonic durable-state revision used to select the newest copy during transfer recovery.
+    pub persistence_revision: u64,
     pub stack: ItemStack,
     pub position: Vec3,
     pub velocity: Vec3,
@@ -23,7 +25,7 @@ impl ItemEntity {
             self.pickup_delay = (self.pickup_delay - dt).max(0.);
         }
         self.age += dt;
-        if self.age > 300. {
+        if self.age >= 300. {
             return;
         }
         if self.velocity.y != 0. || !world.collides(self.bounds(), |b| registry.is_solid(b)) {
@@ -54,6 +56,14 @@ impl ItemEntity {
             self.position - Vec3::new(0.125, 0.125, 0.125),
             self.position + Vec3::new(0.125, 0.125, 0.125),
         )
+    }
+
+    #[must_use]
+    pub fn column(&self) -> rustcraft_engine_core::ChunkPos {
+        rustcraft_engine_core::ChunkPos {
+            x: (self.position.x.floor() as i32).div_euclid(16),
+            z: (self.position.z.floor() as i32).div_euclid(16),
+        }
     }
 }
 
@@ -225,7 +235,8 @@ mod tests {
             BlockId(1),
         );
         let mut e = ItemEntity {
-            id: 1,
+            id: EntityId::from_parts(1, 1),
+            persistence_revision: 1,
             stack: ItemStack {
                 item: ItemId(1),
                 count: 2,

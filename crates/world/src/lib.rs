@@ -1,7 +1,7 @@
 //! Generic deterministic generation contracts and versioned world storage.
 //! This crate stores semantic identities and never interprets game-specific terrain policy.
 
-use rustcraft_engine_core::{BlockId, BlockState, CHUNK_VOLUME, Chunk, ChunkPos};
+use rustcraft_engine_core::{BlockId, BlockState, CHUNK_VOLUME, Chunk, ChunkPos, EntityId};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File},
@@ -18,18 +18,29 @@ use std::{
 const WORLD_MAGIC: &[u8; 8] = b"RCWORLD\0";
 const CHUNK_MAGIC: &[u8; 8] = b"RCCHNK\0\0";
 const PLAYER_MAGIC: &[u8; 8] = b"RCPLAY\0\0";
+const WORLD_STATE_MAGIC: &[u8; 8] = b"RCSTATE\0";
 pub const WORLD_FORMAT_VERSION: u32 = 1;
 pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const PERSISTED_STATE_SCHEMA_VERSION: u32 = 1;
-pub const CHUNK_FORMAT_VERSION: u32 = 2;
+pub const CHUNK_FORMAT_VERSION: u32 = 3;
+const LEGACY_CHUNK_FORMAT_VERSION: u32 = 2;
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
-pub const MAX_CHUNK_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_CHUNK_BYTES: usize = 8 * 1024 * 1024;
 pub const PLAYER_RECORD_VERSION: u32 = 2;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 pub const MAX_PLAYER_RECORD_BYTES: usize = 64 * 1024;
 pub const MAX_PLAYER_COMPONENTS: usize = 64;
 pub const MAX_PLAYER_COMPONENT_ID_BYTES: usize = 256;
 pub const MAX_PLAYER_COMPONENT_BYTES: usize = 32 * 1024;
+pub const WORLD_STATE_RECORD_VERSION: u32 = 1;
+pub const MAX_WORLD_STATE_BYTES: usize = 64 * 1024;
+pub const MAX_WORLD_COMPONENTS: usize = 64;
+pub const MAX_WORLD_COMPONENT_ID_BYTES: usize = 256;
+pub const MAX_WORLD_COMPONENT_BYTES: usize = 32 * 1024;
+pub const MAX_SPATIAL_RECORDS: usize = 1_024;
+pub const MAX_SPATIAL_TOMBSTONES: usize = 1_024;
+pub const MAX_SPATIAL_TYPE_ID_BYTES: usize = 256;
+pub const MAX_SPATIAL_PAYLOAD_BYTES: usize = 4 * 1024;
 pub const MAX_SECTIONS: usize = 64;
 pub const MAX_PALETTE: usize = CHUNK_VOLUME;
 
@@ -130,6 +141,56 @@ pub struct StoredSection {
 pub struct StoredChunk {
     pub position: ChunkPos,
     pub sections: Vec<StoredSection>,
+    /// Generic spatial envelopes. The active game owns each semantic type and payload codec.
+    pub spatial_records: Vec<SpatialRecord>,
+    /// Bounded recovery markers used while an entity removal is being made durable in another
+    /// column/domain. They are pruned after the source snapshot is safely rewritten.
+    pub spatial_tombstones: Vec<SpatialTombstone>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpatialRecord {
+    pub entity_id: EntityId,
+    pub entity_revision: u64,
+    pub entity_type: String,
+    pub schema_version: u32,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpatialTombstone {
+    pub entity_id: EntityId,
+    pub entity_revision: u64,
+    pub source: ChunkPos,
+}
+
+#[derive(Debug)]
+pub struct LoadedColumn {
+    pub sections: Vec<(i32, Chunk)>,
+    pub spatial_records: Vec<SpatialRecord>,
+    pub spatial_tombstones: Vec<SpatialTombstone>,
+}
+
+/// Opaque game-owned payload for one independently versioned global world component.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldStateComponent {
+    pub id: String,
+    pub schema_version: u32,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldStateRecord {
+    pub revision: u64,
+    pub components: Vec<WorldStateComponent>,
+    pub recovered_from_checkpoint: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WorldStateCheckpointIoMetrics {
+    pub encoded_bytes: usize,
+    pub write_ms: f64,
+    pub sync_ms: f64,
 }
 
 /// Opaque game-owned payload for one independently versioned durable player component.
@@ -172,6 +233,7 @@ pub enum WorldError {
     InvalidData(&'static str),
     UnsupportedVersion(u32),
     UnknownBlock(String),
+    Compatibility(String),
 }
 
 impl std::fmt::Display for WorldError {
@@ -184,6 +246,7 @@ impl std::fmt::Display for WorldError {
                 write!(f, "unsupported world format version {version}")
             }
             Self::UnknownBlock(key) => write!(f, "world requires unavailable semantic block {key}"),
+            Self::Compatibility(message) => write!(f, "world compatibility error: {message}"),
         }
     }
 }
@@ -209,6 +272,8 @@ pub trait WorldStore: Send + Sync {
     fn store_chunk(&self, chunk: &StoredChunk) -> Result<(), WorldError>;
     fn load_player(&self, player_id: &str) -> Result<Option<PlayerRecord>, WorldError>;
     fn store_player(&self, record: &PlayerRecord) -> Result<(), WorldError>;
+    fn load_world_state(&self) -> Result<Option<WorldStateRecord>, WorldError>;
+    fn store_world_state(&self, record: &WorldStateRecord) -> Result<(), WorldError>;
     fn chunk_exists(&self, position: ChunkPos) -> bool;
     fn flush(&self) -> Result<(), WorldError>;
     fn close(&self) -> Result<(), WorldError> {
@@ -248,7 +313,7 @@ pub struct LoadCompletion {
     pub request: ResidencyRequest,
     /// `None` means no persisted file exists. All other failures are explicit and must not
     /// transition into generation.
-    pub result: Result<Option<Vec<(i32, Chunk)>>, WorldError>,
+    pub result: Result<Option<LoadedColumn>, WorldError>,
     pub queue_wait_ms: f64,
     pub load_ms: f64,
 }
@@ -318,7 +383,7 @@ impl ChunkLoadScheduler {
                         f.fetch_add(1, Ordering::Relaxed);
                         let queue_wait_ms = job.queued_at.elapsed().as_secs_f64() * 1000.0;
                         let started = std::time::Instant::now();
-                        let result = job.storage.load_runtime_chunk_if_present(
+                        let result = job.storage.load_runtime_column_if_present(
                             job.request.position,
                             job.resolver.as_ref(),
                         );
@@ -1800,6 +1865,109 @@ impl WorldStorage {
             .join(format!("{player_id}.{slot}.rcp"))
     }
 
+    pub fn load_world_state(&self) -> Result<Option<WorldStateRecord>, WorldError> {
+        let paths = [self.world_state_path(0), self.world_state_path(1)];
+        let mut records = Vec::new();
+        let mut had_invalid = false;
+        let mut last_error = None;
+        for path in &paths {
+            match read_world_state_checkpoint(path) {
+                Ok(Some(record)) => records.push(record),
+                Ok(None) => {}
+                Err(error) => {
+                    had_invalid = true;
+                    last_error = Some(error);
+                }
+            }
+        }
+        if !records.is_empty() {
+            records.sort_by_key(|record| record.revision);
+            let mut newest = records.pop().expect("non-empty world state records");
+            newest.recovered_from_checkpoint = had_invalid;
+            return Ok(Some(newest));
+        }
+        if had_invalid {
+            return Err(
+                last_error.unwrap_or(WorldError::InvalidData("no valid world-state checkpoint"))
+            );
+        }
+        Ok(None)
+    }
+
+    pub fn store_world_state(&self, record: &WorldStateRecord) -> Result<(), WorldError> {
+        self.store_world_state_measured(record).map(|_| ())
+    }
+
+    pub fn store_world_state_measured(
+        &self,
+        record: &WorldStateRecord,
+    ) -> Result<WorldStateCheckpointIoMetrics, WorldError> {
+        validate_world_components(&record.components)?;
+        if record.revision == 0 {
+            return Err(WorldError::InvalidData(
+                "world-state revision must be nonzero",
+            ));
+        }
+        let paths = [self.world_state_path(0), self.world_state_path(1)];
+        let valid = paths
+            .iter()
+            .map(|path| read_world_state_checkpoint(path).ok().flatten())
+            .collect::<Vec<_>>();
+        let newest = valid
+            .iter()
+            .flatten()
+            .max_by_key(|existing| existing.revision);
+        let target = match newest {
+            Some(existing) if existing.revision > record.revision => {
+                return Ok(WorldStateCheckpointIoMetrics::default());
+            }
+            Some(existing) if existing.revision == record.revision => {
+                if existing.components == record.components {
+                    return Ok(WorldStateCheckpointIoMetrics::default());
+                }
+                return Err(WorldError::InvalidData(
+                    "world-state revision content conflict",
+                ));
+            }
+            Some(existing) => {
+                if valid[0]
+                    .as_ref()
+                    .is_some_and(|slot| slot.revision == existing.revision)
+                {
+                    1
+                } else {
+                    0
+                }
+            }
+            None => (record.revision & 1) as usize,
+        };
+        let mut out = Vec::new();
+        out.extend_from_slice(WORLD_STATE_MAGIC);
+        put_u32(&mut out, WORLD_STATE_RECORD_VERSION);
+        put_u64(&mut out, record.revision);
+        put_u16(&mut out, record.components.len() as u16);
+        for component in &record.components {
+            put_string(&mut out, &component.id)?;
+            put_u32(&mut out, component.schema_version);
+            put_u32(&mut out, component.payload.len() as u32);
+            out.extend_from_slice(&component.payload);
+        }
+        finish_checksum(&mut out);
+        if out.len() > MAX_WORLD_STATE_BYTES {
+            return Err(WorldError::InvalidData("world-state record limit"));
+        }
+        let (write_ms, sync_ms) = durable_write_slot(&paths[target], &out)?;
+        Ok(WorldStateCheckpointIoMetrics {
+            encoded_bytes: out.len(),
+            write_ms,
+            sync_ms,
+        })
+    }
+
+    fn world_state_path(&self, slot: u8) -> PathBuf {
+        self.root.join(format!("world-state.{slot}.rcs"))
+    }
+
     pub fn store_metadata(&self, metadata: &WorldMetadata) -> Result<(), WorldError> {
         let mut out = Vec::new();
         out.extend_from_slice(WORLD_MAGIC);
@@ -1877,7 +2045,7 @@ impl WorldStorage {
         let body = verify_file(&data, CHUNK_MAGIC)?;
         let mut header = Reader::new(body);
         let version = header.u32()?;
-        if version != CHUNK_FORMAT_VERSION {
+        if version != LEGACY_CHUNK_FORMAT_VERSION && version != CHUNK_FORMAT_VERSION {
             return Err(WorldError::UnsupportedVersion(version));
         }
         let actual = ChunkPos {
@@ -1950,8 +2118,87 @@ impl WorldStorage {
             }
             sections.push(StoredSection { y, states });
         }
+        let (spatial_records, spatial_tombstones) = if version == LEGACY_CHUNK_FORMAT_VERSION {
+            (Vec::new(), Vec::new())
+        } else {
+            let record_count = r.u16()? as usize;
+            if record_count > MAX_SPATIAL_RECORDS {
+                return Err(WorldError::InvalidData("spatial entity count limit"));
+            }
+            let mut records = Vec::with_capacity(record_count);
+            let mut ids = HashSet::with_capacity(record_count);
+            for _ in 0..record_count {
+                let entity_id = EntityId(u128::from_le_bytes(
+                    r.take(16)?
+                        .try_into()
+                        .map_err(|_| WorldError::InvalidData("invalid entity id"))?,
+                ));
+                if entity_id == EntityId::NIL || !ids.insert(entity_id) {
+                    return Err(WorldError::InvalidData(
+                        "zero or duplicate spatial entity id",
+                    ));
+                }
+                let entity_revision = r.u64()?;
+                if entity_revision == 0 {
+                    return Err(WorldError::InvalidData("zero spatial entity revision"));
+                }
+                let entity_type = r.string()?;
+                if entity_type.len() > MAX_SPATIAL_TYPE_ID_BYTES
+                    || !valid_semantic_key(&entity_type)
+                {
+                    return Err(WorldError::InvalidData("invalid spatial entity type"));
+                }
+                let schema_version = r.u32()?;
+                let payload_len = r.u32()? as usize;
+                if payload_len > MAX_SPATIAL_PAYLOAD_BYTES {
+                    return Err(WorldError::InvalidData("spatial entity payload limit"));
+                }
+                records.push(SpatialRecord {
+                    entity_id,
+                    entity_revision,
+                    entity_type,
+                    schema_version,
+                    payload: r.take(payload_len)?.to_vec(),
+                });
+            }
+            let tombstone_count = r.u16()? as usize;
+            if tombstone_count > MAX_SPATIAL_TOMBSTONES {
+                return Err(WorldError::InvalidData("spatial tombstone count limit"));
+            }
+            let mut tombstones = Vec::with_capacity(tombstone_count);
+            let mut tombstone_ids = HashSet::with_capacity(tombstone_count);
+            for _ in 0..tombstone_count {
+                let entity_id =
+                    EntityId(u128::from_le_bytes(r.take(16)?.try_into().map_err(
+                        |_| WorldError::InvalidData("invalid tombstone entity id"),
+                    )?));
+                if entity_id == EntityId::NIL || !tombstone_ids.insert(entity_id) {
+                    return Err(WorldError::InvalidData(
+                        "zero or duplicate spatial tombstone id",
+                    ));
+                }
+                let entity_revision = r.u64()?;
+                if entity_revision == 0 {
+                    return Err(WorldError::InvalidData("zero spatial tombstone revision"));
+                }
+                tombstones.push(SpatialTombstone {
+                    entity_id,
+                    entity_revision,
+                    source: ChunkPos {
+                        x: r.i32()?,
+                        z: r.i32()?,
+                    },
+                });
+            }
+            (records, tombstones)
+        };
         r.finish()?;
-        Ok(StoredChunk { position, sections })
+        Ok(StoredChunk {
+            position,
+            sections,
+            spatial_records,
+            spatial_tombstones,
+        })
     }
 
     pub fn load_runtime_chunk(
@@ -1959,8 +2206,17 @@ impl WorldStorage {
         position: ChunkPos,
         resolver: &(impl SemanticBlockResolver + ?Sized),
     ) -> Result<Vec<(i32, Chunk)>, WorldError> {
+        self.load_runtime_column(position, resolver)
+            .map(|column| column.sections)
+    }
+
+    pub fn load_runtime_column(
+        &self,
+        position: ChunkPos,
+        resolver: &(impl SemanticBlockResolver + ?Sized),
+    ) -> Result<LoadedColumn, WorldError> {
         let stored = self.load_chunk(position)?;
-        stored
+        let sections = stored
             .sections
             .into_iter()
             .map(|section| {
@@ -1980,7 +2236,12 @@ impl WorldStorage {
                 }
                 Ok((section.y, chunk))
             })
-            .collect()
+            .collect::<Result<Vec<_>, WorldError>>()?;
+        Ok(LoadedColumn {
+            sections,
+            spatial_records: stored.spatial_records,
+            spatial_tombstones: stored.spatial_tombstones,
+        })
     }
 
     /// Load and resolve a stored column, returning `None` only for ordinary absence. Corruption,
@@ -2000,6 +2261,23 @@ impl WorldStorage {
             return Err(WorldError::InvalidData("chunk path is not a regular file"));
         }
         self.load_runtime_chunk(position, resolver).map(Some)
+    }
+
+    pub fn load_runtime_column_if_present(
+        &self,
+        position: ChunkPos,
+        resolver: &dyn SemanticBlockResolver,
+    ) -> Result<Option<LoadedColumn>, WorldError> {
+        let path = self.chunk_path(position);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(WorldError::Io(error)),
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(WorldError::InvalidData("chunk path is not a regular file"));
+        }
+        self.load_runtime_column(position, resolver).map(Some)
     }
 
     pub fn encode_runtime_chunk(
@@ -2026,7 +2304,23 @@ impl WorldStorage {
         Ok(StoredChunk {
             position,
             sections: encoded,
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         })
+    }
+
+    pub fn encode_runtime_column(
+        position: ChunkPos,
+        sections: impl IntoIterator<Item = (i32, Chunk)>,
+        resolver: &(impl SemanticBlockResolver + ?Sized),
+        spatial_records: Vec<SpatialRecord>,
+        spatial_tombstones: Vec<SpatialTombstone>,
+    ) -> Result<StoredChunk, WorldError> {
+        let mut chunk = Self::encode_runtime_chunk(position, sections, resolver)?;
+        chunk.spatial_records = spatial_records;
+        chunk.spatial_tombstones = spatial_tombstones;
+        validate_spatial_records(&chunk.spatial_records, &chunk.spatial_tombstones)?;
+        Ok(chunk)
     }
 
     pub fn chunk_exists(&self, position: ChunkPos) -> bool {
@@ -2246,6 +2540,183 @@ impl Drop for PlayerSaveScheduler {
     }
 }
 
+#[derive(Debug)]
+pub struct WorldStateSaveCompletion {
+    pub revision: u64,
+    pub result: Result<(), WorldError>,
+    pub elapsed_ms: f64,
+    pub io: WorldStateCheckpointIoMetrics,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorldStateSaveMetrics {
+    pub requests: u64,
+    pub coalesced: u64,
+    pub successes: u64,
+    pub failures: u64,
+    pub pending: usize,
+    pub in_flight: usize,
+}
+
+struct WorldStateSaveJob {
+    storage: WorldStorage,
+    record: WorldStateRecord,
+}
+
+#[derive(Default)]
+struct WorldStateSaveQueue {
+    pending: Option<WorldStateSaveJob>,
+    stopped: bool,
+}
+
+/// One bounded coalescing worker for the small world-global component record.
+pub struct WorldStateSaveScheduler {
+    queue: Arc<(Mutex<WorldStateSaveQueue>, Condvar)>,
+    results: Option<Receiver<WorldStateSaveCompletion>>,
+    thread: Option<JoinHandle<()>>,
+    requests: AtomicU64,
+    coalesced: AtomicU64,
+    successes: AtomicU64,
+    failures: AtomicU64,
+    in_flight: Arc<AtomicUsize>,
+}
+
+impl WorldStateSaveScheduler {
+    #[must_use]
+    pub fn new() -> Self {
+        let queue = Arc::new((Mutex::new(WorldStateSaveQueue::default()), Condvar::new()));
+        let worker_queue = Arc::clone(&queue);
+        let worker_in_flight = Arc::new(AtomicUsize::new(0));
+        let worker_in_flight_count = Arc::clone(&worker_in_flight);
+        let (result_sender, results) = mpsc::sync_channel(2);
+        let worker = thread::Builder::new()
+            .name("rustcraft-world-state-save".into())
+            .spawn(move || {
+                loop {
+                    let job = {
+                        let (lock, wake) = &*worker_queue;
+                        let mut state = lock.lock().expect("world-state save queue poisoned");
+                        while state.pending.is_none() && !state.stopped {
+                            state = wake.wait(state).expect("world-state save queue poisoned");
+                        }
+                        if state.stopped && state.pending.is_none() {
+                            break;
+                        }
+                        let job = state.pending.take().expect("pending world-state job");
+                        worker_in_flight_count.fetch_add(1, Ordering::Relaxed);
+                        job
+                    };
+                    let started = std::time::Instant::now();
+                    let revision = job.record.revision;
+                    let result = job.storage.store_world_state_measured(&job.record);
+                    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    worker_in_flight_count.fetch_sub(1, Ordering::Relaxed);
+                    let io = result.as_ref().copied().unwrap_or_default();
+                    if result_sender
+                        .send(WorldStateSaveCompletion {
+                            revision,
+                            result: result.map(|_| ()),
+                            elapsed_ms,
+                            io,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("world-state save worker creation failed");
+        Self {
+            queue,
+            results: Some(results),
+            thread: Some(worker),
+            requests: AtomicU64::new(0),
+            coalesced: AtomicU64::new(0),
+            successes: AtomicU64::new(0),
+            failures: AtomicU64::new(0),
+            in_flight: worker_in_flight,
+        }
+    }
+
+    pub fn submit(
+        &self,
+        storage: WorldStorage,
+        record: WorldStateRecord,
+    ) -> Result<(), WorldError> {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        let (lock, wake) = &*self.queue;
+        let mut state = lock.lock().expect("world-state save queue poisoned");
+        if state.stopped {
+            return Err(WorldError::InvalidData("world-state save worker stopped"));
+        }
+        if let Some(existing) = state.pending.as_ref() {
+            if existing.record.revision > record.revision {
+                self.coalesced.fetch_add(1, Ordering::Relaxed);
+                return Ok(());
+            }
+            self.coalesced.fetch_add(1, Ordering::Relaxed);
+        }
+        state.pending = Some(WorldStateSaveJob { storage, record });
+        wake.notify_one();
+        Ok(())
+    }
+
+    pub fn take_completed(&self) -> Vec<WorldStateSaveCompletion> {
+        let mut completed = Vec::new();
+        while let Ok(completion) = self
+            .results
+            .as_ref()
+            .expect("live world-state save result receiver")
+            .try_recv()
+        {
+            if completion.result.is_ok() {
+                self.successes.fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.failures.fetch_add(1, Ordering::Relaxed);
+            }
+            completed.push(completion);
+        }
+        completed
+    }
+
+    pub fn metrics(&self) -> WorldStateSaveMetrics {
+        let pending = self
+            .queue
+            .0
+            .lock()
+            .map(|state| usize::from(state.pending.is_some()))
+            .unwrap_or_default();
+        WorldStateSaveMetrics {
+            requests: self.requests.load(Ordering::Relaxed),
+            coalesced: self.coalesced.load(Ordering::Relaxed),
+            successes: self.successes.load(Ordering::Relaxed),
+            failures: self.failures.load(Ordering::Relaxed),
+            pending,
+            in_flight: self.in_flight.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Default for WorldStateSaveScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for WorldStateSaveScheduler {
+    fn drop(&mut self) {
+        self.results.take();
+        let (lock, wake) = &*self.queue;
+        if let Ok(mut state) = lock.lock() {
+            state.stopped = true;
+            wake.notify_all();
+        }
+        if let Some(worker) = self.thread.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 impl WorldStore for WorldStorage {
     fn load_metadata(&self) -> Result<WorldMetadata, WorldError> {
         WorldStorage::load_metadata(self)
@@ -2264,6 +2735,12 @@ impl WorldStore for WorldStorage {
     }
     fn store_player(&self, record: &PlayerRecord) -> Result<(), WorldError> {
         WorldStorage::store_player(self, record)
+    }
+    fn load_world_state(&self) -> Result<Option<WorldStateRecord>, WorldError> {
+        WorldStorage::load_world_state(self)
+    }
+    fn store_world_state(&self, record: &WorldStateRecord) -> Result<(), WorldError> {
+        WorldStorage::store_world_state(self, record)
     }
     fn chunk_exists(&self, position: ChunkPos) -> bool {
         WorldStorage::chunk_exists(self, position)
@@ -2291,10 +2768,54 @@ fn valid_semantic_key(key: &str) -> bool {
         })
 }
 
+fn validate_spatial_records(
+    records: &[SpatialRecord],
+    tombstones: &[SpatialTombstone],
+) -> Result<(), WorldError> {
+    if records.len() > MAX_SPATIAL_RECORDS {
+        return Err(WorldError::InvalidData("spatial entity count limit"));
+    }
+    if tombstones.len() > MAX_SPATIAL_TOMBSTONES {
+        return Err(WorldError::InvalidData("spatial tombstone count limit"));
+    }
+    let mut ids = HashSet::with_capacity(records.len());
+    for record in records {
+        if record.entity_id == EntityId::NIL || !ids.insert(record.entity_id) {
+            return Err(WorldError::InvalidData(
+                "zero or duplicate spatial entity id",
+            ));
+        }
+        if record.entity_revision == 0 {
+            return Err(WorldError::InvalidData("zero spatial entity revision"));
+        }
+        if record.entity_type.len() > MAX_SPATIAL_TYPE_ID_BYTES
+            || !valid_semantic_key(&record.entity_type)
+        {
+            return Err(WorldError::InvalidData("invalid spatial entity type"));
+        }
+        if record.payload.len() > MAX_SPATIAL_PAYLOAD_BYTES {
+            return Err(WorldError::InvalidData("spatial entity payload limit"));
+        }
+    }
+    let mut tombstone_ids = HashSet::with_capacity(tombstones.len());
+    for tombstone in tombstones {
+        if tombstone.entity_id == EntityId::NIL || !tombstone_ids.insert(tombstone.entity_id) {
+            return Err(WorldError::InvalidData(
+                "zero or duplicate spatial tombstone id",
+            ));
+        }
+        if tombstone.entity_revision == 0 {
+            return Err(WorldError::InvalidData("zero spatial tombstone revision"));
+        }
+    }
+    Ok(())
+}
+
 fn encode_chunk_file(chunk: &StoredChunk) -> Result<(Vec<u8>, ChunkEncodingMetrics), WorldError> {
     if chunk.sections.len() > MAX_SECTIONS {
         return Err(WorldError::InvalidData("too many sections"));
     }
+    validate_spatial_records(&chunk.spatial_records, &chunk.spatial_tombstones)?;
     let mut raw = Vec::new();
     let mut sorted = chunk.sections.iter().collect::<Vec<_>>();
     sorted.sort_by_key(|section| section.y);
@@ -2338,6 +2859,33 @@ fn encode_chunk_file(chunk: &StoredChunk) -> Result<(Vec<u8>, ChunkEncodingMetri
         if raw.len().saturating_add(64) > MAX_CHUNK_BYTES {
             return Err(WorldError::InvalidData("chunk payload limit"));
         }
+    }
+    let mut records = chunk.spatial_records.iter().collect::<Vec<_>>();
+    records.sort_by_key(|record| record.entity_id);
+    put_u16(&mut raw, records.len() as u16);
+    for record in records {
+        raw.extend_from_slice(&record.entity_id.0.to_le_bytes());
+        put_u64(&mut raw, record.entity_revision);
+        put_string(&mut raw, &record.entity_type)?;
+        put_u32(&mut raw, record.schema_version);
+        put_u32(
+            &mut raw,
+            u32::try_from(record.payload.len())
+                .map_err(|_| WorldError::InvalidData("spatial entity payload limit"))?,
+        );
+        raw.extend_from_slice(&record.payload);
+    }
+    let mut tombstones = chunk.spatial_tombstones.clone();
+    tombstones.sort_by_key(|record| record.entity_id);
+    put_u16(&mut raw, tombstones.len() as u16);
+    for tombstone in tombstones {
+        raw.extend_from_slice(&tombstone.entity_id.0.to_le_bytes());
+        put_u64(&mut raw, tombstone.entity_revision);
+        put_i32(&mut raw, tombstone.source.x);
+        put_i32(&mut raw, tombstone.source.z);
+    }
+    if raw.len().saturating_add(64) > MAX_CHUNK_BYTES {
+        return Err(WorldError::InvalidData("chunk payload limit"));
     }
     let compression_started = std::time::Instant::now();
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
@@ -2576,6 +3124,84 @@ fn read_player_legacy(path: &Path, requested_id: &str) -> Result<Option<PlayerRe
     }))
 }
 
+fn read_world_state_checkpoint(path: &Path) -> Result<Option<WorldStateRecord>, WorldError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(WorldError::Io(error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(WorldError::InvalidData(
+            "invalid world-state checkpoint path",
+        ));
+    }
+    let data = read_limited(path, MAX_WORLD_STATE_BYTES)?;
+    let body = verify_file(&data, WORLD_STATE_MAGIC)?;
+    let mut r = Reader::new(body);
+    let version = r.u32()?;
+    if version != WORLD_STATE_RECORD_VERSION {
+        return Err(WorldError::UnsupportedVersion(version));
+    }
+    let revision = r.u64()?;
+    if revision == 0 {
+        return Err(WorldError::InvalidData("zero world-state revision"));
+    }
+    let count = r.u16()? as usize;
+    if count > MAX_WORLD_COMPONENTS {
+        return Err(WorldError::InvalidData("world component count limit"));
+    }
+    let mut components = Vec::with_capacity(count);
+    for _ in 0..count {
+        let id = r.string()?;
+        let schema_version = r.u32()?;
+        let length = r.u32()? as usize;
+        if length > MAX_WORLD_COMPONENT_BYTES {
+            return Err(WorldError::InvalidData("world component payload limit"));
+        }
+        components.push(WorldStateComponent {
+            id,
+            schema_version,
+            payload: r.take(length)?.to_vec(),
+        });
+    }
+    r.finish()?;
+    validate_world_components(&components)?;
+    Ok(Some(WorldStateRecord {
+        revision,
+        components,
+        recovered_from_checkpoint: false,
+    }))
+}
+
+fn validate_world_components(components: &[WorldStateComponent]) -> Result<(), WorldError> {
+    if components.len() > MAX_WORLD_COMPONENTS {
+        return Err(WorldError::InvalidData("world component count limit"));
+    }
+    let mut previous: Option<&str> = None;
+    let mut total = 0usize;
+    for component in components {
+        if component.id.len() > MAX_WORLD_COMPONENT_ID_BYTES || !valid_semantic_key(&component.id) {
+            return Err(WorldError::InvalidData("invalid world component id"));
+        }
+        if previous.is_some_and(|prior| prior >= component.id.as_str()) {
+            return Err(WorldError::InvalidData(
+                "world components must be unique and sorted",
+            ));
+        }
+        if component.payload.len() > MAX_WORLD_COMPONENT_BYTES {
+            return Err(WorldError::InvalidData("world component payload limit"));
+        }
+        total = total
+            .checked_add(component.payload.len())
+            .ok_or(WorldError::InvalidData("world payload length overflow"))?;
+        if total > MAX_WORLD_STATE_BYTES {
+            return Err(WorldError::InvalidData("world payload limit"));
+        }
+        previous = Some(&component.id);
+    }
+    Ok(())
+}
+
 fn validate_player_components(components: &[PlayerComponent]) -> Result<(), WorldError> {
     if components.len() > MAX_PLAYER_COMPONENTS {
         return Err(WorldError::InvalidData("player component count limit"));
@@ -2797,6 +3423,8 @@ mod tests {
             .store_chunk(&StoredChunk {
                 position: loaded,
                 sections: vec![StoredSection { y: 0, states }],
+                spatial_records: Vec::new(),
+                spatial_tombstones: Vec::new(),
             })
             .unwrap();
         fs::write(storage.chunk_path(corrupt), b"truncated").unwrap();
@@ -2822,7 +3450,7 @@ mod tests {
                 && entry.result.as_ref().is_ok_and(|loaded| {
                     loaded
                         .as_ref()
-                        .is_some_and(|sections| sections[0].1.get((0, 0, 0)) == BlockId(2))
+                        .is_some_and(|column| column.sections[0].1.get((0, 0, 0)) == BlockId(2))
                 })
         }));
         assert!(completed.iter().any(|entry| {
@@ -2957,6 +3585,8 @@ mod tests {
                 y: 0,
                 states: vec![("sample:stone".into(), variant); CHUNK_VOLUME],
             }],
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         };
         storage.store_chunk(&chunk(1)).unwrap();
         storage.store_chunk(&chunk(2)).unwrap();
@@ -3115,6 +3745,8 @@ mod tests {
                 y: 0,
                 states: vec![("sample:air".into(), 0); CHUNK_VOLUME],
             }],
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         };
         storage.store_chunk(&chunk).unwrap();
         assert!(storage.load_chunk(ChunkPos { x: 1, z: 0 }).is_err());
@@ -3132,6 +3764,8 @@ mod tests {
                 y: 0,
                 states: vec![("missing:block".into(), 0); CHUNK_VOLUME],
             }],
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         };
         storage.store_chunk(&stored).unwrap();
         assert!(
@@ -3166,6 +3800,8 @@ mod tests {
                 y: 0,
                 states: vec![("minecraft_b173:water".into(), 0); CHUNK_VOLUME],
             }],
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         };
         storage.store_chunk(&stored).unwrap();
         let water_resolver = Resolver(
@@ -3262,6 +3898,8 @@ mod tests {
                 y: 0,
                 states: vec![("sample:air".into(), 0); CHUNK_VOLUME],
             }],
+            spatial_records: Vec::new(),
+            spatial_tombstones: Vec::new(),
         };
         let token = SaveToken {
             position,
@@ -3280,6 +3918,273 @@ mod tests {
         assert!(complete[0].result.is_ok());
         drop(scheduler);
         assert!(storage.load_chunk(position).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn spatial_envelopes_roundtrip_and_legacy_v2_means_zero_entities() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "spatial").unwrap();
+        let position = ChunkPos { x: -12, z: 19 };
+        let entity_id = EntityId::from_parts(7, 11);
+        let stored = StoredChunk {
+            position,
+            sections: Vec::new(),
+            spatial_records: vec![SpatialRecord {
+                entity_id,
+                entity_revision: 4,
+                entity_type: "sample:entity/item".into(),
+                schema_version: 2,
+                payload: vec![1, 2, 3, 4],
+            }],
+            spatial_tombstones: vec![SpatialTombstone {
+                entity_id: EntityId::from_parts(7, 12),
+                entity_revision: 5,
+                source: ChunkPos { x: -13, z: 19 },
+            }],
+        };
+        storage.store_chunk(&stored).unwrap();
+        assert_eq!(storage.load_chunk(position).unwrap(), stored);
+
+        let legacy_position = ChunkPos { x: -2, z: -3 };
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(CHUNK_MAGIC);
+        put_u32(&mut legacy, LEGACY_CHUNK_FORMAT_VERSION);
+        put_i32(&mut legacy, legacy_position.x);
+        put_i32(&mut legacy, legacy_position.z);
+        put_u16(&mut legacy, 0);
+        legacy.push(0); // uncompressed
+        put_u32(&mut legacy, 0); // zero-byte raw payload
+        finish_checksum(&mut legacy);
+        fs::write(storage.chunk_path(legacy_position), legacy).unwrap();
+        let migrated = storage.load_chunk(legacy_position).unwrap();
+        assert!(migrated.sections.is_empty());
+        assert!(migrated.spatial_records.is_empty());
+        assert!(migrated.spatial_tombstones.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pre_m4_003_world_keeps_voxel_and_player_then_upgrades_naturally() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "legacy_m4").unwrap();
+        let position = ChunkPos { x: -4, z: 6 };
+        let mut raw = Vec::new();
+        put_i32(&mut raw, 0);
+        put_u16(&mut raw, 1);
+        put_string(&mut raw, "sample:stone").unwrap();
+        put_u16(&mut raw, 77);
+        for _ in 0..CHUNK_VOLUME {
+            put_u16(&mut raw, 0);
+        }
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(CHUNK_MAGIC);
+        put_u32(&mut legacy, LEGACY_CHUNK_FORMAT_VERSION);
+        put_i32(&mut legacy, position.x);
+        put_i32(&mut legacy, position.z);
+        put_u16(&mut legacy, 1);
+        legacy.push(0);
+        put_u32(&mut legacy, raw.len() as u32);
+        legacy.extend_from_slice(&raw);
+        finish_checksum(&mut legacy);
+        fs::write(storage.chunk_path(position), legacy).unwrap();
+        let player = PlayerRecord {
+            player_id: "local-player".into(),
+            revision: 4,
+            components: vec![PlayerComponent {
+                id: "sample:player/state".into(),
+                schema_version: 1,
+                payload: vec![4, 2],
+            }],
+            recovered_from_checkpoint: false,
+        };
+        storage.store_player(&player).unwrap();
+
+        let loaded = storage.load_chunk(position).unwrap();
+        assert_eq!(loaded.sections[0].states[0], ("sample:stone".into(), 77));
+        assert!(loaded.spatial_records.is_empty());
+        assert!(loaded.spatial_tombstones.is_empty());
+        assert_eq!(
+            storage.load_player("local-player").unwrap().unwrap(),
+            player
+        );
+        assert!(storage.load_world_state().unwrap().is_none());
+
+        storage.store_chunk(&loaded).unwrap();
+        let upgraded = fs::read(storage.chunk_path(position)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(upgraded[8..12].try_into().unwrap()),
+            CHUNK_FORMAT_VERSION
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_state_checkpoints_recover_previous_and_reject_both_corrupt() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "global").unwrap();
+        let record = |revision, value| WorldStateRecord {
+            revision,
+            components: vec![WorldStateComponent {
+                id: "sample:world/clock".into(),
+                schema_version: 1,
+                payload: vec![value],
+            }],
+            recovered_from_checkpoint: false,
+        };
+        storage.store_world_state(&record(1, 1)).unwrap();
+        storage.store_world_state(&record(2, 2)).unwrap();
+        assert_eq!(storage.load_world_state().unwrap().unwrap().revision, 2);
+
+        fs::write(storage.world_state_path(0), b"corrupt-newest").unwrap();
+        let recovered = storage.load_world_state().unwrap().unwrap();
+        assert_eq!(recovered.revision, 1);
+        assert!(recovered.recovered_from_checkpoint);
+
+        storage.store_world_state(&record(2, 2)).unwrap();
+        let mut bad_checksum = fs::read(storage.world_state_path(0)).unwrap();
+        bad_checksum[20] ^= 0x40;
+        fs::write(storage.world_state_path(0), bad_checksum).unwrap();
+        let recovered_checksum = storage.load_world_state().unwrap().unwrap();
+        assert_eq!(recovered_checksum.revision, 1);
+        assert!(recovered_checksum.recovered_from_checkpoint);
+
+        fs::write(storage.world_state_path(1), b"corrupt-previous").unwrap();
+        assert!(matches!(
+            storage.load_world_state(),
+            Err(WorldError::InvalidData(_))
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_state_worker_coalesces_to_newest_revision() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "global_worker").unwrap();
+        let record = |revision| WorldStateRecord {
+            revision,
+            components: vec![WorldStateComponent {
+                id: "sample:world/clock".into(),
+                schema_version: 1,
+                payload: revision.to_le_bytes().to_vec(),
+            }],
+            recovered_from_checkpoint: false,
+        };
+        let scheduler = WorldStateSaveScheduler::new();
+        scheduler.submit(storage.clone(), record(1)).unwrap();
+        scheduler.submit(storage.clone(), record(2)).unwrap();
+        scheduler.submit(storage.clone(), record(3)).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while storage
+            .load_world_state()
+            .unwrap()
+            .is_none_or(|saved| saved.revision < 3)
+        {
+            let _ = scheduler.take_completed();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "world-state worker did not persist newest revision"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(storage.load_world_state().unwrap().unwrap(), record(3));
+        assert!(scheduler.metrics().coalesced >= 1);
+        drop(scheduler);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_state_worker_reports_failure_and_accepts_retry() {
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "global_retry").unwrap();
+        let component = WorldStateComponent {
+            id: "sample:world/clock".into(),
+            schema_version: 1,
+            payload: 7u64.to_le_bytes().to_vec(),
+        };
+        let invalid = WorldStateRecord {
+            revision: 1,
+            components: vec![component.clone(), component.clone()],
+            recovered_from_checkpoint: false,
+        };
+        let scheduler = WorldStateSaveScheduler::new();
+        scheduler.submit(storage.clone(), invalid).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let completed = scheduler.take_completed();
+            if let Some(completion) = completed.first() {
+                assert!(completion.result.is_err());
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(storage.load_world_state().unwrap().is_none());
+        let retry = WorldStateRecord {
+            revision: 2,
+            components: vec![component],
+            recovered_from_checkpoint: false,
+        };
+        scheduler.submit(storage.clone(), retry.clone()).unwrap();
+        while storage.load_world_state().unwrap().is_none() {
+            let _ = scheduler.take_completed();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(storage.load_world_state().unwrap().unwrap(), retry);
+        drop(scheduler);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn spatial_and_world_component_limits_fail_without_allocation_or_panic() {
+        let duplicate = EntityId::from_parts(1, 1);
+        let invalid = StoredChunk {
+            position: ChunkPos { x: 0, z: 0 },
+            sections: Vec::new(),
+            spatial_records: vec![
+                SpatialRecord {
+                    entity_id: duplicate,
+                    entity_revision: 1,
+                    entity_type: "sample:entity/item".into(),
+                    schema_version: 1,
+                    payload: Vec::new(),
+                },
+                SpatialRecord {
+                    entity_id: duplicate,
+                    entity_revision: 2,
+                    entity_type: "sample:entity/item".into(),
+                    schema_version: 1,
+                    payload: Vec::new(),
+                },
+            ],
+            spatial_tombstones: Vec::new(),
+        };
+        assert!(matches!(
+            encode_chunk_file(&invalid),
+            Err(WorldError::InvalidData(
+                "zero or duplicate spatial entity id"
+            ))
+        ));
+        let duplicate_components = WorldStateRecord {
+            revision: 1,
+            components: vec![
+                WorldStateComponent {
+                    id: "sample:world/x".into(),
+                    schema_version: 1,
+                    payload: Vec::new(),
+                },
+                WorldStateComponent {
+                    id: "sample:world/x".into(),
+                    schema_version: 1,
+                    payload: Vec::new(),
+                },
+            ],
+            recovered_from_checkpoint: false,
+        };
+        let root = temp_root();
+        let storage = WorldStorage::open(&root, "invalid_global").unwrap();
+        assert!(storage.store_world_state(&duplicate_components).is_err());
         let _ = fs::remove_dir_all(root);
     }
 }

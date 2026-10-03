@@ -1,8 +1,8 @@
 //! Minecraft-owned durable player schema. Runtime item handles never enter the payload.
-use rustcraft_engine_core::Vec3;
+use rustcraft_engine_core::{ChunkPos, EntityId, Vec3};
 use rustcraft_mod_api::BlockRegistry;
 use rustcraft_runtime::{
-    Simulation,
+    PickupReceipt, Simulation,
     inventory::{HOTBAR_SLOTS, Inventory, ItemStack},
     survival::GameMode,
 };
@@ -13,9 +13,12 @@ pub const PLAYER_SCHEMA_VERSION: u32 = 1;
 pub const TRANSFORM_COMPONENT: &str = "minecraft_b173:player/transform";
 pub const INVENTORY_COMPONENT: &str = "minecraft_b173:player/inventory";
 pub const GAME_MODE_COMPONENT: &str = "minecraft_b173:player/game_mode";
+pub const PICKUP_RECEIPTS_COMPONENT: &str = "minecraft_b173:player/pickup_receipts";
+pub const PICKUP_RECEIPTS_SCHEMA_VERSION: u32 = 1;
 pub const LEGACY_COMPONENT: &str = "rustcraft:legacy-player-payload";
 const SLOT_COUNT: usize = 36;
 const MAX_KEY_BYTES: usize = 256;
+const MAX_PICKUP_RECEIPTS: usize = 512;
 
 #[derive(Debug)]
 pub enum PlayerCodecError {
@@ -59,6 +62,7 @@ pub struct RestoredPlayer {
     pub inventory: Inventory,
     pub cursor: Option<ItemStack>,
     pub crafting: [Option<ItemStack>; 4],
+    pub pickup_receipts: Vec<PickupReceipt>,
 }
 
 pub fn encode(sim: &Simulation) -> Result<PlayerRecord, PlayerCodecError> {
@@ -87,6 +91,11 @@ pub fn encode_revision(
             schema_version: 1,
             payload: payload[21..].to_vec(),
         },
+        PlayerComponent {
+            id: PICKUP_RECEIPTS_COMPONENT.into(),
+            schema_version: PICKUP_RECEIPTS_SCHEMA_VERSION,
+            payload: encode_pickup_receipts(sim)?,
+        },
     ];
     components.extend(
         preserved_unknown
@@ -97,6 +106,7 @@ pub fn encode_revision(
                     TRANSFORM_COMPONENT
                         | INVENTORY_COMPONENT
                         | GAME_MODE_COMPONENT
+                        | PICKUP_RECEIPTS_COMPONENT
                         | LEGACY_COMPONENT
                 )
             })
@@ -176,7 +186,7 @@ pub fn decode_with_unknown(
                 "unsupported legacy player schema",
             ));
         }
-        let state = decode_payload(&legacy.payload, &record.player_id, registry)?;
+        let state = decode_payload(&legacy.payload, &record.player_id, registry, Vec::new())?;
         return Ok((state, Vec::new()));
     }
     let get = |id: &str| {
@@ -207,14 +217,24 @@ pub fn decode_with_unknown(
     payload.extend_from_slice(&transform.payload);
     payload.extend_from_slice(&mode.payload);
     payload.extend_from_slice(&inventory.payload);
-    let state = decode_payload(&payload, &record.player_id, registry)?;
+    let receipts = record
+        .components
+        .iter()
+        .find(|component| component.id == PICKUP_RECEIPTS_COMPONENT)
+        .map(decode_pickup_receipts)
+        .transpose()?
+        .unwrap_or_default();
+    let state = decode_payload(&payload, &record.player_id, registry, receipts)?;
     let unknown = record
         .components
         .iter()
         .filter(|component| {
             !matches!(
                 component.id.as_str(),
-                TRANSFORM_COMPONENT | INVENTORY_COMPONENT | GAME_MODE_COMPONENT
+                TRANSFORM_COMPONENT
+                    | INVENTORY_COMPONENT
+                    | GAME_MODE_COMPONENT
+                    | PICKUP_RECEIPTS_COMPONENT
             )
         })
         .cloned()
@@ -226,6 +246,7 @@ fn decode_payload(
     payload: &[u8],
     player_id: &str,
     registry: &BlockRegistry,
+    pickup_receipts: Vec<PickupReceipt>,
 ) -> Result<RestoredPlayer, PlayerCodecError> {
     if payload.len() > 32 * 1024 {
         return Err(PlayerCodecError::Invalid("payload limit"));
@@ -287,6 +308,7 @@ fn decode_payload(
         inventory,
         cursor,
         crafting,
+        pickup_receipts,
     })
 }
 
@@ -305,6 +327,61 @@ pub fn apply(sim: &mut Simulation, state: RestoredPlayer) {
     sim.inventory = state.inventory;
     sim.inventory_cursor = state.cursor;
     sim.crafting_grid = state.crafting;
+    sim.restore_pickup_receipts(state.pickup_receipts);
+}
+
+fn encode_pickup_receipts(sim: &Simulation) -> Result<Vec<u8>, PlayerCodecError> {
+    let receipts = sim.pickup_receipts();
+    if receipts.len() > MAX_PICKUP_RECEIPTS {
+        return Err(PlayerCodecError::Invalid("pickup receipt count limit"));
+    }
+    let mut out = Vec::with_capacity(2 + receipts.len() * 24);
+    out.extend_from_slice(&(receipts.len() as u16).to_le_bytes());
+    for receipt in receipts {
+        if receipt.entity_id == EntityId::NIL {
+            return Err(PlayerCodecError::Invalid("zero pickup receipt entity id"));
+        }
+        out.extend_from_slice(&receipt.entity_id.0.to_le_bytes());
+        out.extend_from_slice(&receipt.source.x.to_le_bytes());
+        out.extend_from_slice(&receipt.source.z.to_le_bytes());
+    }
+    Ok(out)
+}
+
+fn decode_pickup_receipts(
+    component: &PlayerComponent,
+) -> Result<Vec<PickupReceipt>, PlayerCodecError> {
+    if component.schema_version != PICKUP_RECEIPTS_SCHEMA_VERSION {
+        return Err(PlayerCodecError::Invalid(
+            "unsupported pickup receipt component schema",
+        ));
+    }
+    let mut reader = Read::new(&component.payload);
+    let count = usize::from(reader.u16()?);
+    if count > MAX_PICKUP_RECEIPTS {
+        return Err(PlayerCodecError::Invalid("pickup receipt count limit"));
+    }
+    let mut receipts = Vec::with_capacity(count);
+    for _ in 0..count {
+        let entity_id = EntityId(u128::from_le_bytes(reader.take(16)?.try_into().unwrap()));
+        if entity_id == EntityId::NIL {
+            return Err(PlayerCodecError::Invalid("zero pickup receipt entity id"));
+        }
+        let source = ChunkPos {
+            x: i32::from_le_bytes(reader.take(4)?.try_into().unwrap()),
+            z: i32::from_le_bytes(reader.take(4)?.try_into().unwrap()),
+        };
+        receipts.push(PickupReceipt { entity_id, source });
+    }
+    reader.finish()?;
+    receipts.sort_by_key(|receipt| receipt.entity_id);
+    if receipts
+        .windows(2)
+        .any(|pair| pair[0].entity_id == pair[1].entity_id)
+    {
+        return Err(PlayerCodecError::Invalid("duplicate pickup receipt"));
+    }
+    Ok(receipts)
 }
 
 fn encode_stack(
@@ -657,5 +734,85 @@ mod tests {
             .unwrap()
             .payload[2] = 9;
         assert!(decode(&bad, &registry).is_err());
+    }
+
+    #[test]
+    fn pickup_receipt_recovery_is_idempotent_and_prunes_boundedly() {
+        let mut registry = BlockRegistry::default();
+        crate::blocks::BlocksModule.register(&mut registry).unwrap();
+        let mut picked = Simulation::new_with_entity_namespace(
+            rustcraft_engine_core::World::new(crate::blocks::AIR.id),
+            registry.clone(),
+            Vec3::new(0.5, 3.0, 0.5),
+            7,
+        );
+        picked.mode = GameMode::Survival;
+        picked.spawn_item(ItemId(1), 3, Vec3::new(0.5, 3.0, 0.5));
+        picked.items[0].pickup_delay = 0.0;
+        let stale_source = picked.items[0];
+        picked.step(Default::default(), 0.0);
+        assert!(picked.items.is_empty());
+        let receipt_record = encode_revision(&picked, 4, &[]).unwrap();
+
+        // Repeating recovery from inventory+receipt plus the same stale source never inserts the
+        // stack again and never reactivates the entity.
+        for _ in 0..3 {
+            let state = decode(&receipt_record, &registry).unwrap();
+            let mut recovered = Simulation::new_with_entity_namespace(
+                rustcraft_engine_core::World::new(crate::blocks::AIR.id),
+                registry.clone(),
+                Vec3::ZERO,
+                8,
+            );
+            apply(&mut recovered, state);
+            recovered
+                .activate_entity_column(stale_source.column(), vec![stale_source], &[])
+                .unwrap();
+            assert!(recovered.items.is_empty());
+            assert_eq!(recovered.inventory.slot(0).unwrap().count, 3);
+        }
+
+        let ids = picked
+            .pickup_receipts()
+            .into_iter()
+            .map(|receipt| receipt.entity_id)
+            .collect::<Vec<_>>();
+        picked.commit_pickup_receipts(&ids);
+        let snapshot = picked.entity_column_snapshot(stale_source.column());
+        assert!(picked.note_entity_column_persisted(&snapshot));
+        assert!(picked.pickup_receipts().is_empty());
+        let pruned = encode_revision(&picked, 5, &[]).unwrap();
+        assert!(
+            decode(&pruned, &registry)
+                .unwrap()
+                .pickup_receipts
+                .is_empty()
+        );
+
+        let source = ChunkPos { x: -2, z: 3 };
+        picked.restore_pickup_receipts((1..=MAX_PICKUP_RECEIPTS as u64).map(|counter| {
+            PickupReceipt {
+                entity_id: EntityId::from_parts(99, counter),
+                source,
+            }
+        }));
+        assert_eq!(picked.pickup_receipts().len(), MAX_PICKUP_RECEIPTS);
+        let stress_record = encode_revision(&picked, 6, &[]).unwrap();
+        assert_eq!(
+            decode(&stress_record, &registry)
+                .unwrap()
+                .pickup_receipts
+                .len(),
+            MAX_PICKUP_RECEIPTS
+        );
+        let stress_ids = picked
+            .pickup_receipts()
+            .into_iter()
+            .map(|receipt| receipt.entity_id)
+            .collect::<Vec<_>>();
+        picked.commit_pickup_receipts(&stress_ids);
+        let stress_snapshot = picked.entity_column_snapshot(source);
+        assert!(picked.note_entity_column_persisted(&stress_snapshot));
+        assert!(picked.pickup_receipts().is_empty());
     }
 }

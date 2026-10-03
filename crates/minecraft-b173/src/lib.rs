@@ -18,6 +18,7 @@ use std::{collections::BTreeSet, path::Path};
 pub use rustcraft_gameplay_blocks as blocks;
 pub use rustcraft_gameplay_flat_world as flat_world;
 pub mod player_persistence;
+pub mod world_persistence;
 
 /// Static-water camera presentation policy consumed by the client renderer adapter.
 pub const UNDERWATER_FOG_COLOR: [f32; 3] = [0.20, 0.40, 0.62];

@@ -186,7 +186,8 @@ ungenerated deterministic neighbor. The client now assembles its safe startup ne
 background bootstrap worker and requests a bounded moving residency area; interactive travel and
 full M4 acceptance remain outstanding.
 
-The M4 player record now uses an outer v2 envelope and three Minecraft-owned component codecs.
+The M4 player record now uses an outer v2 envelope and four Minecraft-owned component codecs:
+transform, game mode, inventory/crafting and bounded pickup receipts.
 Changed revisions checkpoint every two seconds by default (configurable 1–2 seconds); one
 coalescing worker keeps filesystem sync off the simulation/render tick. Checkpoint diagnostics
 report encoded bytes, write time, sync/replace time and total worker latency; sync/replace measures
@@ -195,16 +196,29 @@ guaranteed physical-media latency. The prior manual 116-byte
 single-payload save measured 0.072 ms encode and 3.307 ms atomic write+sync, with 0.032 ms read and
 0.029 ms decode on reopen. It is a pre-component legacy-format sample, not a comparison against
 the final async/two-slot layout. The empty inventory payload was 65 bytes before component framing;
-the componentized current payload has not yet been release-profile measured. In a debug-profile
+pickup receipts add a two-byte zero-count payload before component framing. The componentized
+current payload has not yet been release-profile measured. In a debug-profile
 scratch-world run, checkpoint writes reported 0.023–0.035 ms write time, 11.8–68.4 ms requested
 file/directory sync time, and 12.7–68.4 ms total worker time for the tiny player record. This local
 filesystem sample demonstrates why sync stays off the simulation/render thread; it is not physical
 media latency or a release benchmark. A hard crash may lose mutations since the last successful
 checkpoint. The isolated scratch client was closed without a graceful-save completion and reopened
-at checkpoint revision 203 with all three components, demonstrating recovery of the latest
+at checkpoint revision 203 with the then-current three components, demonstrating recovery of the latest
 checkpoint; unsaved motion after it remains within the configured 1–2 second window. Underwater
 fog adds only a camera uniform and fragment distance/mix work on world opaque/translucent fragments;
 no GPU timing comparison is available yet, so no frame-time cost is claimed.
+
+M4-003 keeps normal spatial persistence on bounded worker paths. Chunk file open, read,
+decompression, generic record parsing, compression, atomic replacement and sync run in the
+load/save workers; the client tick only snapshots a bounded column, resolves game-owned item
+records from an already-loaded result, and applies lifecycle transitions. Spatial records are
+capped at 1,024 per column. Global-state checkpoint file work similarly runs in one bounded,
+coalescing worker; the tick snapshots the eight-byte clock component and polls revision
+completions. The final release `entity-persistence-bench` measured 16 records at 1,892 raw/284
+stored bytes, 0.024 ms encode, 0.518 ms compressed atomic write+sync and 0.059 ms read/decode. Its
+1,000-record stress case measured 118,004 raw/7,628 stored bytes, 0.456 ms encode, 0.898 ms
+write+sync and 0.653 ms read/decode. These short local-filesystem samples demonstrate bounded cost;
+they are not physical-media latency guarantees.
 
 `just world-stream-bench` is a headless release workload over 91 deterministic interest centers,
 including negative coordinates, multiple travel reversals, save-before-evict, and edits in two
@@ -346,7 +360,8 @@ normal-speed travel acceptance remain necessary.
 The client default is now load radius 4 / retain radius 5; `RUSTCRAFT_STREAM_RADIUS=3..12`
 remains supported. The final autonomous route and margin evidence are recorded below.
 Outside-retain columns are considered for eviction every simulation tick,
-while dirty, saving, boundary-lighting-dependent, and entity-pinned columns remain resident safely.
+while dirty, saving and boundary-lighting-dependent columns remain resident safely. Persistable
+dropped-item columns now freeze, checkpoint and evict rather than pinning residency indefinitely.
 The owner has reported responsive input but slow terrain arrival during manual travel; this batch's
 controlled flight is scripted and does not replace that manual acceptance. Initial bulk lighting
 now runs on a bounded worker; boundary reconciliation is advanced in 32-operation resumable

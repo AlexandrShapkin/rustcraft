@@ -233,7 +233,7 @@ persistence-dirty queue. Save jobs are bounded and shutdown waits for active wri
 remaining dirty columns. Player records use an outer v2 envelope (`player_id`, monotonic revision,
 component count, checksum) and sorted independently versioned semantic components. The generic
 storage layer bounds and preserves opaque component payloads; games own component IDs and codecs.
-Minecraft currently registers transform, inventory, and game-mode v1 components. Inventory
+Minecraft currently registers transform, inventory, game-mode and pickup-receipt v1 components. Inventory
 contains semantic ItemKey/count/durability stacks in all slots, cursor stack and crafting grid;
 new components need only a game codec/registration, not a generic format or path change. Unknown
 components are retained opaquely on load/save; missing required components or unsupported known
@@ -252,9 +252,64 @@ filesystem behavior; it is not a promise against hardware/controller caches that
 Graceful shutdown submits and waits for the latest dirty revision and reports failure rather than
 claiming success. Missing player records in older worlds remain first-time-player migration. The
 startup 3x3 neighborhood is centered on the restored player chunk. Position/orientation, mode,
-inventory/crafting/cursor are durable; velocity and grounded/contact state reset, bounds/camera
-are derived, and mining/input/UI/render state is transient. Lighting is recomputed; dropped
-entities and world time remain unpersisted. Local chunk availability is managed by generic
+inventory/crafting/cursor and bounded pickup receipts are durable; player velocity and
+grounded/contact state reset, bounds/camera are derived, and mining/input/UI/render state is
+transient.
+
+Chunk payload v3 extends the atomic `.rcc` column snapshot with bounded generic spatial records
+and transfer tombstones. Each record has a stable 128-bit `EntityId`, monotonic entity revision,
+semantic entity type, independently versioned game-owned payload, and its containing column as
+spatial owner. Minecraft's first codec is `minecraft_b173:entity/item` v1: semantic ItemKey,
+count, damage, position, velocity, age and pickup delay. Runtime numeric item handles and renderer
+state are absent. Payload v2 loads as valid voxel data with zero entities and rewrites only on a
+natural save. Unknown entity types, unsupported known schemas, missing items and corrupt entity
+data are contextual compatibility errors, never an empty/regenerated chunk.
+
+Spatial entities activate only after terrain publication. Spawn, merge, pickup/despawn, periodic
+motion checkpoints and boundary crossing dirty their persistence domains. Eviction freezes the
+entity column, captures its latest voxel+entity generation, waits for that exact save, then removes
+simulation and terrain residency; dropped items therefore no longer pin terrain. A cross-column
+move saves the destination first with a stable-ID tombstone naming the old source. Revision
+deduplication makes either load order deterministic. Only after destination success is the source
+rewritten, and only after source success is the tombstone pruned. Merge remains column-local so
+survivor and consumed participant share one atomic snapshot.
+
+Pickup crosses player and column files. Inventory plus a bounded `(EntityId, source-column)`
+receipt is one player checkpoint; only its successful revision permits source-column deletion.
+The receipt suppresses a stale source entity after recovery and is pruned after source absence is
+durable. This is ordered idempotent recovery, not multi-file atomicity: failure may roll back to
+the latest complete checkpoint, but repeated reopen/pickup cannot manufacture items and an
+acknowledged item is not silently discarded.
+
+World-global state uses generic `world-state.{0,1}.rcs` v1 checkpoints: monotonic revision, sorted
+semantic/versioned opaque components, strict bounds and BLAKE3 checksum. Minecraft owns
+`minecraft_b173:world/clock` v1, the fixed simulation-tick counter. It pauses while closed and
+resumes exactly; no wall-clock catch-up, weather or day/night system is invented. Unknown global
+components are retained opaquely; unsupported known versions fail compatibly. One background
+coalescing worker retains at most one in-flight and one newest snapshot, checkpoints every two
+seconds by default (`RUSTCRAFT_WORLD_AUTOSAVE_SECONDS`), and flushes the newest revision on graceful
+shutdown. Unexpected failure can lose progress since the latest successful approximately
+two-second checkpoint; graceful shutdown targets zero acknowledged durable-state loss, within the
+platform sync contract above.
+
+The current persistence matrix is:
+
+| State | Policy | Domain / durable identity |
+| --- | --- | --- |
+| Voxel `BlockState` | durable | column; semantic BlockKey + variant |
+| Dropped `ItemEntity` stack/transform/velocity/age/delay | durable | column; EntityId + semantic entity type/ItemKey |
+| Local player transform/mode/inventory/cursor/crafting | durable | player ID + semantic components |
+| Pickup recovery receipts | durable until acknowledged/pruned | player component + EntityId/source column |
+| Simulation world time | durable | global `minecraft_b173:world/clock` component |
+| Seed/generator/profile compatibility | durable metadata | `world.rcw` |
+| Lighting | derived/rebuilt from voxels | none |
+| Item bob/orientation and renderer extraction | derived | none |
+| Player velocity/contact, mining progress, input intent | transient | none |
+| Desired/Safe/Visible/Retained sets, queues and lifecycle tokens | transient | none |
+| RenderWorld, meshes, GPU/atlas state and telemetry | derived/transient | none |
+| Registries, recipes and crafting definitions | active profile definitions | not world snapshots |
+
+Local chunk availability is managed by generic
 `WorldResidency`: an interest center maps to signed chunk coordinates, a configurable load radius
 (default 4, `RUSTCRAFT_STREAM_RADIUS=3..12`) and a retain radius one column larger (default 5).
 Both use Chebyshev distance, so their boundaries are complete predictable squares rather than
@@ -285,7 +340,8 @@ invalidates only sections whose light changed, rather than rebuilding the whole 
 Missing storage is eligible for generation, while corrupt/incompatible data remains an explicit failure.
 Unavailable columns are not treated as walkable air by collision or ray queries. Resident columns
 outside the retain radius become eviction candidates on each fixed tick. Dirty columns stay resident
-until the matching persistence generation is saved; non-persisted dropped-item columns are pinned.
+until the matching persistence generation is saved. Dropped-item columns use the same frozen
+save-before-evict protocol and are not permanently pinned.
 Eviction removes world/light state, render snapshots, and renderer/mesher residency. Initial
 world assembly happens on a cancellable bootstrap worker after window creation, with a minimum safe
 neighborhood centered on restored player position. After startup, input/event dispatch precedes
@@ -316,8 +372,8 @@ The four horizontal area sets are deliberately distinct:
   Safe set, seeded by the complete 3x3 neighborhood around the restored player. Collision,
   movement, targeting, placement and breaking may use only Safe columns. Consequently
   `Safe => Visible`; the only transition occurs atomically inside result application.
-- `Retained(c, Rretain, pins)` is the Chebyshev radius-5 square plus explicit active-light,
-  dirty/save-in-flight and dropped-entity pins. Pins extend storage lifetime only; they never
+- `Retained(c, Rretain, pins)` is the Chebyshev radius-5 square plus explicit active-light and
+  dirty/save-in-flight pins. Persistable dropped items use save-before-evict instead. Pins extend storage lifetime only; they never
   redefine Safe or Visible.
 
 Initial lighting supplies local authoritative voxel/light readiness. Cross-border reconciliation

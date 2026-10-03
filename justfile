@@ -152,6 +152,19 @@ survival-scenario:
 world-roundtrip:
     cargo run -p rustcraft-server -- --world-roundtrip
 
+# M4-003 production-path world clock, spatial entity, eviction/reload and pickup recovery.
+world-state-roundtrip:
+    cargo run --release -p rustcraft-server -- --world-state-roundtrip
+
+entity-persistence-bench:
+    cargo run --release -p rustcraft-server -- --entity-persistence-bench
+
+world-info saves_root world:
+    cargo run -p rustcraft-server -- --world-info {{quote(saves_root)}} {{quote(world)}}
+
+inspect-chunk saves_root world x z:
+    cargo run -p rustcraft-server -- --inspect-chunk {{quote(saves_root)}} {{quote(world)}} {{quote(x)}} {{quote(z)}}
+
 worldgen-bench:
     cargo run --release -p rustcraft-server -- --worldgen-bench
 
