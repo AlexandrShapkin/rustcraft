@@ -423,7 +423,7 @@ it supplies the water fog policy. Generic world shaders apply distance-dependent
 translucent geometry without Minecraft block-ID checks. This presentation state does not affect
 authoritative voxels or persistence.
 
-## DX1 control tooling (active)
+## DX1 control tooling (accepted)
 
 `control` owns game-neutral semantic control; `scripting-rhai` is a leaf adapter.
 `minecraft-b173::control` owns first-party registration and the legacy simulation adapter.

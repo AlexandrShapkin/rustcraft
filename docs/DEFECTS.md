@@ -57,11 +57,11 @@ Severity:
 - P2: visible functional issue — may wait for the next defect batch.
 - P3: polish/cleanup/performance suspicion — backlog until relevant.
 
-## DX1 closure tracking
+## DX1 acceptance (closed)
 
 Background compile/reload, stale publication, real job lifecycle/waits, asynchronous DX capture,
 bounded queries/pages, console automation, cancellation and lifecycle soak are implemented.
-Final local/graphical/overhead validation and public Ubuntu/Windows CI are tracked in DX1_REPORT.md.
+Final local/graphical/overhead validation and public Ubuntu/Windows CI pass; see DX1_REPORT.md.
 No owner save-deletion observation is recorded as a persistence defect. Optional subsequent breadth:
 new command-file discovery, more game commands, richer editor and remote/WASM adapters.
 

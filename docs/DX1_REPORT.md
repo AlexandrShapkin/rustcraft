@@ -1,6 +1,6 @@
 # DX1 developer control and scripting acceptance
 
-Status: **ACTIVE — implementation complete; public Ubuntu/Windows CI pending**.
+Status: **CLOSED — mandatory DX1 acceptance satisfied**.
 Starting public SHA: `c459f218ab389d365554a1fd4a8cf5b7b88a3eb1`.
 M4 remains functionally complete, with representative-hardware evidence conditional under M4-009.
 M5/M6/M7 remain inactive. No product version change, tag or release is part of DX1.
@@ -9,7 +9,7 @@ M5/M6/M7 remain inactive. No product version change, tag or release is part of D
 
 | Requested end-report item | Final implementation / evidence |
 | --- | --- |
-| 1–2. Baseline / status | Accepted c459f218 baseline preserved. Functional implementation complete; local acceptance passes; closure awaits public CI recorded below. |
+| 1–2. Baseline / status | Accepted c459f218 baseline preserved. Functional implementation complete; local and public Ubuntu/Windows acceptance pass; DX1 closed. |
 | 3. Ownership | control owns mechanism; scripting-rhai owns interpreter/worker/editor/scenario composition; minecraft-b173::control owns first-party registration/legacy adapter; client::devtools/server compose; render owns transient lines and GPU mapping. |
 | 4. Control API | Version 1: Context/Source/capabilities, immutable semantic Snapshot, Action/Host, Registry/parser, FixedControl, Scenario/Predicate/Step, EventRing and real Jobs. No Rhai/Minecraft/render dependency in control. |
 | 5. Rhai | Exact 1.26.1, sync, standard AST interpreter, no Grain. Native first-party simulation remains authoritative. |
@@ -40,9 +40,9 @@ M5/M6/M7 remain inactive. No product version change, tag or release is part of D
 | 32. Generic boundary | sample-game dependency guard and game-neutral control/Rhai query pass. Server adds no winit/wgpu/render dependencies; sandbox-test remains Minecraft/runtime independent. |
 | 33. Hygiene | cargo machete clean after removing two unused DX dependencies. cargo audit: no vulnerabilities, three unmaintained warnings (paste/smartstring/ttf-parser); no random version changes. No deny policy exists, so cargo deny not used. |
 | 34–35. Local/M4 gates | Full local matrix passes; old thresholds and canonical v1/v2 hashes unchanged. |
-| 36–39. Commit/main/CI | Pending final validated publication; Ubuntu and Windows required before closure. |
-| 40. Worktree | Use writable accepted metadata/fresh HTTPS publication clone; mounted original .git stale/read-only. Unrelated reference-study skill frontmatter left untouched and excluded. Generated captures/saves/bundles remain ignored. |
-| 41. Mandatory gaps | No feature gap currently known; public Ubuntu/Windows CI pending. |
+| 36–39. Commit/main/CI | Implementation/main SHA `008fbac252e4307af5146cda8e033eee3079bcc3`; [public CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37156846278): Ubuntu green, Windows green. Documentation closeout follows as a separate commit. |
+| 40. Worktree | Writable HTTPS publication checkout clean; validated source matches published DX1 byte-for-byte. Mounted original .git remains stale/read-only; source comparison leaves only the pre-existing unrelated reference-study skill frontmatter, preserved and excluded. Generated outputs remain ignored. |
+| 41. Mandatory gaps | None. Mandatory implementation, local, graphical and both-platform public gates pass. |
 | 42. Optional breadth | More game commands, new command-file discovery, multiline editor/debugger, persistent script-state migration, remote tooling and future WASM adapters. Not required for current bounded tooling contract. |
 | 43. Persistence observation | Owner intentionally deleted saves between manual runs; revision reset is not recorded as defect. Normal M4 persistence regressions retained. |
 | 44–45. Scope | No version/tag/release. M5/M6/M7, frame pacing, residency audit, persistence redesign, texture normalization/config registry/legacy retirement not started. |
@@ -130,4 +130,12 @@ Ubuntu and Windows without modifying workflow permissions. An initial publicatio
 rejected because the OAuth token lacks workflow scope; the same checks were moved into the
 existing test gate and the workflow retained unchanged.
 
-Publication and public Ubuntu/Windows CI: pending. DX1 remains ACTIVE until both are green.
+Implementation committed and non-force pushed to main: `008fbac252e4307af5146cda8e033eee3079bcc3`.
+[Public implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37156846278) passed both jobs:
+Ubuntu job 111301867154 and Windows job 111301866983. Their unchanged workflow runs format,
+workspace/all-targets check, workspace tests (including shipped-script/CLI integration) and
+all-targets/all-features Clippy with warnings denied. Mandatory DX1 acceptance is satisfied.
+The documentation closeout commit records this evidence; it does not change executable behavior.
+Final closeout/main SHA and its CI link are reported with the owner-facing console report because
+a document cannot contain its own commit hash. No mandatory gaps remain. No tag/version/release
+or subsequent milestone was created.

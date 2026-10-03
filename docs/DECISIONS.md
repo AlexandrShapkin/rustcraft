@@ -671,7 +671,7 @@ omissions are preferable to placeholder content that would expand M4 into unrela
 
 ## D-044 — Developer control and Rhai adapters
 
-Status: accepted boundary; DX1 acceptance remains active.
+Status: accepted; DX1 closed by local/headless/graphical and Ubuntu/Windows CI acceptance.
 
 Game-neutral control owns registry/source/capability/snapshot/action/scenario contracts.
 Rhai 1.26.1 is a leaf adapter with per-session scopes, bounded AST execution and no dynamic

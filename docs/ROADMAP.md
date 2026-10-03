@@ -195,11 +195,12 @@ The older multiplayer/content-resolution scope is moved to an inactive later roa
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and
 advanced renderer optimization are out of M4 scope.
 
-## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (active)
+## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (complete)
 
 Generic control and bounded Rhai sessions/scenarios now have shared headless/graphical composition.
-Same-source smoke and automatic graphical failure captures are demonstrated. Full DX1 acceptance
-remains open; see SCRIPTING.md and DEFECTS.md. M4 stays functionally complete with M4-009 conditional.
+Same-source smoke, actual console, cooperative reload/jobs/cancellation, automatic failure capture,
+bounded lifecycle/overhead and the full regression matrix pass. [Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37156846278)
+is green; see DX1_REPORT.md for canonical evidence. M4 remains complete with M4-009 conditional.
 
 ## M5 — multiplayer + server content resolution (future, inactive)
 
