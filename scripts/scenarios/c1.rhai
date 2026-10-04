@@ -1,0 +1,46 @@
+// Real native settings UI and configuration plane; disposable acceptance world.
+pause();
+command("/debug ui open");
+debug_page("settings");
+command("/config select rustcraft:diagnostics/sample_interval_ms");
+command("/debug ui setting_increase");
+assert_config("rustcraft:diagnostics/sample_interval_ms",300);
+assert_debug("native_config.diagnostic_ms",300);
+console_line("assert_eq(config_get(\"rustcraft:diagnostics/sample_interval_ms\"),300);");
+console_open(false);
+command("/debug ui open");
+if has_capability("render.capture") {wait_frames(3);capture("c1_settings");wait_frames(3);}
+command("/debug ui setting_reset");
+assert_config("rustcraft:diagnostics/sample_interval_ms",250);
+console_line("/config set rustcraft:diagnostics/sample_interval_ms 1");
+wait_frames(2);
+assert_config("rustcraft:diagnostics/sample_interval_ms",250);
+console_open(false);
+command("/debug ui open");
+if has_capability("render.capture") {wait_frames(3);capture("c1_invalid");wait_frames(3);}
+command("/config batch rustcraft:streaming/load_radius=6 rustcraft:streaming/retain_radius=7");
+assert_config_field("rustcraft:streaming/load_radius","requested",6);
+assert_config("rustcraft:streaming/load_radius",4);
+step(1);wait_frames(3);
+assert_config("rustcraft:streaming/load_radius",6);
+assert_debug("native_config.load_radius",6);
+assert_debug("native_config.retain_radius",7);
+command("/config batch rustcraft:streaming/load_radius=3 rustcraft:streaming/retain_radius=4");
+step(1);wait_frames(3);
+assert_config("rustcraft:streaming/load_radius",3);
+command("/config reset rustcraft:streaming/load_radius rustcraft:streaming/retain_radius");
+step(1);wait_frames(3);
+command("/config set rustcraft:meshing/upload_sections 2");
+wait_frames(2);
+assert_config("rustcraft:meshing/upload_sections",2);
+assert_debug("native_config.upload_sections",2);
+command("/config reset rustcraft:meshing/upload_sections");wait_frames(2);
+assert_config("rustcraft:meshing/upload_sections",4);
+command("/config set rustcraft:persistence/player_interval_ms 1000");
+step(1);wait_frames(2);
+assert_config("rustcraft:persistence/player_interval_ms",1000);
+assert_debug("native_config.player_save_ms",1000);
+command("/config reset rustcraft:persistence/player_interval_ms");step(1);wait_frames(2);
+command("/debug ui close");
+resume();move_player(1.0,0.0,2);wait_ticks(2);pause();
+assert_debug("selector_open",false);

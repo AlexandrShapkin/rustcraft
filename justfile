@@ -275,3 +275,11 @@ dux-test:
 
 dux-client:
     cargo run --release -p rustcraft-client -- --dux-acceptance
+
+# Shared configuration contracts and headless operational readback.
+config-test:
+    cargo test -p rustcraft-config -p rustcraft-control
+    cargo test -p rustcraft-client configuration
+
+config-smoke:
+    cargo run -p rustcraft-server -- --config-smoke

@@ -221,6 +221,25 @@ impl RhaiRuntime {
                 Ok(semantic_value(value, 0))
             });
         }
+        for (name, describe) in [("config_get", false), ("config_describe", true)] {
+            let query = bridge.clone();
+            let caps = context.clone();
+            engine.register_fn(
+                name,
+                move |key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+                    caps.require("config.read").map_err(err)?;
+                    let b = query.lock().unwrap();
+                    let entry = &b.snapshot.config["settings"][key];
+                    if entry.is_null() {
+                        return Err(err(format!("unknown setting {key}")));
+                    }
+                    Ok(semantic_value(
+                        if describe { entry } else { &entry["effective"] },
+                        0,
+                    ))
+                },
+            );
+        }
         let query = bridge.clone();
         let caps = context.clone();
         engine.register_fn("block_at", move |x:i64,y:i64,z:i64| -> Result<String, Box<EvalAltResult>> {
@@ -246,6 +265,8 @@ impl RhaiRuntime {
             },
         );
         macro_rules! action_fn { ($name:literal, ($($args:tt)*), $action:expr) => {{ let b=bridge.clone(); let caps=context.clone(); engine.register_fn($name, move |$($args)*| -> Result<(),Box<EvalAltResult>> { let action: Action=$action; caps.require(action.capability()).map_err(|e|err(format!("{}: {e}",$name)))?; action.validate().map_err(err)?; let mut b=b.lock().unwrap(); if b.actions.len()+b.steps.len()>=1024 { return Err(err("command/step queue limit")); } if b.scenario { b.steps.push(Step::Action(action)); } else { b.actions.push(action); } Ok(()) }); }}; }
+        action_fn!("config_set", (key:&str,value:&str), Action::ConfigSet(vec![(key.into(),value.into())]));
+        action_fn!("config_reset", (key:&str), Action::ConfigReset(key.into()));
         action_fn!("pause", (), Action::Pause);
         action_fn!("resume", (), Action::Resume);
         action_fn!("step", (n: i64), Action::Step(u32::try_from(n).map_err(|_| err("invalid tick count"))?));
@@ -259,6 +280,9 @@ impl RhaiRuntime {
         step_fn!("wait_ticks", (n:i64), Step::WaitTicks(count(n)?));
         step_fn!("wait_frames", (n:i64), Step::WaitFrames(count(n)?));
         step_fn!("wait_tick", (tick:i64,timeout:i64), Step::Wait { predicate:Predicate::TickAtLeast(count(tick)?),timeout_ms:count(timeout)?.clamp(1,30_000) });
+        step_fn!("assert_config", (key:&str,value:i64), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:"effective".into(),value:serde_json::json!(value)},message:format!("config {key} effective={value}")});
+        step_fn!("assert_config_field", (key:&str,field:&str,value:&str), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:field.into(),value:serde_json::json!(value)},message:format!("config {key} {field}={value}")});
+        step_fn!("assert_config_field", (key:&str,field:&str,value:i64), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:field.into(),value:serde_json::json!(value)},message:format!("config {key} {field}={value}")});
         step_fn!("assert_tick", (tick:i64), Step::Assert { predicate:Predicate::TickAtLeast(count(tick)?),message:format!("tick >= {tick}") });
         step_fn!("assert_block", (x:i64,y:i64,z:i64,key:&str), Step::Assert { predicate:Predicate::BlockEquals { position:coords(x,y,z)?,key:key.into() },message:format!("block ({x},{y},{z}) == {key}") });
         step_fn!("move_player", (forward:f64,strafe:f64,ticks:i64), Step::Intent { forward:forward as f32,strafe:strafe as f32,ticks:count(ticks)? });
@@ -1382,7 +1406,7 @@ impl DevTools {
             self.jobs.cancel_owner(&s.result.run_id);
         }
 
-        if self.last_poll.elapsed() > Duration::from_millis(500) {
+        if self.last_poll.elapsed() > Duration::from_millis(host.script_poll_interval_ms()) {
             self.last_poll = Instant::now();
             if let Err(error) = self.request_reloads() {
                 self.print(&error);
@@ -1573,6 +1597,9 @@ struct JobHost<'a, H> {
     jobs: serde_json::Value,
 }
 impl<H: rustcraft_control::Host> rustcraft_control::Host for JobHost<'_, H> {
+    fn script_poll_interval_ms(&self) -> u64 {
+        self.host.script_poll_interval_ms()
+    }
     fn snapshot(&self) -> Snapshot {
         let mut s = self.host.snapshot();
         if s.scripts.is_null() {

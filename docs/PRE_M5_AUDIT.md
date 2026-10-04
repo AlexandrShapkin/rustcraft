@@ -16,6 +16,14 @@ Local and Ubuntu/Windows public CI acceptance is recorded in
 ChunkPos/section coordinates and stable EntityId; PM5-001 remains an A1 blocker for older contracts.
 No residency lifetime, pacing, storage or legacy-resource cleanup is part of DUX1.
 
+## C1 execution update
+
+C1 starts from accepted DUX1 closeout f8fb177. Typed operational policy, source precedence,
+transactional boundary acknowledgement and shared adapters replace PM5-008's fragmented migrated
+knobs. [CONFIGURATION.md](CONFIGURATION.md) inventories every remaining owner/boundary; closure
+and measurements are in [C1_REPORT.md](C1_REPORT.md). Original audit findings/counts remain historical.
+RSM1 and later stages remain inactive; no lifetime/presentation/storage/API cleanup is folded in.
+
 ## Baseline, method and limits
 
 GitHub commit API and a fresh HTTPS origin clone agreed on main. `git status --short` and

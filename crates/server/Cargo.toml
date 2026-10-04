@@ -24,3 +24,6 @@ rustcraft-world.workspace = true
 
 rustcraft-control.workspace = true
 rustcraft-scripting-rhai.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

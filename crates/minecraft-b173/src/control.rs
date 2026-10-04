@@ -27,6 +27,8 @@ impl MinecraftHost<'_> {
             "held":s.inventory.held().map(|stack| json!({"key":s.registry.item(stack.item).map(|i|i.name),
             "count":stack.count})),
             "paused":state.fixed.paused});
+        snapshot.config = state.config.snapshot();
+        snapshot.config["status"] = json!(state.config_status);
         snapshot
     }
     pub fn collect_diagnostic(&self, domain: rustcraft_control::diagnostics::Domain) -> Value {
@@ -99,13 +101,20 @@ impl MinecraftHost<'_> {
     }
 }
 impl Host for MinecraftHost<'_> {
+    fn script_poll_interval_ms(&self) -> u64 {
+        if self.state.script_poll_ms == 0 {
+            500
+        } else {
+            self.state.script_poll_ms
+        }
+    }
     fn diagnostic_due(&self, domain: rustcraft_control::diagnostics::Domain) -> bool {
         self.state
             .diagnostics
             .samples
             .get(&domain)
             .and_then(|s| s.at)
-            .is_none_or(|t| t.elapsed() >= rustcraft_control::diagnostics::Diagnostics::CADENCE)
+            .is_none_or(|t| t.elapsed() >= self.state.diagnostics.cadence)
     }
     fn prepare_diagnostics(&mut self, domains: &[rustcraft_control::diagnostics::Domain]) {
         use rustcraft_control::diagnostics::Domain;

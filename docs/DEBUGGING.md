@@ -79,3 +79,7 @@ collection deltas. Ignored evidence is under `target/dx-overhead.json`, `target/
 
 Selection/configuration actions require existing `debug.configure`; shared diagnostic reads retain
 their read capabilities. Read-only/FutureChat contexts cannot change the selector or inspection target.
+
+## C1 Settings
+
+F4 -> Runtime settings uses the shared configuration plane. Left/Right selects a key, +/- adjusts supported scalar values, R resets its runtime override. Backquote opens the existing console for exact /config values, coupled batch/reset or explicit persistence. Effective/requested/source/type/range/owner/policy/error remain visible; only privileged tooling mutates. Settings adds no broad-provider demand. See [CONFIGURATION.md](CONFIGURATION.md).

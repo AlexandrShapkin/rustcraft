@@ -1,3 +1,4 @@
+mod configuration;
 mod devtools;
 mod render_tests;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
@@ -1362,6 +1363,7 @@ impl ClientApp {
         let saves_directory = self.saves_directory.clone();
         let survival_start = self.survival_start;
         let cancellation = self.startup_cancel.clone();
+        let config = self.control_state.config.clone();
         self.startup_cancel
             .store(false, std::sync::atomic::Ordering::Release);
         self.startup_result = Some(receiver);
@@ -1370,7 +1372,7 @@ impl ClientApp {
             std::thread::Builder::new()
                 .name("client-world-startup".into())
                 .spawn(move || {
-                    let mut worker = ClientApp::new(None, None);
+                    let mut worker = ClientApp::with_config(None, None, config);
                     worker.world_name = world_name;
                     worker.saves_directory = saves_directory;
                     worker.survival_start = survival_start;
@@ -1474,37 +1476,50 @@ impl ClientApp {
     }
 
     fn new(diagnostic: Option<Stage>, capture: Option<PathBuf>) -> Self {
-        let mesh_workers = std::env::var("RUSTCRAFT_MESH_WORKERS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map_or(1, usize::from)
-                    // Streaming also owns one load and one generation worker, while save and
-                    // player checkpoints have their own mostly-I/O workers. Reserve capacity for
-                    // the event/simulation threads instead of giving meshing N-1 CPUs alone.
-                    .saturating_sub(5)
-                    .clamp(1, 3)
-            })
-            .clamp(1, 32);
-        let initial_light_workers = std::env::var("RUSTCRAFT_LIGHT_WORKERS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(1)
-            .clamp(1, 4);
-        let stream_load_radius = std::env::var("RUSTCRAFT_STREAM_RADIUS")
-            .ok()
-            .and_then(|value| value.parse::<i32>().ok())
-            .unwrap_or(4)
-            .clamp(3, 12);
-        let stream_lookahead_enabled = std::env::var("RUSTCRAFT_STREAM_LOOKAHEAD")
-            .map(|value| !matches!(value.as_str(), "0" | "false" | "off"))
-            .unwrap_or(false);
+        let mut config = rustcraft_control::config::settings::engine(true);
+        if cfg!(test) {
+            config.open();
+        } else {
+            rustcraft_control::config::settings::load(
+                &mut config,
+                &std::env::args().collect::<Vec<_>>(),
+                |key| std::env::var(key).ok(),
+                rustcraft_control::config::user_path(),
+            )
+            .unwrap_or_else(|e| panic!("configuration: {e}"));
+        }
+        Self::with_config(diagnostic, capture, config)
+    }
+    fn with_config(
+        diagnostic: Option<Stage>,
+        capture: Option<PathBuf>,
+        config: rustcraft_control::config::Registry,
+    ) -> Self {
+        use rustcraft_control::config::settings as keys;
+        let mesh_workers = config.effective(keys::MESH_WORKERS).integer() as usize;
+        let initial_light_workers = config.effective(keys::LIGHT_WORKERS).integer() as usize;
+        let stream_load_radius = config.effective(keys::LOAD_RADIUS).integer() as i32;
+        let retain_radius = config.effective(keys::RETAIN_RADIUS).integer() as i32;
+        let stream_lookahead_enabled = config.effective(keys::LOOKAHEAD).boolean();
+        let player_autosave_interval =
+            Duration::from_millis(config.effective(keys::PLAYER_SAVE_MS).integer() as u64);
+        let world_state_autosave_interval =
+            Duration::from_millis(config.effective(keys::WORLD_SAVE_MS).integer() as u64);
+        let mesh_upload_section_budget = config.effective(keys::UPLOAD_SECTIONS).integer() as usize;
+        let mesh_upload_byte_budget = config.effective(keys::UPLOAD_BYTES).integer() as usize;
+        let lighting_work_budget = config.effective(keys::LIGHT_WORK).integer() as usize;
+        let stream_main_budget =
+            Duration::from_secs_f64(config.effective(keys::STREAM_MS).float() / 1000.);
+        let mut control_state = rustcraft_control::ControlState {
+            config,
+            ..Default::default()
+        };
+        control_state.sync_config();
         Self {
             window: None,
             renderer: None,
             devtools: None,
-            control_state: Default::default(),
+            control_state,
             scenario_path: None,
             dx_capture: None,
             dx_exit_pending: false,
@@ -1542,7 +1557,10 @@ impl ClientApp {
             resident_columns_peak: 0,
             resident_sections_peak: 0,
             world_storage: None,
-            residency: rustcraft_world::WorldResidency::new(stream_load_radius, 1),
+            residency: rustcraft_world::WorldResidency::new(
+                stream_load_radius,
+                retain_radius - stream_load_radius,
+            ),
             stream_load_radius,
             stream_lookahead_enabled,
             last_residency_position: None,
@@ -1592,13 +1610,7 @@ impl ClientApp {
             last_debug_trace: Instant::now(),
             last_snapshot: Instant::now() - std::time::Duration::from_secs(1),
             last_player_autosave: Instant::now(),
-            player_autosave_interval: Duration::from_secs(
-                std::env::var("RUSTCRAFT_PLAYER_AUTOSAVE_SECONDS")
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .unwrap_or(2)
-                    .clamp(1, 2),
-            ),
+            player_autosave_interval,
             player_components: None,
             unknown_player_components: Vec::new(),
             player_revision: 0,
@@ -1611,12 +1623,7 @@ impl ClientApp {
             player_checkpoint_receipts: HashMap::new(),
             player_autosave_writes: 0,
             last_world_state_autosave: Instant::now(),
-            world_state_autosave_interval: Duration::from_secs(
-                std::env::var("RUSTCRAFT_WORLD_AUTOSAVE_SECONDS")
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(2),
-            ),
+            world_state_autosave_interval,
             world_state_components: None,
             unknown_world_state_components: Vec::new(),
             world_state_revision: 0,
@@ -1661,28 +1668,10 @@ impl ClientApp {
                 FirstPartyTextures,
             ),
             mesh_worker_count: mesh_workers,
-            mesh_upload_section_budget: std::env::var("RUSTCRAFT_MESH_UPLOAD_SECTIONS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(4),
-            mesh_upload_byte_budget: std::env::var("RUSTCRAFT_MESH_UPLOAD_BYTES")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(8 * 1024 * 1024),
-            lighting_work_budget: std::env::var("RUSTCRAFT_LIGHTING_WORK_BUDGET")
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(32)
-                .clamp(1, 256),
-            stream_main_budget: Duration::from_secs_f64(
-                std::env::var("RUSTCRAFT_STREAM_MAIN_BUDGET_MS")
-                    .ok()
-                    .and_then(|value| value.parse::<f64>().ok())
-                    .filter(|value| value.is_finite())
-                    .unwrap_or(2.0)
-                    .clamp(0.25, 8.0)
-                    / 1000.0,
-            ),
+            mesh_upload_section_budget,
+            mesh_upload_byte_budget,
+            lighting_work_budget,
+            stream_main_budget,
             stream_turn_started: None,
             stream_stage_deadline: None,
             snapshot_dirty_sections: HashSet::new(),
@@ -2369,6 +2358,7 @@ impl ClientApp {
         deadline.is_none_or(|deadline| Instant::now() < deadline)
     }
     fn fixed_step(&mut self) {
+        self.apply_config_boundary(rustcraft_control::config::Policy::NextTick);
         let developer_focus = self.dev_focus();
         let tick_started = Instant::now();
         if let Some(previous) = self.responsiveness.last_fixed_tick.replace(tick_started) {
@@ -5369,6 +5359,7 @@ impl ApplicationHandler for ClientApp {
         }
     }
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.apply_config_boundary(rustcraft_control::config::Policy::NextFrame);
         let callback_started = Instant::now();
         self.stream_turn_started = Some(callback_started);
         if let Some(previous) = self
@@ -6069,6 +6060,18 @@ fn run_world_travel_test() {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--config-report") {
+        let mut config = rustcraft_control::config::settings::engine(true);
+        rustcraft_control::config::settings::load(
+            &mut config,
+            &std::env::args().collect::<Vec<_>>(),
+            |k| std::env::var(k).ok(),
+            rustcraft_control::config::user_path(),
+        )
+        .expect("configuration");
+        println!("{}", config.snapshot());
+        return;
+    }
     if std::env::args().any(|argument| argument == "--version") {
         println!("{}", rustcraft_build_info::identity());
         return;
@@ -6115,7 +6118,10 @@ fn main() {
         std::env::var("RUSTCRAFT_WORLD_NAME").unwrap_or_else(|_| "default".to_owned());
     while let Some(flag) = args.next() {
         match flag.as_str() {
-            "--devtools" | "--dx-overhead" | "--dux-acceptance" => {}
+            "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance" => {}
+            "--set-config" | "--config-file" => {
+                args.next().expect("configuration option requires value");
+            }
             "--dx-abort-after-frames" => {
                 args.next().expect("--dx-abort-after-frames requires N");
             }
@@ -6194,7 +6200,7 @@ fn main() {
             .position(|a| a == "--scenario")
             .and_then(|i| args.get(i + 1).cloned());
     }
-    if std::env::args().any(|a| a == "--dux-acceptance") {
+    if std::env::args().any(|a| a == "--dux-acceptance" || a == "--c1-acceptance") {
         app.dux_fixture = true;
         app.devtools = Some(
             rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), {
@@ -6205,7 +6211,14 @@ fn main() {
             })
             .expect("devtools"),
         );
-        app.scenario_path = Some("scripts/scenarios/dux1.rhai".into());
+        app.scenario_path = Some(
+            if std::env::args().any(|a| a == "--c1-acceptance") {
+                "scripts/scenarios/c1.rhai"
+            } else {
+                "scripts/scenarios/dux1.rhai"
+            }
+            .into(),
+        );
     }
     app.world_name = if app.dux_fixture {
         format!(

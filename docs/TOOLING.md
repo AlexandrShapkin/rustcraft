@@ -159,3 +159,7 @@ callers/assertions/artifacts and proves scenario equivalence before retirement. 
 merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
 discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
 C1 and later stages remain planned/inactive. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
+
+## C1 workflows
+
+`just config-test` runs registry/control/native application tests; `just config-smoke` runs headless acceptance. Client/server `--config-report` gives non-graphical readback; `--set-config KEY=VALUE` and `--config-file PATH` select startup sources. `rustcraft-client --c1-acceptance` exercises real Settings/boundaries/captures in a disposable world. Existing DX/DUX and specialist recipes remain. See [CONFIGURATION.md](CONFIGURATION.md) and [C1_REPORT.md](C1_REPORT.md).

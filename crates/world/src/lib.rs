@@ -825,6 +825,16 @@ impl WorldResidency {
         }
     }
 
+    /// Apply validated operational radii without losing generations, residency entries or pins.
+    pub fn set_radii(&mut self, load: i32, retain: i32) -> Result<(), &'static str> {
+        if !(1..=12).contains(&load) || retain < load || retain > 16 {
+            return Err("invalid load/retain radii");
+        }
+        self.load_radius = load;
+        self.retain_radius = retain;
+        Ok(())
+    }
+
     pub fn phase(&self, position: ChunkPos) -> Option<ResidencyPhase> {
         self.entries.get(&position).map(|entry| entry.phase)
     }
@@ -4198,5 +4208,40 @@ mod tests {
         let storage = WorldStorage::open(&root, "invalid_global").unwrap();
         assert!(storage.store_world_state(&duplicate_components).is_err());
         let _ = fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod c1_radius_tests {
+    use super::*;
+    #[test]
+    fn live_radius_changes_preserve_tokens_negative_coordinates_and_pins() {
+        let center = ChunkPos { x: -1, z: -1 };
+        let old = ChunkPos { x: 8, z: -1 };
+        let residents = HashSet::from([center, old]);
+        let pins = HashSet::from([old]);
+        let mut r = WorldResidency::new(3, 1);
+        let first = r.update(center, &residents, &pins);
+        let request = first.requests.first().copied().unwrap();
+        r.set_radii(6, 7).unwrap();
+        let grown = r.update(center, &residents, &pins);
+        assert!(r.is_current(request));
+        assert!(!grown.evict.contains(&old));
+        assert_eq!(r.desired_column_count(), 169);
+        r.set_radii(3, 3).unwrap();
+        let shrunk = r.update(center, &residents, &pins);
+        assert!(!shrunk.evict.contains(&old));
+        assert_eq!(r.desired_column_count(), 49);
+        // Only after the existing owner clears a save/entity pin may the candidate be evicted.
+        let saved = r.update(center, &residents, &HashSet::new());
+        assert!(saved.evict.contains(&old));
+        assert!(!saved.evict.contains(&center));
+        assert!(r.set_radii(6, 5).is_err());
+        assert_eq!((r.load_radius(), r.retain_radius()), (3, 3));
+        r.set_radii(12, 16).unwrap();
+        assert!(r.update(center, &residents, &pins).requests.len() > 500);
+        r.set_radii(3, 4).unwrap();
+        r.update(center, &residents, &pins);
+        assert_eq!(r.desired_column_count(), 49);
     }
 }

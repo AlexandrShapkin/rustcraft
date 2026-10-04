@@ -440,3 +440,7 @@ The current ownership/normal dependency map and rechecked transitional debt are 
 [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md). D-045 requires bounded pre-M5 consolidation, not a general
 rewrite. Engine provides mechanism; game provides policy. Native runtime commands/dense handles
 are local contracts and must not be serialized unchanged as network schemas. M5 remains inactive.
+
+## C1 operational configuration
+
+The composition-owned rustcraft-config leaf supplies typed semantic policy, validation and requested/effective acknowledgement. Control, Rhai, native consumers and developer Settings share it; startup sources resolve once and native loops use typed fields. See [CONFIGURATION.md](CONFIGURATION.md) and [C1_REPORT.md](C1_REPORT.md). Engine mechanism remains independent of game policy; server remains headless.

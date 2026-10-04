@@ -1,5 +1,7 @@
 //! Versioned semantic developer control mechanism. No game, renderer or interpreter dependency.
 pub mod diagnostics;
+pub use rustcraft_config as config;
+pub mod configuration;
 use diagnostics::{DebugInput, Domain};
 pub use rustcraft_agent_api::AgentIntent;
 use serde::{Deserialize, Serialize};
@@ -27,9 +29,15 @@ impl Context {
     pub fn read_only(source: Source) -> Self {
         Self {
             source,
-            capabilities: ["world.read", "player.read", "entity.read", "debug.inspect"]
-                .map(str::to_owned)
-                .into(),
+            capabilities: [
+                "world.read",
+                "player.read",
+                "entity.read",
+                "debug.inspect",
+                "config.read",
+            ]
+            .map(str::to_owned)
+            .into(),
         }
     }
     pub fn developer(source: Source) -> Self {
@@ -45,6 +53,8 @@ impl Context {
                 "debug.pause",
                 "debug.configure",
                 "script.load",
+                "config.write",
+                "config.persist",
             ]
             .map(str::to_owned),
         );
@@ -63,6 +73,14 @@ impl Context {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Action {
+    ConfigSet(Vec<(String, String)>),
+    ConfigReset(String),
+    ConfigResetBatch(Vec<String>),
+    ConfigSelect(String),
+    ConfigPersist {
+        keys: Vec<String>,
+        remove: bool,
+    },
     Pause,
     Resume,
     Step(u32),
@@ -90,6 +108,14 @@ pub enum Action {
 impl Action {
     pub fn capability(&self) -> &'static str {
         match self {
+            Self::ConfigSet(_) | Self::ConfigReset(_) | Self::ConfigResetBatch(_) => "config.write",
+            Self::ConfigPersist { .. } => "config.persist",
+            Self::ConfigSelect(_) => "debug.configure",
+            Self::DebugUi(
+                DebugInput::SettingIncrease
+                | DebugInput::SettingDecrease
+                | DebugInput::SettingReset,
+            ) => "config.write",
             Self::Pause | Self::Resume | Self::Step(_) => "debug.pause",
             Self::Teleport(_) => "player.control",
             Self::SetBlock { .. } => "world.write",
@@ -102,6 +128,26 @@ impl Action {
     }
     pub fn validate(&self) -> ControlResult<()> {
         match self {
+            Self::ConfigSet(values)
+                if values.is_empty()
+                    || values.len() > 16
+                    || values.iter().any(|(k, v)| k.len() > 128 || v.len() > 256) =>
+            {
+                Err("configuration batch/key/value bounds exceeded".into())
+            }
+            Self::ConfigReset(k) | Self::ConfigSelect(k) if k.len() > 128 => {
+                Err("setting identity exceeds 128 bytes".into())
+            }
+            Self::ConfigResetBatch(keys)
+                if keys.is_empty() || keys.len() > 16 || keys.iter().any(|k| k.len() > 128) =>
+            {
+                Err("reset key/count bounds exceeded".into())
+            }
+            Self::ConfigPersist { keys, .. }
+                if keys.is_empty() || keys.len() > 16 || keys.iter().any(|k| k.len() > 128) =>
+            {
+                Err("persist key/count bounds exceeded".into())
+            }
             Self::Step(n) if *n == 0 || *n > 1000 => Err("step count must be 1..1000".into()),
             Self::Teleport(p) if p.iter().any(|v| !v.is_finite() || v.abs() > 30_000_000.) => {
                 Err("invalid position".into())
@@ -142,6 +188,8 @@ impl Action {
 /// Bounded immutable values; absent domains are explicitly null. Adapters supply semantic IDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub config: Value,
     pub version: u32,
     pub tick: u64,
     pub runtime: Value,
@@ -166,6 +214,7 @@ pub struct Snapshot {
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
+            config: Value::Null,
             version: CONTROL_API_VERSION,
             tick: 0,
             runtime: Value::Null,
@@ -187,6 +236,9 @@ impl Default for Snapshot {
 }
 /// All adapters dispatch here; capability checks precede authoritative application.
 pub trait Host {
+    fn script_poll_interval_ms(&self) -> u64 {
+        500
+    }
     fn diagnostic_due(&self, _domain: Domain) -> bool {
         true
     }
@@ -446,6 +498,12 @@ pub fn engine_registry() -> Registry {
             "Immutable semantic debug snapshot",
             "debug.inspect",
         ),
+        (
+            "config",
+            "list|get|describe|set|batch|reset|persist|unpersist",
+            "Typed effective/requested configuration; mutation is privileged",
+            "config.read",
+        ),
         ("pause", "", "Pause fixed simulation", "debug.pause"),
         ("resume", "", "Resume fixed simulation", "debug.pause"),
         (
@@ -483,12 +541,17 @@ pub fn engine_registry() -> Registry {
                     "step" => step_command,
                     "capture" => capture_command,
                     "debug" => debug_command,
+                    "config" => configuration::command,
                     "script" | "scenario" | "reload" => service_command,
                     _ => inspect_command,
                 },
             )
             .expect("static commands valid");
     }
+    registry.cache_completion(
+        "config",
+        config::settings::engine(true).keys().map(str::to_owned),
+    );
     let views = diagnostics::ViewRegistry::engine();
     registry.cache_completion(
         "debug",
@@ -547,6 +610,11 @@ fn debug_command(args: &[String], _: &Snapshot) -> ControlResult<CommandResult> 
                 "activate" => DebugInput::Activate,
                 "help" => DebugInput::Help,
                 "target" => DebugInput::TargetChunk,
+                "setting_next" => DebugInput::SettingNext,
+                "setting_previous" => DebugInput::SettingPrevious,
+                "setting_increase" => DebugInput::SettingIncrease,
+                "setting_decrease" => DebugInput::SettingDecrease,
+                "setting_reset" => DebugInput::SettingReset,
                 "entity" => DebugInput::NextEntity,
                 _ => return Err("unknown selector input".into()),
             },
@@ -653,10 +721,24 @@ impl EventRing {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Predicate {
     TickAtLeast(u64),
-    BlockEquals { position: [i32; 3], key: String },
-    PlayerNear { position: [f32; 3], tolerance: f32 },
+    BlockEquals {
+        position: [i32; 3],
+        key: String,
+    },
+    PlayerNear {
+        position: [f32; 3],
+        tolerance: f32,
+    },
     DomainIdle(String),
-    DebugEquals { path: String, value: Value },
+    DebugEquals {
+        path: String,
+        value: Value,
+    },
+    ConfigEquals {
+        key: String,
+        field: String,
+        value: Value,
+    },
 }
 impl Predicate {
     fn evaluate(&self, host: &impl Host) -> ControlResult<bool> {
@@ -674,6 +756,12 @@ impl Predicate {
                             .is_some_and(|v| (v - f64::from(*p)).abs() <= f64::from(*tolerance))
                     })
             }),
+            Self::ConfigEquals { key, field, value } => {
+                if key.len() > 128 || field.len() > 32 {
+                    return Err("bounded setting identity/field required".into());
+                }
+                snapshot.config["settings"][key][field] == *value
+            }
             Self::DebugEquals { path, value } => {
                 if path.len() > 128 || path.split('.').count() > 8 {
                     return Err("bounded diagnostic path required".into());
@@ -690,6 +778,7 @@ impl Predicate {
     }
     fn capability(&self) -> &'static str {
         match self {
+            Self::ConfigEquals { .. } => "config.read",
             Self::BlockEquals { .. } => "world.read",
             Self::PlayerNear { .. } => "player.read",
             _ => "debug.inspect",
@@ -1025,6 +1114,10 @@ impl Scenario {
 /// Composition-owned transient state. A scenario lease overrides human/legacy drivers per tick.
 #[derive(Default)]
 pub struct ControlState {
+    pub config: config::Registry,
+    pub script_poll_ms: u64,
+    pub selected_setting: String,
+    pub config_status: String,
     pub diagnostics: diagnostics::Diagnostics,
     pub selector: diagnostics::Selector,
     pub selected_chunk: Option<[i32; 3]>,
@@ -1042,6 +1135,16 @@ impl ControlState {
     pub fn tooling_action(&mut self, action: &Action) -> Option<ControlResult<Value>> {
         if matches!(action, Action::Teleport(_) | Action::SetBlock { .. }) {
             return None;
+        }
+        if matches!(
+            action,
+            Action::ConfigSet(_)
+                | Action::ConfigReset(_)
+                | Action::ConfigResetBatch(_)
+                | Action::ConfigSelect(_)
+                | Action::ConfigPersist { .. }
+        ) {
+            return Some(self.configuration_action(action));
         }
         Some((|| {
             match action {

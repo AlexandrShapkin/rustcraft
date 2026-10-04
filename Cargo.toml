@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/config",
     "crates/control",
     "crates/scripting-rhai",
     "crates/build-info",
@@ -36,6 +37,7 @@ unsafe_code = "forbid"
 all = "warn"
 
 [workspace.dependencies]
+rustcraft-config = { path = "crates/config" }
 rustcraft-control = { path = "crates/control" }
 rustcraft-scripting-rhai = { path = "crates/scripting-rhai" }
 rhai = { version = "=1.26.1", features = ["sync"] }

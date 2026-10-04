@@ -716,3 +716,7 @@ inspection contracts, not local dense IDs or GPU handles. Availability, coverage
 cost remain visible. UI focus is mutually exclusive with the console and suppresses human input;
 scenario controller ownership remains explicit. This is a small native developer surface, not C1's
 general settings registry or a future mod UI framework. See DEBUGGING.md and DUX1_REPORT.md.
+
+## D-047 — Typed operational policy and acknowledged application
+
+Use a composition-owned leaf registry, not a mutable process global. Resolve default < startup user file < environment < CLI < runtime. Apply atomic coupled requests only at declared boundaries; publish effective values after native acknowledgement and preserve old state on failure. Structural identities remain immutable and worker pools restart-bound. Explicit user-file edits are independent from world saves and affect next launch. Shared Control/Rhai/Settings adapters expose the same observation. See CONFIGURATION.md and C1_REPORT.md.

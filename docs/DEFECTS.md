@@ -88,3 +88,7 @@ claimed. Renderer byte counts and retained mesh-generation entries remain diagno
 Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
 mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
 not represented as zero. C1 and later stages remain inactive.
+
+## C1 execution
+
+PM5-008 migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed and all later stages inactive.

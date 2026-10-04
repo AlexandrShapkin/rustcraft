@@ -15,6 +15,25 @@ fn main() {
         println!("{}", rustcraft_build_info::identity());
         return;
     }
+    if arguments.iter().any(|a| a == "--config-report") {
+        let mut config = rustcraft_control::config::settings::engine(false);
+        rustcraft_control::config::settings::load(
+            &mut config,
+            &arguments,
+            |k| std::env::var(k).ok(),
+            rustcraft_control::config::user_path(),
+        )
+        .expect("configuration");
+        println!("{}", config.snapshot());
+        return;
+    }
+    if arguments.iter().any(|a| a == "--config-smoke") {
+        if let Err(e) = run_config_smoke(&arguments) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     rustcraft_minecraft_b173::validate_package()
         .expect("minecraft_b173 must register through the public Game API");
     if let Some(index) = arguments.iter().position(|arg| arg == "--scenario") {
@@ -1075,11 +1094,17 @@ fn run_world_stream_bench() {
     // columns without letting an outer/speculative workload consume their bounded capacity.
     let mut loads = ChunkLoadScheduler::new(1, 9);
     let mut generations = GenerationScheduler::new(1, 9);
-    let light_workers = std::env::var("RUSTCRAFT_LIGHT_WORKERS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(1)
-        .clamp(1, 4);
+    let mut config = rustcraft_control::config::settings::engine(false);
+    rustcraft_control::config::settings::load(
+        &mut config,
+        &std::env::args().collect::<Vec<_>>(),
+        |k| std::env::var(k).ok(),
+        rustcraft_control::config::user_path(),
+    )
+    .expect("stream benchmark configuration");
+    let light_workers = config
+        .effective(rustcraft_control::config::settings::LIGHT_WORKERS)
+        .integer() as usize;
     let mut initial_lighting = InitialLightingScheduler::new(light_workers, 9);
     let initial_lighting_registry = Arc::new(simulation.registry.clone());
     let mut initial_lighting_submitted = 0usize;
@@ -1719,10 +1744,33 @@ fn run_dx_scenario(path: &str) -> Result<(), String> {
     let mut world = World::new(profile.default_state().block);
     rustcraft_minecraft_b173::flat_world_module(&profile).generate(&mut world, -16, 16, -16, 16);
     let mut simulation = Simulation::new(world, bootstrap.registry, Vec3::new(0.5, 3., 0.5));
+    let mut config = rustcraft_control::config::settings::engine(false);
+    rustcraft_control::config::settings::load(
+        &mut config,
+        &std::env::args().collect::<Vec<_>>(),
+        |k| std::env::var(k).ok(),
+        rustcraft_control::config::user_path(),
+    )?;
     let mut state = rustcraft_control::ControlState {
+        config,
         leased: true,
         ..Default::default()
     };
+    state.sync_config();
+    let mut residency = rustcraft_world::WorldResidency::new(
+        state
+            .config
+            .effective(rustcraft_control::config::settings::LOAD_RADIUS)
+            .integer() as i32,
+        state
+            .config
+            .effective(rustcraft_control::config::settings::RETAIN_RADIUS)
+            .integer() as i32
+            - state
+                .config
+                .effective(rustcraft_control::config::settings::LOAD_RADIUS)
+                .integer() as i32,
+    );
     {
         let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
             simulation: &mut simulation,
@@ -1758,7 +1806,148 @@ fn run_dx_scenario(path: &str) -> Result<(), String> {
             tools.write_snapshot(directory, snapshot)?;
         }
         for _ in 0..state.fixed.take_ticks(1) {
+            state.config.apply(
+                rustcraft_control::config::Policy::NextTick,
+                simulation.time,
+                |c| {
+                    residency
+                        .set_radii(
+                            c.effective(rustcraft_control::config::settings::LOAD_RADIUS)
+                                .integer() as i32,
+                            c.effective(rustcraft_control::config::settings::RETAIN_RADIUS)
+                                .integer() as i32,
+                        )
+                        .map_err(str::to_owned)
+                },
+            )?;
+            state.sync_config();
             simulation.step(state.intent, 0.05);
         }
     }
+}
+
+/// Bounded native/headless acceptance; no graphical dependency or world-save mutation.
+fn run_config_smoke(arguments: &[String]) -> Result<(), String> {
+    use rustcraft_control::{
+        Action, Context, Host, Source,
+        config::{self, Policy, settings as keys},
+    };
+    let mut c = config::settings::engine(false);
+    config::settings::load(
+        &mut c,
+        arguments,
+        |k| std::env::var(k).ok(),
+        config::user_path(),
+    )?;
+    let base = c.effective(keys::LOAD_RADIUS).integer();
+    let blocks = rustcraft_minecraft_b173::blocks::BlocksModule;
+    let mut boot = RuntimeBootstrap::new(ContentManifest { packages: vec![] });
+    boot.register_module(&blocks)
+        .map_err(|e| format!("{e:?}"))?;
+    let mut simulation = Simulation::new(
+        World::new(rustcraft_minecraft_b173::blocks::AIR.id),
+        boot.registry,
+        Vec3::new(-0.5, 3., -0.5),
+    );
+    let mut state = rustcraft_control::ControlState {
+        config: c,
+        ..Default::default()
+    };
+    state.sync_config();
+    let mut residency = rustcraft_world::WorldResidency::new(
+        base as i32,
+        state.config.effective(keys::RETAIN_RADIUS).integer() as i32 - base as i32,
+    );
+    let context = Context::developer(Source::ServerAdmin);
+    for (load, retain) in [(6, 7), (3, 4), (12, 16), (3, 3)] {
+        let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
+            simulation: &mut simulation,
+            state: &mut state,
+        };
+        rustcraft_control::execute(
+            &mut host,
+            &context,
+            &Action::ConfigSet(vec![
+                (keys::LOAD_RADIUS.into(), load.to_string()),
+                (keys::RETAIN_RADIUS.into(), retain.to_string()),
+            ]),
+        )?;
+        state.config.apply(Policy::NextTick, simulation.time, |c| {
+            residency
+                .set_radii(
+                    c.effective(keys::LOAD_RADIUS).integer() as i32,
+                    c.effective(keys::RETAIN_RADIUS).integer() as i32,
+                )
+                .map_err(str::to_owned)
+        })?;
+        assert_eq!(residency.load_radius(), load);
+        assert_eq!(residency.retain_radius(), retain);
+        let center = ChunkPos { x: -1, z: -1 };
+        let resident = std::collections::HashSet::from([center]);
+        let plan = residency.update(center, &resident, &std::collections::HashSet::new());
+        assert!(!plan.evict.contains(&center));
+        assert_eq!(
+            residency.desired_column_count(),
+            ((load * 2 + 1) * (load * 2 + 1)) as usize
+        );
+    }
+    let cadence = state.config.effective(keys::DIAGNOSTIC_MS).integer();
+    {
+        let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
+            simulation: &mut simulation,
+            state: &mut state,
+        };
+        rustcraft_control::execute(
+            &mut host,
+            &context,
+            &Action::ConfigSet(vec![(keys::DIAGNOSTIC_MS.into(), "50".into())]),
+        )?;
+        assert_eq!(host.state.diagnostics.cadence.as_millis(), 50);
+        rustcraft_control::execute(
+            &mut host,
+            &context,
+            &Action::ConfigReset(keys::DIAGNOSTIC_MS.into()),
+        )?;
+        assert_eq!(host.state.diagnostics.cadence.as_millis(), cadence as u128);
+    }
+    let before = state.config.effective(keys::LOAD_RADIUS).clone();
+    let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
+        simulation: &mut simulation,
+        state: &mut state,
+    };
+    assert!(
+        rustcraft_control::execute(
+            &mut host,
+            &context,
+            &Action::ConfigSet(vec![(keys::LOAD_RADIUS.into(), "13".into())])
+        )
+        .is_err()
+    );
+    assert_eq!(host.state.config.effective(keys::LOAD_RADIUS), &before);
+    // Reset both runtime layers atomically, preserving file/env/CLI precedence.
+    state.config.request(&[
+        (keys::LOAD_RADIUS.into(), None),
+        (keys::RETAIN_RADIUS.into(), None),
+    ])?;
+    state.config.apply(Policy::NextTick, 0, |c| {
+        residency
+            .set_radii(
+                c.effective(keys::LOAD_RADIUS).integer() as i32,
+                c.effective(keys::RETAIN_RADIUS).integer() as i32,
+            )
+            .map_err(str::to_owned)
+    })?;
+    assert_eq!(state.config.effective(keys::LOAD_RADIUS).integer(), base);
+    let host = rustcraft_minecraft_b173::control::MinecraftHost {
+        simulation: &mut simulation,
+        state: &mut state,
+    };
+    let s = host.snapshot();
+    assert_eq!(s.config["settings"][keys::LOAD_RADIUS]["effective"], base);
+    println!(
+        "C1_HEADLESS pass settings={} native/control/readback={} reset=precedence invalid=preserved negative_coordinates=ok",
+        state.config.len(),
+        base
+    );
+    Ok(())
 }

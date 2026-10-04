@@ -219,3 +219,7 @@ Scenario `assert_debug(PATH, BOOL/STRING/INT)` checks bounded current debug meta
 `entity(STABLE_ID)` retains its bounded active-list contract. Data can be sampled/stale; provider
 age, availability and coverage are explicit. These additions grant no filesystem, network, process
 or mutation capability. See [DEBUGGING.md](DEBUGGING.md) for focus/cadence and [DUX1_REPORT.md](DUX1_REPORT.md).
+
+## C1 configuration adapter
+
+Trusted local Rhai uses config_get(key), config_describe(key), config_set(key, string_value), config_reset(key). Queued mutation keeps validation/capabilities/boundaries; another read in the same evaluation sees its original immutable snapshot. Scenarios use assert_config(key, integer) and assert_config_field(key, field, integer_or_string). config.read/write/persist do not derive privilege from a source label. Diagnostic cadence defaults250ms but effective C1 configuration now controls it; Settings remains demand-driven. See [CONFIGURATION.md](CONFIGURATION.md).

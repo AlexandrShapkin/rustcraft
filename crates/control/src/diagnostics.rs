@@ -196,6 +196,13 @@ impl ViewRegistry {
                 vec![Domain::Entities],
             ),
             (
+                "settings",
+                "Runtime settings",
+                "Typed operational policy. Left/right choose; +/- change; R reset; console /config supports exact values and batches.",
+                Cost::Low,
+                vec![],
+            ),
+            (
                 "lighting",
                 "Lighting",
                 "Initial/boundary lighting progress. No full voxel scan.",
@@ -334,6 +341,7 @@ pub struct Diagnostics {
     pub registry: ViewRegistry,
     pub samples: BTreeMap<Domain, Sample>,
     pub managed: bool,
+    pub cadence: Duration,
 }
 impl Default for Diagnostics {
     fn default() -> Self {
@@ -341,6 +349,7 @@ impl Default for Diagnostics {
             registry: ViewRegistry::engine(),
             samples: Default::default(),
             managed: false,
+            cadence: Self::CADENCE,
         }
     }
 }
@@ -349,7 +358,7 @@ impl Diagnostics {
     pub fn due(&mut self, d: Domain, now: Instant) -> bool {
         let s = self.samples.entry(d).or_default();
         s.requests += 1;
-        s.at.is_none_or(|at| now.saturating_duration_since(at) >= Self::CADENCE)
+        s.at.is_none_or(|at| now.saturating_duration_since(at) >= self.cadence)
     }
     pub fn collected(&mut self, d: Domain, started: Instant) {
         let s = self.samples.entry(d).or_default();
@@ -377,8 +386,8 @@ impl Diagnostics {
             "max_us":s.max_us,
             "total_us":s.total_us,
             "age_ms":s.at.map(|t|t.elapsed().as_millis()),
-            "cadence_ms":Self::CADENCE.as_millis(),
-            "stale":s.at.is_none_or(|t|t.elapsed()>Self::CADENCE*2)}),
+            "cadence_ms":self.cadence.as_millis(),
+            "stale":s.at.is_none_or(|t|t.elapsed()>self.cadence*2)}),
                     )
                 })
                 .collect(),
@@ -396,6 +405,11 @@ pub enum DebugInput {
     Help,
     TargetChunk,
     NextEntity,
+    SettingNext,
+    SettingPrevious,
+    SettingIncrease,
+    SettingDecrease,
+    SettingReset,
 }
 #[derive(Debug)]
 pub struct Selector {
@@ -459,6 +473,16 @@ impl ControlState {
         Ok(())
     }
     pub fn selector_input(&mut self, input: DebugInput) -> ControlResult<()> {
+        if matches!(
+            input,
+            DebugInput::SettingNext
+                | DebugInput::SettingPrevious
+                | DebugInput::SettingIncrease
+                | DebugInput::SettingDecrease
+                | DebugInput::SettingReset
+        ) {
+            return self.setting_input(input);
+        }
         match input {
             DebugInput::Open => self.selector.open = true,
             DebugInput::Close => self.selector.open = false,
@@ -517,6 +541,11 @@ impl ControlState {
                 self.diagnostics.invalidate(Domain::Chunk);
                 self.diagnostics.invalidate(Domain::Overlays);
             }
+            DebugInput::SettingNext
+            | DebugInput::SettingPrevious
+            | DebugInput::SettingIncrease
+            | DebugInput::SettingDecrease
+            | DebugInput::SettingReset => unreachable!(),
             DebugInput::NextEntity => {
                 let entries = self
                     .domains
@@ -651,7 +680,7 @@ impl ControlState {
                     m.map_or(0, |s| s.collections),
                     m.map_or(0, |s| s.last_us),
                     if m.and_then(|s| s.at)
-                        .is_none_or(|t| t.elapsed() > Diagnostics::CADENCE * 2)
+                        .is_none_or(|t| t.elapsed() > self.diagnostics.cadence * 2)
                     {
                         "STALE/UNSAMPLED"
                     } else {
@@ -709,6 +738,9 @@ impl ControlState {
                     }
                 }
             }
+        }
+        if self.page == "settings" {
+            text = self.settings_text(&text);
         }
         bounded_text(&text)
     }

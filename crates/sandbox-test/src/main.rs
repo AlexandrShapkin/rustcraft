@@ -321,6 +321,37 @@ fn schedule() -> Schedule<SandboxContext> {
 }
 
 fn main() {
+    use rustcraft_control::config::{Kind, Policy, Registry as ConfigRegistry, Spec, Value};
+    let mut config = ConfigRegistry::default();
+    config
+        .register(Spec {
+            key: "sandbox_test:settings/pulse_enabled".into(),
+            kind: Kind::Bool,
+            default: Value::Bool(true),
+            owner: "sandbox_test:package/game".into(),
+            description: "Independent package-owned operational setting".into(),
+            unit: "".into(),
+            policy: Policy::Immediate,
+            persist: true,
+            reason: "".into(),
+            availability: "available".into(),
+        })
+        .unwrap();
+    config.open();
+    config
+        .request(&[(
+            "sandbox_test:settings/pulse_enabled".into(),
+            Some(Value::Bool(false)),
+        )])
+        .unwrap();
+    config.apply(Policy::Immediate, 0, |_| Ok(())).unwrap();
+    assert!(
+        !config
+            .effective("sandbox_test:settings/pulse_enabled")
+            .boolean()
+    );
+    println!("SANDBOX_CONFIG independent registration/apply/readback=pass");
+
     let context = rustcraft_control::Context::read_only(rustcraft_control::Source::Script);
     let mut runtime = rustcraft_scripting_rhai::RhaiRuntime::new(context, Default::default());
     let result = runtime

@@ -66,6 +66,21 @@ impl ClientApp {
             let input = match code {
                 KeyCode::Escape => Some(DebugInput::Close),
                 KeyCode::ArrowDown => Some(DebugInput::Next),
+                KeyCode::ArrowRight if self.control_state.page == "settings" => {
+                    Some(DebugInput::SettingNext)
+                }
+                KeyCode::ArrowLeft if self.control_state.page == "settings" => {
+                    Some(DebugInput::SettingPrevious)
+                }
+                KeyCode::Equal if self.control_state.page == "settings" => {
+                    Some(DebugInput::SettingIncrease)
+                }
+                KeyCode::Minus if self.control_state.page == "settings" => {
+                    Some(DebugInput::SettingDecrease)
+                }
+                KeyCode::KeyR if self.control_state.page == "settings" => {
+                    Some(DebugInput::SettingReset)
+                }
                 KeyCode::ArrowUp => Some(DebugInput::Previous),
                 KeyCode::Tab => Some(DebugInput::Tab),
                 KeyCode::Enter => Some(DebugInput::Activate),
@@ -79,7 +94,13 @@ impl ClientApp {
                     use rustcraft_control::Host;
                     ClientHost { app: self }.prepare_diagnostics(&[Domain::Entities]);
                 }
-                if let Err(error) = self.control_state.selector_input(input) {
+                if let Err(error) = rustcraft_control::execute(
+                    &mut ClientHost { app: self },
+                    &rustcraft_control::Context::developer(
+                        rustcraft_control::Source::DeveloperConsole,
+                    ),
+                    &rustcraft_control::Action::DebugUi(input),
+                ) {
                     self.devtools.as_mut().unwrap().print(&error);
                 }
                 self.dev_focus_transition();
@@ -191,7 +212,7 @@ impl ClientApp {
             }
         }
         self.control_state.diagnostics.managed = true;
-        let refresh_debug = self.dx_snapshot_at.elapsed() > Duration::from_millis(250);
+        let refresh_debug = self.dx_snapshot_at.elapsed() > self.control_state.diagnostics.cadence;
         if refresh_debug {
             self.dx_snapshot_at = Instant::now();
         }
@@ -538,6 +559,9 @@ struct ClientHost<'a> {
     app: &'a mut ClientApp,
 }
 impl rustcraft_control::Host for ClientHost<'_> {
+    fn script_poll_interval_ms(&self) -> u64 {
+        self.app.control_state.script_poll_ms.max(100)
+    }
     fn snapshot(&self) -> rustcraft_control::Snapshot {
         let mut s = self.app.simulation.as_ref().map_or_else(
             || self.app.control_state.domains.clone(),
@@ -548,7 +572,11 @@ impl rustcraft_control::Host for ClientHost<'_> {
                 )
             },
         );
+        s.config = self.app.control_state.config.snapshot();
+        s.config["status"] = serde_json::json!(self.app.control_state.config_status);
         s.debug = self.app.control_state.debug_metadata();
+        s.debug["native_config"] = serde_json::json!({"load_radius":self.app.residency.load_radius(),"retain_radius":self.app.residency.retain_radius(),"diagnostic_ms":self.app.control_state.diagnostics.cadence.as_millis(),"upload_sections":self.app.mesh_upload_section_budget,"lighting_work":self.app.lighting_work_budget,"player_save_ms":self.app.player_autosave_interval.as_millis(),"world_save_ms":self.app.world_state_autosave_interval.as_millis()});
+        s.debug["configuration_status"] = serde_json::json!(self.app.control_state.config_status);
         s.debug["entity_coverage"] =
             self.app.control_state.domains.debug["entity_coverage"].clone();
         s.debug["overlay_enabled"] = serde_json::json!(
@@ -574,7 +602,7 @@ impl rustcraft_control::Host for ClientHost<'_> {
             .samples
             .get(&domain)
             .and_then(|s| s.at)
-            .is_none_or(|at| at.elapsed() >= rustcraft_control::diagnostics::Diagnostics::CADENCE)
+            .is_none_or(|at| at.elapsed() >= self.app.control_state.diagnostics.cadence)
     }
     fn prepare_diagnostics(&mut self, domains: &[rustcraft_control::diagnostics::Domain]) {
         use rustcraft_control::diagnostics::Domain;
@@ -750,11 +778,27 @@ impl rustcraft_control::Host for ClientHost<'_> {
             .simulation
             .as_mut()
             .ok_or("simulation unavailable")?;
+        let config_action = matches!(
+            action,
+            rustcraft_control::Action::ConfigSet(_)
+                | rustcraft_control::Action::ConfigReset(_)
+                | rustcraft_control::Action::ConfigResetBatch(_)
+                | rustcraft_control::Action::ConfigSelect(_)
+                | rustcraft_control::Action::ConfigPersist { .. }
+                | rustcraft_control::Action::DebugUi(
+                    rustcraft_control::diagnostics::DebugInput::SettingIncrease
+                        | rustcraft_control::diagnostics::DebugInput::SettingDecrease
+                        | rustcraft_control::diagnostics::DebugInput::SettingReset
+                )
+        );
         let result = rustcraft_minecraft_b173::control::MinecraftHost {
             simulation,
             state: &mut self.app.control_state,
         }
         .apply(action);
+        if config_action {
+            self.app.dx_text.clear();
+        }
         if result.is_ok()
             && matches!(
                 action,
@@ -860,6 +904,82 @@ mod tests {
         ));
         a.control_state.diagnostics.managed = true;
         a
+    }
+    #[test]
+    fn config_native_control_console_rhai_and_settings_read_one_registry() {
+        use rustcraft_control::{Context, Source, config::settings as keys};
+        let mut a = app();
+        let mut host = ClientHost { app: &mut a };
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts");
+        let mut tools =
+            rustcraft_scripting_rhai::DevTools::new(&root, rustcraft_control::engine_registry())
+                .unwrap();
+        tools
+            .evaluate(
+                &format!("config_set(\"{}\",\"50\");", keys::DIAGNOSTIC_MS),
+                &mut host,
+                false,
+            )
+            .unwrap();
+        tools.advance(&mut host, false).unwrap();
+        assert_eq!(host.app.control_state.diagnostics.cadence.as_millis(), 50);
+        assert_eq!(
+            host.snapshot().config["settings"][keys::DIAGNOSTIC_MS]["effective"],
+            50
+        );
+        tools
+            .evaluate(
+                &format!("/config get {}", keys::DIAGNOSTIC_MS),
+                &mut host,
+                false,
+            )
+            .unwrap();
+        tools
+            .evaluate(
+                &format!("assert_eq(config_get(\"{}\"),50);", keys::DIAGNOSTIC_MS),
+                &mut host,
+                false,
+            )
+            .unwrap();
+        host.app.control_state.selected_setting = keys::DIAGNOSTIC_MS.into();
+        host.app.control_state.page = "settings".into();
+        assert!(
+            host.app
+                .control_state
+                .diagnostic_text()
+                .contains("effective=50")
+        );
+        assert!(host.app.control_state.diagnostics.samples.is_empty());
+        assert!(
+            rustcraft_control::execute(
+                &mut host,
+                &Context::read_only(Source::ServerAdmin),
+                &Action::ConfigSet(vec![(keys::DIAGNOSTIC_MS.into(), "100".into())])
+            )
+            .is_err()
+        );
+        assert_eq!(
+            host.app
+                .control_state
+                .config
+                .effective(keys::DIAGNOSTIC_MS)
+                .integer(),
+            50
+        );
+        let mut runtime = rustcraft_scripting_rhai::RhaiRuntime::new(
+            Context::read_only(Source::FutureChat),
+            Default::default(),
+        );
+        let mut session = rustcraft_scripting_rhai::RhaiSession::new("readonly-config");
+        assert!(
+            runtime
+                .eval(
+                    &mut session,
+                    &format!("config_set(\"{}\",\"100\");", keys::DIAGNOSTIC_MS),
+                    host.snapshot()
+                )
+                .is_err()
+        );
     }
     #[test]
     fn shared_observation_is_reused_and_inactive_demand_stops_collection() {
@@ -979,7 +1099,7 @@ mod tests {
                 .unwrap()
                 .contains("not found")
         );
-        assert_eq!(a.control_state.diagnostics.registry.len(), 17);
+        assert_eq!(a.control_state.diagnostics.registry.len(), 18);
         assert!(a.control_state.diagnostics.samples.len() <= 11);
     }
     #[test]

@@ -1620,6 +1620,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustcraft-config"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "atomicwrites",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rustcraft-content"
 version = "0.1.0-alpha.2"
 dependencies = [
@@ -1633,6 +1642,7 @@ name = "rustcraft-control"
 version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-agent-api",
+ "rustcraft-config",
  "serde",
  "serde_json",
 ]
@@ -1774,6 +1784,7 @@ dependencies = [
  "rustcraft-runtime",
  "rustcraft-scripting-rhai",
  "rustcraft-world",
+ "serde_json",
 ]
 
 [[package]]

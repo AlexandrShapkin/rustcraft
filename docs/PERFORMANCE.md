@@ -738,3 +738,26 @@ legacy F3 collection is suppressed. Low/Medium/High labels are guidance rather t
 timing guarantees. Whole-service costs include existing polling/maintenance and vary with
 workload. No universal threshold, M7 optimization or physical scanout claim is introduced.
 See [DUX1_REPORT.md](DUX1_REPORT.md) for gates, reuse and bounds.
+
+## C1 configuration and diagnostics acceptance
+
+| Mode | Mean µs | p50 | p95 | p99 | Max |
+|---|---:|---:|---:|---:|---:|
+| disabled | 4.28 | 3.91 | 5.31 | 5.59 | 59.30 |
+| overview | 107.69 | 70.26 | 483.45 | 634.79 | 671.95 |
+| low_page | 120.60 | 74.73 | 510.26 | 641.78 | 820.36 |
+| high_page | 142.02 | 77.66 | 560.62 | 787.05 | 1437.14 |
+| overlay | 159.62 | 75.29 | 701.56 | 933.51 | 1191.08 |
+| scenario | 947.64 | 916.61 | 1315.05 | 1687.10 | 2146.87 |
+
+C1 uses the same llvmpipe correctness surface and 240-turn/20-warmup diagnostic-service protocol.
+Disabled/Overview collect no broad domains; active Lighting/Renderer/overlays collect 30/32/34
+times, and collect zero once inactive. Settings requests no broad provider. The shared diagnostic
+cadence is now configurable from 50–5000 ms; hidden legacy F3 scanning remains suppressed.
+
+Optimized core measurements: 10,000 inactive guards 10.616 µs; 10,000 control lookups
+702.471 µs; 200 request/apply transactions 542.445276 ms with bounded metadata/history rebuild.
+Native steady state caches typed values and checks a pending flag at boundaries; no semantic
+lookup/lock enters voxel/entity inner loops. Transaction costs are rare tooling costs. These
+measurements are evidence, not universal timing limits or representative GPU performance.
+See [C1_REPORT.md](C1_REPORT.md) for source, streaming, persistence and adapter gates.
