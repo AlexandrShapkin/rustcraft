@@ -1,5 +1,11 @@
 # Architecture alignment audit
 
+The table below is historical M0-M3 alignment evidence, not the current next-stage plan.
+The post-DX1 [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) rechecks every ARCH finding against public main
+16c6823a and supersedes this document's stale R1.0 one-page/temporary-atlas actions. R1.1/R1.2
+already resolve those foundations. Runtime policy, controller/definition compatibility and active
+HUD/skin layout debt remain current; A1/R2 bound their pre-M5 closure.
+
 This audit covers the implemented M0-M3 tree at the architecture-alignment pass. It distinguishes
 actual dependency/policy leaks from directory naming. The alignment is incremental so accepted
 gameplay and presentation behavior is preserved.
@@ -44,7 +50,8 @@ tracked above.
 New engine mechanisms may land in engine/Game API crates. New Minecraft rules land in
 `minecraft-b173` and register through the public extension surface. Before modifying a legacy
 mixed subsystem, first migrate the portion needed by that change; do not deepen the leak. This is
-safe for the next milestone only if that rule is enforced.
+safe for incremental local work only if that rule is enforced. Before M5, the stricter A1 identity/
+replication-touched policy gate in PRE_M5_AUDIT.md also applies.
 
 ## R1.0 numeric-identity audit
 

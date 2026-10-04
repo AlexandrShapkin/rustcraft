@@ -705,3 +705,12 @@ The isolated actual-client DX CPU service measurements averaged 4.31 us disabled
 inactive, 271.50 us with a streaming page, 282.21 us with overlays, and 871.23 us with a lightweight
 cooperative scenario. Expensive domain/page updates are cached at 250 ms; capture/reload work
 is measured separately. No frame-pacing or renderer optimization campaign is part of this slice.
+
+## Pre-network measurement contracts
+
+D-045 and [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) define RSM1 repeated-route logical-resource/RAM/
+driver plateau evidence, P1 refresh/request/render/present-call distributions and state/input
+cadence, S1 write amplification/sync/recovery/churn evaluation, and demand-driven DX cost baselines.
+No new performance measurements are claimed by the audit. Application present is not scanout;
+logical GPU bytes/capacity are not driver VRAM. Correctness thresholds, diagnostic baselines and
+representative-hardware acceptance remain distinct; M4-009 stays hardware-conditional.

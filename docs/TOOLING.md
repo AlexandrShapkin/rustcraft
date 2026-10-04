@@ -151,3 +151,11 @@ Both scenario recipes default to scripts/scenarios/dx_smoke.rhai. See [DEBUGGING
 DX1 closure diagnostics: `just dx-test`, `just dx-console`, `just dx-overhead`.
 Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the explicit
 `--dx-abort-after-frames 100` client flag proves cooperative job/capture/abort with frame progress.
+
+## Planned pre-M5 workflow consolidation
+
+[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) classifies current recipes and test tiers. DX2 inventories
+callers/assertions/artifacts and proves scenario equivalence before retirement. No recipe is dead
+merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
+discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
+These stages remain planned/inactive. The audit adds no new command or dependency policy gate.

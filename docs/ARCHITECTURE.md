@@ -433,3 +433,10 @@ DX1 async work has one bounded tooling worker (16 queued requests/replies), per-
 generations and owner-thread atomic AST/handler publication. JobRef is used for compile/reload,
 bundle writes and PNG writes, with cooperative scenario WaitJob. Render owns async GPU mapping;
 workers receive owned bytes, never simulation/renderer borrows. See SCRIPTING.md for the audit.
+
+## Post-DX1 consolidation boundary
+
+The current ownership/normal dependency map and rechecked transitional debt are in
+[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md). D-045 requires bounded pre-M5 consolidation, not a general
+rewrite. Engine provides mechanism; game provides policy. Native runtime commands/dense handles
+are local contracts and must not be serialized unchanged as network schemas. M5 remains inactive.

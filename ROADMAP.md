@@ -1,0 +1,9 @@
+# RustCraft roadmap
+
+The canonical roadmap is [docs/ROADMAP.md](docs/ROADMAP.md). It preserves completed milestone
+history and the planned pre-M5 consolidation sequence.
+
+Detailed audit evidence and bounded stage contracts are in
+[docs/PRE_M5_AUDIT.md](docs/PRE_M5_AUDIT.md).
+
+DX1 is CLOSED. Pre-M5 implementation stages and M5/M6/M7 remain inactive.

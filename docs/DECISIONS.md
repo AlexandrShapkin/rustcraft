@@ -684,3 +684,22 @@ Scopes never cross consumer ownership. JobRef tracks real compile/bundle/PNG lif
 terminal retention. GPU mapping stays in render ownership with nonblocking publication; CPU PNG
 work stays in the tooling worker. This adds no GPU dependency to headless server or game policy to
 control. Native REPL parsing is limited to a 4 KiB console line; file compilation is background work.
+
+## D-045 — Bounded technical consolidation before multiplayer
+
+Status: accepted planning decision, 2026-10-04; no new implementation stage activated.
+
+Public DX1 closeout main 16c6823a is verified with green Ubuntu/Windows CI. Preserve completed
+M0–M4/DX1 and M4-009's conditional representative-hardware evidence. Execute DUX1 → C1 → RSM1 →
+P1 → S1 → R2 → A1 → DX2 → READY1 before M5, one bounded sub-slice per pass. Source evidence and
+complete contracts are in [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md); sequence is in [ROADMAP.md](ROADMAP.md).
+
+Use existing Control Snapshot diagnostics for human and automated consumers, collect expensive
+views only on bounded demand, and share one configuration registry across adapters. Distinguish
+application present events from physical scanout and logical GPU lifetime from driver high-water
+allocation. Benchmark persistence before choosing storage; accepting the current backend with
+measured limits is valid. Runtime layout, disk schema and network schema remain separate. Retain
+the game-owned legacy importer while normalizing active semantic resource roles. Close external
+identity and replication-touched game-policy leaks without broad rewrites. Retire workflows only
+with proven equivalence. M5 remains inactive until READY1 records closure evidence and a separate
+pass starts it; M6/M7 remain inactive.

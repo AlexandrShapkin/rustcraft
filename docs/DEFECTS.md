@@ -69,3 +69,11 @@ Dependency hygiene (2026-10-04): cargo audit reports no vulnerabilities and unma
 RUSTSEC-2024-0436 (paste), RUSTSEC-2026-0249 (smartstring, Rhai transitive), and RUSTSEC-2026-0192
 (ttf-parser). Track upstream replacements/evaluation in dependency maintenance; DX1 does not
 randomly change accepted dependencies to suppress warnings.
+
+## Pre-M5 risk inventory
+
+[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) records PM5-001–013 with a separate M5-entry risk model
+(1 BLOCKER, 5 HIGH, 5 MEDIUM, 2 LOW). These are not reopened M4/DX1 defects or replacements for
+the P0–P3 functional queue. ARCH-001–004 remain current; R1.0 single-page/path findings are resolved.
+Camera fixed-tick stepping and retained mesh-generation metadata have source evidence; the owner
+VRAM observation is not yet a proven GPU leak. RSM1/P1/S1 investigate before measured fixes.

@@ -19,3 +19,13 @@ from total software-GPU frame cost. See [DX1_REPORT.md](DX1_REPORT.md) for final
 
 `just script-bench` reports Rhai version, compile, cached queries, command dispatch, scenario steps
 and bounded runaway termination. Existing M4 specialist acceptance modes remain intact.
+
+## Planned DUX1 scope
+
+Current DX1 already supports runtime page/overlay selection through the console. DUX1 is a
+planned early stage for discoverable metadata/selection, targeted ChunkPos/EntityId inspection
+and demand-driven collection over the same Control Snapshot/query backend. Meshing and
+Scenarios/Jobs may use bounded combined views. Inactive views must not scan expensive domains;
+active collection uses measured bounded cadence and explicit cost/coverage. C1 later connects
+shared runtime settings. See [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md); no menu/registry is implemented
+by this planning pass.

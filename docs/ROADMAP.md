@@ -195,12 +195,58 @@ The older multiplayer/content-resolution scope is moved to an inactive later roa
 chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and
 advanced renderer optimization are out of M4 scope.
 
-## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (complete)
+## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (CLOSED)
+
+Status: CLOSED.
 
 Generic control and bounded Rhai sessions/scenarios now have shared headless/graphical composition.
 Same-source smoke, actual console, cooperative reload/jobs/cancellation, automatic failure capture,
 bounded lifecycle/overhead and the full regression matrix pass. [Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37156846278)
 is green; see DX1_REPORT.md for canonical evidence. M4 remains complete with M4-009 conditional.
+
+## Pre-M5 technical consolidation (planned, inactive)
+
+Accepted planning baseline: public main `16c6823a739e83f830b6676bbe0390be769ca17e`,
+2026-10-04; [closeout Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37157185442)
+passed. M0–M4 and DX1 remain closed; M4-009 representative-hardware quantitative evidence remains
+conditional. No new stage is implemented by this roadmap pass.
+
+The canonical [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) contains source evidence, severity/disposition,
+ownership map, dependencies and executable stage contracts (goal, scope, invariants, measurements,
+acceptance, deferrals and regression gates). Activate one named bounded sub-slice per future pass;
+do not treat the sequence as authorization to implement everything automatically.
+
+| Order | Stage | Bounded result / closure evidence |
+| --- | --- | --- |
+| 1 | DUX1 — In-game developer diagnostics | Metadata/selector and demand-driven shared DX1 snapshots, then targeted chunk/EntityId inspection; graphical selection/toggle/cost proof. Existing console pages/overlays stay usable. |
+| 2 | C1 — Runtime configuration plane | Shared typed registry, source/validation/change policy and safe existing operational controls; Control/Rhai/developer UI share effective readback. Structural settings remain immutable/restart-bound. |
+| 3 | RSM1 — Residency and memory lifetime | Ownership ledger and repeated A→B→C→D→A/unique-exploration/stale-revisit tests; logical counts/bytes plateau, safe metadata retirement and bounded pressure. Driver VRAM need not return to startup. |
+| 4 | P1 — Frame pacing and presentation | Separate authoritative/render/request/present-call cadence, refresh/provider evidence and distributions; bounded scheduling/interpolation/input change only after diagnosis. High average FPS is not acceptance. |
+| 5 | S1 — Persistence architecture evaluation and scalability | Benchmark existing storage and justified candidate spikes first; ADR accepts backend limits/component/recovery boundaries or names a separate bounded migration. No automatic database adoption. |
+| 6 | R2 — Semantic resource normalization | Active HUD/inventory/player subresources lose source-sheet dependence; retain game-owned Beta importer and generic compiler; synthetic rearranged/multipage proof. Block crops already normalized. |
+| 7 | A1 — Network-facing ownership and API consolidation | A1.1 semantic/stable external references and trusted-source adapter contract; A1.2 behavior-preserving migration of replication-touched game policy through public Game API. No all-API merger or ECS rewrite. |
+| 8 | DX2 — Repository and legacy workflow retirement | Inventory/equivalence before deleting drivers/aliases; stable just/test tiers/output paths/release policy coherent; preserve specialist correctness coverage. |
+| 9 | READY1 — Pre-M5 readiness review | Linked closure/baseline evidence, explicit medium-risk waivers, functional regression and Ubuntu/Windows CI; activate M5 only in a separate pass. |
+
+Dependency reasoning: DUX1 exposes existing diagnostic leverage without waiting for a settings UI;
+C1 prevents later experiments from proliferating flags. RSM1 stabilizes workload ownership before
+P1 timing; P1 separates presentation from the clock future prediction will consume. S1 decides
+storage/recovery/component limits before network commitments. R2 removes active layout coupling
+before A1 settles future-facing references; those two investigations can otherwise proceed
+independently. DX2 retirement follows proven replacement equivalence. A1.1 semantic/provenance
+rules apply to all new contracts immediately, even before its consolidation gate.
+
+M5 entry requires closure of the audit's PM5-001–006 mandatory findings, completion or explicit
+rationale/trigger for MEDIUM items, generic/game direction and headless server intact, stable semantic
+external identities, consciously accepted persistence backend, bounded residency, understood pacing,
+normalized active resources, controlled configuration, shared automatic/in-game diagnostics with
+bounded cost, host-owned admin capability provenance, coherent regression/tooling/docs and green
+platform CI. See the audit's exact checklist. This does not require speculative perfection or claim
+M4-009 representative-hardware evidence has been obtained.
+
+Deferred: general ECS/renderer rewrites, exotic M7 optimization, distributed storage, full WASM/mod
+UI, polished production GUI/settings, full scripting debugger, unlimited commands, inactive legacy
+asset classes and mechanical dependency updates. Milestone history and frozen M4 hashes stay intact.
 
 ## M5 — multiplayer + server content resolution (future, inactive)
 
