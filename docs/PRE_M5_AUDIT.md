@@ -5,6 +5,16 @@ Audited 2026-10-04 against public main **16c6823a739e83f830b6676bbe0390be769ca17
 **008fbac252e4307af5146cda8e033eee3079bcc3**. This is an architecture/source audit and an
 accepted execution plan, not implementation or newly measured hardware acceptance.
 
+## DUX1 execution update
+
+The original findings/counts below describe the audited baseline and remain historical evidence.
+DUX1 implementation starts from the accepted planning commit `195f53ca3025c9f001f0338d7a51a6e6c6626a80`.
+Generic native metadata/selection, shared demand/cadence and targeted inspection now replace the
+PM5-007 hard-coded discovery/all-domain refresh path. Acceptance/public CI closure is recorded in
+[DUX1_REPORT.md](DUX1_REPORT.md); C1 and every later stage remain inactive. New debug contracts use
+ChunkPos/section coordinates and stable EntityId; PM5-001 remains an A1 blocker for older contracts.
+No residency lifetime, pacing, storage or legacy-resource cleanup is part of DUX1.
+
 ## Baseline, method and limits
 
 GitHub commit API and a fresh HTTPS origin clone agreed on main. `git status --short` and

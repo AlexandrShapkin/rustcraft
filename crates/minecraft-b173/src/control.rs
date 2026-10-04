@@ -9,38 +9,141 @@ pub struct MinecraftHost<'a> {
     pub simulation: &'a mut Simulation,
     pub state: &'a mut ControlState,
 }
-impl Host for MinecraftHost<'_> {
-    fn snapshot(&self) -> Snapshot {
-        let s = &self.simulation;
-        let mut snapshot = self.state.domains.clone();
+impl MinecraftHost<'_> {
+    /// Cheap current authoritative values, shared by headless and graphical adapters.
+    pub fn live_snapshot(simulation: &Simulation, state: &ControlState) -> Snapshot {
+        let s = simulation;
+        let mut snapshot = state.domains.clone();
         snapshot.tick = s.time;
-        snapshot.runtime = json!({"tick":s.time,"fixed_paused":self.state.fixed.paused,"controller":if self.state.leased {"Scenario"} else {"Human"}});
-        snapshot.player = json!({"position":[s.player.position.x,s.player.position.y,s.player.position.z],"velocity":[s.player.velocity.x,s.player.velocity.y,s.player.velocity.z],"orientation":{"yaw":s.player.yaw,"pitch":s.player.pitch},"chunk":[(s.player.position.x.floor() as i32).div_euclid(16),(s.player.position.z.floor() as i32).div_euclid(16)],"mode":format!("{:?}",s.mode),"grounded":s.player.on_ground,"selected":s.inventory.selected(),"held":s.inventory.held().map(|stack| json!({"key":s.registry.item(stack.item).map(|i|i.name),"count":stack.count})),"paused":self.state.fixed.paused});
-        if snapshot.world.is_null() {
-            snapshot.world = json!({});
+        snapshot.runtime = json!({"tick":s.time,"fixed_paused":state.fixed.paused,"controller":if state.leased {"Scenario"} else {"Human"}});
+        snapshot.player = json!({"position":[s.player.position.x,s.player.position.y,s.player.position.z],
+            "velocity":[s.player.velocity.x,s.player.velocity.y,s.player.velocity.z],
+            "orientation":{"yaw":s.player.yaw,
+            "pitch":s.player.pitch},
+            "chunk":[(s.player.position.x.floor() as i32).div_euclid(16),(s.player.position.z.floor() as i32).div_euclid(16)],
+            "mode":format!("{:?}",s.mode),
+            "grounded":s.player.on_ground,
+            "selected":s.inventory.selected(),
+            "held":s.inventory.held().map(|stack| json!({"key":s.registry.item(stack.item).map(|i|i.name),
+            "count":stack.count})),
+            "paused":state.fixed.paused});
+        snapshot
+    }
+    pub fn collect_diagnostic(&self, domain: rustcraft_control::diagnostics::Domain) -> Value {
+        use rustcraft_control::diagnostics::Domain;
+        let s = &self.simulation;
+        let mut snapshot = Snapshot::default();
+        if domain == Domain::World {
+            snapshot.world = self.state.domains.world.clone();
         }
-        snapshot.world["time"] = json!(s.time);
-        snapshot.world["dirty_sections"] = json!(s.dirty_section_count());
-        // Small semantic neighborhood; never a whole-world scan.
-        let center = [
-            s.player.position.x.floor() as i32,
-            s.player.position.y.floor() as i32,
-            s.player.position.z.floor() as i32,
-        ];
-        let mut blocks = serde_json::Map::new();
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    let p = [center[0] + dx, center[1] + dy, center[2] + dz];
-                    if let Ok(key) = self.block(p) {
-                        blocks.insert(format!("{},{},{}", p[0], p[1], p[2]), json!(key));
+        match domain {
+            Domain::World => {
+                if snapshot.world.is_null() {
+                    snapshot.world = json!({});
+                }
+                snapshot.world["time"] = json!(s.time);
+                snapshot.world["dirty_sections"] = json!(s.dirty_section_count());
+                // Small semantic neighborhood; never a whole-world scan.
+                let center = [
+                    s.player.position.x.floor() as i32,
+                    s.player.position.y.floor() as i32,
+                    s.player.position.z.floor() as i32,
+                ];
+                let mut blocks = serde_json::Map::new();
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        for dz in -1..=1 {
+                            let p = [center[0] + dx, center[1] + dy, center[2] + dz];
+                            if let Ok(key) = self.block(p) {
+                                blocks.insert(format!("{},{},{}", p[0], p[1], p[2]), json!(key));
+                            }
+                        }
                     }
                 }
+                snapshot.world["blocks"] = Value::Object(blocks);
+                snapshot.world["block_query_radius"] = json!(1);
+                snapshot.world["resident_columns"] = json!(s.world.column_positions().count());
+                snapshot.world["player_chunk"] =
+                    json!([center[0].div_euclid(16), center[2].div_euclid(16)]);
+                snapshot.world["target"]=s.target().map_or(json!({"status":"no raycast hit"}),|h|json!({"position":[h.block.x,h.block.y,h.block.z],"key":self.block([h.block.x,h.block.y,h.block.z]).ok()}));
+                snapshot.world
+            }
+            Domain::Entities => {
+                snapshot.entities=json!(s.items.iter().take(64).map(|e|json!({"id":format!("{:032x}",e.id.0),
+                    "type":"minecraft_b173:item",
+                    "position":[e.position.x,e.position.y,e.position.z],
+                    "velocity":[e.velocity.x,e.velocity.y,e.velocity.z],
+                    "owner_chunk":[(e.position.x.floor() as i32).div_euclid(16),(e.position.z.floor() as i32).div_euclid(16)],
+                    "age":e.age,
+                    "revision":e.persistence_revision})).collect::<Vec<_>>());
+                snapshot.entities
+            }
+            Domain::Entity => {
+                let Some(id) = self.state.selected_entity.as_deref() else {
+                    return json!({"unavailable":"select an EntityId (E or /debug entity HEX_ID)"});
+                };
+                let cap = 4096;
+                s.items.iter().take(cap).find(|e| format!("{:032x}",e.id.0)==id).map_or_else(
+                    || json!({"id":id,"status":"not found in active entities; may be unloaded or removed","coverage":cap,"truncated":s.items.len()>cap}),
+                    |e|json!({"id":id,
+                        "type":"minecraft_b173:item",
+                        "position":[e.position.x,e.position.y,e.position.z],
+                        "velocity":[e.velocity.x,e.velocity.y,e.velocity.z],
+                        "owner_chunk":[(e.position.x.floor() as i32).div_euclid(16),(e.position.z.floor() as i32).div_euclid(16)],
+                        "age":e.age,
+                        "revision":e.persistence_revision,
+                        "durability":"active record; revision is logical, not confirmation of fsync"}))
+            }
+            _ => json!({"unavailable":"provider belongs to client composition"}),
+        }
+    }
+}
+impl Host for MinecraftHost<'_> {
+    fn diagnostic_due(&self, domain: rustcraft_control::diagnostics::Domain) -> bool {
+        self.state
+            .diagnostics
+            .samples
+            .get(&domain)
+            .and_then(|s| s.at)
+            .is_none_or(|t| t.elapsed() >= rustcraft_control::diagnostics::Diagnostics::CADENCE)
+    }
+    fn prepare_diagnostics(&mut self, domains: &[rustcraft_control::diagnostics::Domain]) {
+        use rustcraft_control::diagnostics::Domain;
+        self.state.diagnostics.managed = true;
+        for &d in domains {
+            if matches!(d, Domain::World | Domain::Entities | Domain::Entity)
+                && self.state.diagnostics.due(d, std::time::Instant::now())
+            {
+                let started = std::time::Instant::now();
+                let value = self.collect_diagnostic(d);
+                d.set(&mut self.state.domains, value);
+                self.state.diagnostics.collected(d, started);
             }
         }
-        snapshot.world["blocks"] = Value::Object(blocks);
-        snapshot.world["block_query_radius"] = json!(1);
-        snapshot.entities=json!(s.items.iter().take(64).map(|e|json!({"id":format!("{:032x}",e.id.0),"type":"minecraft_b173:item","position":[e.position.x,e.position.y,e.position.z],"velocity":[e.velocity.x,e.velocity.y,e.velocity.z],"owner_chunk":[(e.position.x.floor() as i32).div_euclid(16),(e.position.z.floor() as i32).div_euclid(16)],"age":e.age,"revision":e.persistence_revision})).collect::<Vec<_>>());
+    }
+    fn publish_diagnostic(
+        &mut self,
+        domain: rustcraft_control::diagnostics::Domain,
+        value: Value,
+        started: std::time::Instant,
+    ) {
+        if self
+            .state
+            .diagnostics
+            .due(domain, std::time::Instant::now())
+        {
+            domain.set(&mut self.state.domains, value);
+            self.state.diagnostics.collected(domain, started);
+        }
+    }
+    fn snapshot(&self) -> Snapshot {
+        let mut snapshot = Self::live_snapshot(self.simulation, self.state);
+        if !self.state.diagnostics.managed {
+            snapshot.world = self.collect_diagnostic(rustcraft_control::diagnostics::Domain::World);
+            snapshot.entities =
+                self.collect_diagnostic(rustcraft_control::diagnostics::Domain::Entities);
+        }
+        snapshot.debug = self.state.debug_metadata();
         snapshot
     }
     fn block(&self, p: [i32; 3]) -> ControlResult<String> {

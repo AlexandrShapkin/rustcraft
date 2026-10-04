@@ -1742,6 +1742,7 @@ dependencies = [
  "rustcraft-render-profile",
  "rustcraft-scripting-rhai",
  "rustcraft-world",
+ "serde_json",
 ]
 
 [[package]]

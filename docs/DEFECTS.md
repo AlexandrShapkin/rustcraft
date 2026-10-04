@@ -77,3 +77,13 @@ randomly change accepted dependencies to suppress warnings.
 the P0–P3 functional queue. ARCH-001–004 remain current; R1.0 single-page/path findings are resolved.
 Camera fixed-tick stepping and retained mesh-generation metadata have source evidence; the owner
 VRAM observation is not yet a proven GPU leak. RSM1/P1/S1 investigate before measured fixes.
+
+## DUX1 execution
+
+PM5-007's discovery/demand gap is implemented through generic native view metadata, the F4 selector,
+shared cached providers and targeted stable inspection; final acceptance/public CI is recorded in
+[DUX1_REPORT.md](DUX1_REPORT.md). No new functional residency/persistence/presentation defect is
+claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
+Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
+mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
+not represented as zero. C1 and later stages remain inactive.

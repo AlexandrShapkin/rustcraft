@@ -703,3 +703,16 @@ the game-owned legacy importer while normalizing active semantic resource roles.
 identity and replication-touched game-policy leaks without broad rewrites. Retire workflows only
 with proven equivalence. M5 remains inactive until READY1 records closure evidence and a separate
 pass starts it; M6/M7 remain inactive.
+
+## D-046 — Demand-driven native developer views
+
+DUX1 keeps one shared Control Snapshot path for native page presentation, Rhai and scenarios.
+`control::diagnostics` registers bounded semantic view metadata independently of key bindings or
+Minecraft policy. The graphical composition owns its existing subsystem providers; the game adapter
+owns semantic world/entity observations. Active pages/overlays and explicit queries request cached
+four-Hz samples; metadata discovery and inactive views do not collect data. Selection/toggle changes
+invalidate relevant samples. Stable EntityId and ChunkPos/section references are the new public
+inspection contracts, not local dense IDs or GPU handles. Availability, coverage, age and collection
+cost remain visible. UI focus is mutually exclusive with the console and suppresses human input;
+scenario controller ownership remains explicit. This is a small native developer surface, not C1's
+general settings registry or a future mod UI framework. See DEBUGGING.md and DUX1_REPORT.md.

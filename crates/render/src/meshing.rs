@@ -413,6 +413,24 @@ impl MeshScheduler {
         }
     }
 
+    /// Read-only lifetime evidence; generation retention policy remains unchanged.
+    pub fn generation_entry_count(&self) -> usize {
+        self.generations.len()
+    }
+
+    /// Selected-section query; does not alter scheduling or generation retention.
+    pub fn section_stage(&self, section: SectionPos) -> Option<ColumnMeshStage> {
+        if self.ready.iter().any(|r| r.section == section) {
+            Some(ColumnMeshStage::UploadPending)
+        } else if self.in_flight.contains_key(&section) {
+            Some(ColumnMeshStage::InFlight)
+        } else if self.pending.contains_key(&section) {
+            Some(ColumnMeshStage::Pending)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     pub fn is_idle(&self) -> bool {
         self.pending.is_empty() && self.in_flight.is_empty() && self.ready.is_empty()

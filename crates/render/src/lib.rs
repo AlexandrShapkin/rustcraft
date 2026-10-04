@@ -1699,6 +1699,12 @@ impl Renderer {
     pub fn mesh_count(&self) -> usize {
         self.chunks.len()
     }
+    /// Read-only selected-section presence/count, without exposing local GPU handles.
+    pub fn section_mesh_pages(&self, position: ChunkPos, section_y: i32) -> Option<usize> {
+        self.chunks
+            .get(&(position, section_y))
+            .map(|m| m.pages.len())
+    }
     #[must_use]
     pub fn column_state(&self, position: ChunkPos, camera: Camera) -> RendererColumnState {
         let frustum = Frustum::from_camera(camera);

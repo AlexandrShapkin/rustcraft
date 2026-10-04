@@ -332,6 +332,42 @@ fn main() {
         .expect("game-neutral scripting");
     assert_eq!(result.0, "1");
 
+    // Independent native game registration and shared observation proof, without runtime/Minecraft.
+    use rustcraft_control::diagnostics::{Cost, DebugView, Domain, ViewKind};
+    let mut diagnostics = rustcraft_control::ControlState::default();
+    diagnostics
+        .diagnostics
+        .registry
+        .register(DebugView {
+            id: "sandbox_test:debug/pulse".into(),
+            name: "pulse".into(),
+            title: "Sandbox pulse".into(),
+            description: "Native sandbox semantic world state".into(),
+            owner: "sandbox_test:package/game".into(),
+            kind: ViewKind::Page,
+            cost: Cost::Low,
+            shortcut: None,
+            requirements: vec![Domain::World],
+        })
+        .unwrap();
+    diagnostics
+        .view_action(&rustcraft_control::Action::DebugPage(
+            "sandbox_test:debug/pulse".into(),
+        ))
+        .unwrap();
+    diagnostics.domains.world = serde_json::json!({"pulse":true});
+    assert_eq!(diagnostics.diagnostic_demand(), [Domain::World]);
+    assert!(diagnostics.diagnostic_text().contains("pulse: true"));
+    let observed = runtime
+        .eval(
+            &mut rustcraft_scripting_rhai::RhaiSession::new("sandbox-diagnostics"),
+            "world().pulse",
+            diagnostics.domains.clone(),
+        )
+        .unwrap();
+    assert_eq!(observed.0, "true");
+    println!("SANDBOX_DEBUG shared native page + Rhai world().pulse = true");
+
     let schedule = schedule();
     let profile = compile_profile(schedule.descriptors());
     let ids = RuntimeIds::resolve(&profile);

@@ -267,3 +267,11 @@ dx-test:
 
 dx-console:
     cargo run -p rustcraft-client -- --devtools --scenario scripts/scenarios/dx_console.rhai
+
+# Bounded shared diagnostics/selector tests and real-surface acceptance (local assets required).
+dux-test:
+    cargo test -p rustcraft-control -p rustcraft-scripting-rhai
+    cargo test -p rustcraft-client devtools
+
+dux-client:
+    cargo run --release -p rustcraft-client -- --dux-acceptance

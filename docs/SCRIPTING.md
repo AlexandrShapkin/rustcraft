@@ -209,3 +209,13 @@ update machine result and write capture-error.json when the bundle directory is 
 stderr explicitly reports partial evidence otherwise. Required evidence jobs have a 30-second
 completion bound. The CPU copy from a completed GPU map is the unavoidable bounded synchronous
 render-ownership operation; filesystem/PNG work is not executed there.
+
+## DUX1 shared diagnostic queries
+
+`debug()`, `chunk_inspection()` and `entity_inspection()` read the same demand-driven samples as
+native developer pages. Explicit `/debug chunk X Z SECTION_Y`, `/debug entity HEX_ID` and
+`/debug ui open/close/next/previous/tab/activate/help/target/entity` select transient diagnostic state.
+Scenario `assert_debug(PATH, BOOL/STRING/INT)` checks bounded current debug metadata. Existing
+`entity(STABLE_ID)` retains its bounded active-list contract. Data can be sampled/stale; provider
+age, availability and coverage are explicit. These additions grant no filesystem, network, process
+or mutation capability. See [DEBUGGING.md](DEBUGGING.md) for focus/cadence and [DUX1_REPORT.md](DUX1_REPORT.md).

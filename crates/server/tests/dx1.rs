@@ -25,7 +25,7 @@ fn shipped_scripts_compile_and_shared_headless_scenario_passes() {
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(if arguments[0] == "--script-check" {
-            "SCRIPT_CHECK 5 scripts"
+            "SCRIPT_CHECK 6 scripts"
         } else {
             "DX_RESULT "
         }));

@@ -1,4 +1,6 @@
 //! Versioned semantic developer control mechanism. No game, renderer or interpreter dependency.
+pub mod diagnostics;
+use diagnostics::{DebugInput, Domain};
 pub use rustcraft_agent_api::AgentIntent;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -73,6 +75,13 @@ pub enum Action {
     Capture(String),
     DebugPage(String),
     EntityPage(u32),
+    DebugUi(DebugInput),
+    InspectChunk {
+        x: i32,
+        z: i32,
+        section_y: i32,
+    },
+    InspectEntity(String),
     Overlay {
         name: String,
         enabled: bool,
@@ -85,7 +94,10 @@ impl Action {
             Self::Teleport(_) => "player.control",
             Self::SetBlock { .. } => "world.write",
             Self::Capture(_) => "debug.capture",
-            Self::DebugPage(_) | Self::EntityPage(_) | Self::Overlay { .. } => "debug.configure",
+            Self::DebugPage(_) | Self::EntityPage(_) | Self::Overlay { .. } | Self::DebugUi(_) => {
+                "debug.configure"
+            }
+            Self::InspectChunk { .. } | Self::InspectEntity(_) => "debug.configure",
         }
     }
     pub fn validate(&self) -> ControlResult<()> {
@@ -103,11 +115,22 @@ impl Action {
             {
                 Err("capture name must be 1..64 letters/digits/_/-".into())
             }
-            Self::DebugPage(name) if !PAGES.contains(&name.as_str()) => {
-                Err("unknown debug page".into())
+            Self::DebugPage(name) | Self::Overlay { name, .. } if name.len() > 128 => {
+                Err("debug identity too long".into())
             }
-            Self::Overlay { name, .. } if !OVERLAYS.contains(&name.as_str()) => {
-                Err("unknown overlay".into())
+            Self::InspectEntity(id)
+                if id.len() != 32
+                    || !id.bytes().all(|b| b.is_ascii_hexdigit())
+                    || id.bytes().all(|b| b == b'0') =>
+            {
+                Err("entity needs a nonzero 32-digit hexadecimal stable EntityId".into())
+            }
+            Self::InspectChunk { x, z, section_y }
+                if x.abs_diff(0) > 1_875_000
+                    || z.abs_diff(0) > 1_875_000
+                    || section_y.abs_diff(0) > 1_875_000 =>
+            {
+                Err("inspection coordinate outside bounded world range".into())
             }
             Self::SetBlock { key, .. } if key.len() > 256 || !key.contains(':') => {
                 Err("block needs a semantic namespaced key".into())
@@ -116,18 +139,6 @@ impl Action {
         }
     }
 }
-pub const PAGES: &[&str] = &[
-    "overview",
-    "streaming",
-    "world",
-    "entities",
-    "lighting",
-    "renderer",
-    "persistence",
-    "scripts",
-];
-pub const OVERLAYS: &[&str] = &["streaming", "entities", "collision", "target"];
-
 /// Bounded immutable values; absent domains are explicitly null. Adapters supply semantic IDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -143,6 +154,14 @@ pub struct Snapshot {
     pub renderer: Value,
     pub persistence: Value,
     pub scripts: Value,
+    #[serde(default)]
+    pub debug: Value,
+    #[serde(default)]
+    pub chunk: Value,
+    #[serde(default)]
+    pub entity: Value,
+    #[serde(default)]
+    pub overlay_geometry: Value,
 }
 impl Default for Snapshot {
     fn default() -> Self {
@@ -159,11 +178,20 @@ impl Default for Snapshot {
             renderer: Value::Null,
             persistence: Value::Null,
             scripts: Value::Null,
+            debug: Value::Null,
+            chunk: Value::Null,
+            entity: Value::Null,
+            overlay_geometry: Value::Null,
         }
     }
 }
 /// All adapters dispatch here; capability checks precede authoritative application.
 pub trait Host {
+    fn diagnostic_due(&self, _domain: Domain) -> bool {
+        true
+    }
+    fn prepare_diagnostics(&mut self, _domains: &[Domain]) {}
+    fn publish_diagnostic(&mut self, _domain: Domain, _value: Value, _started: Instant) {}
     fn snapshot(&self) -> Snapshot;
     fn block(&self, position: [i32; 3]) -> ControlResult<String>;
     fn apply(&mut self, action: &Action) -> ControlResult<Value>;
@@ -461,7 +489,14 @@ pub fn engine_registry() -> Registry {
             )
             .expect("static commands valid");
     }
-    registry.cache_completion("debug", PAGES.iter().chain(OVERLAYS).map(|s| s.to_string()));
+    let views = diagnostics::ViewRegistry::engine();
+    registry.cache_completion(
+        "debug",
+        views
+            .views(diagnostics::ViewKind::Page)
+            .chain(views.views(diagnostics::ViewKind::Overlay))
+            .map(|v| v.name.clone()),
+    );
     registry
 }
 fn inspect_command(args: &[String], snapshot: &Snapshot) -> ControlResult<CommandResult> {
@@ -502,6 +537,34 @@ fn capture_command(args: &[String], _: &Snapshot) -> ControlResult<CommandResult
 }
 fn debug_command(args: &[String], _: &Snapshot) -> ControlResult<CommandResult> {
     match args {
+        [verb, input] if verb == "ui" => Ok(CommandResult::action(Action::DebugUi(
+            match input.as_str() {
+                "open" => DebugInput::Open,
+                "close" => DebugInput::Close,
+                "next" => DebugInput::Next,
+                "previous" => DebugInput::Previous,
+                "tab" => DebugInput::Tab,
+                "activate" => DebugInput::Activate,
+                "help" => DebugInput::Help,
+                "target" => DebugInput::TargetChunk,
+                "entity" => DebugInput::NextEntity,
+                _ => return Err("unknown selector input".into()),
+            },
+        ))),
+        [verb, x, z, y] if verb == "chunk" => {
+            let number = |s: &str| {
+                s.parse::<i32>()
+                    .map_err(|_| "invalid coordinate".to_owned())
+            };
+            Ok(CommandResult::action(Action::InspectChunk {
+                x: number(x)?,
+                z: number(z)?,
+                section_y: number(y)?,
+            }))
+        }
+        [verb, id] if verb == "entity" => {
+            Ok(CommandResult::action(Action::InspectEntity(id.clone())))
+        }
         [verb, name, page] if verb == "page" && name == "entities" => Ok(CommandResult::action(
             Action::EntityPage(page.parse().map_err(|_| "invalid entity page")?),
         )),
@@ -593,6 +656,7 @@ pub enum Predicate {
     BlockEquals { position: [i32; 3], key: String },
     PlayerNear { position: [f32; 3], tolerance: f32 },
     DomainIdle(String),
+    DebugEquals { path: String, value: Value },
 }
 impl Predicate {
     fn evaluate(&self, host: &impl Host) -> ControlResult<bool> {
@@ -610,6 +674,13 @@ impl Predicate {
                             .is_some_and(|v| (v - f64::from(*p)).abs() <= f64::from(*tolerance))
                     })
             }),
+            Self::DebugEquals { path, value } => {
+                if path.len() > 128 || path.split('.').count() > 8 {
+                    return Err("bounded diagnostic path required".into());
+                }
+                let observed = path.split('.').fold(&snapshot.debug, |v, k| &v[k]);
+                observed == value
+            }
             Self::DomainIdle(domain) => match domain.as_str() {
                 "streaming" => snapshot.streaming["idle"].as_bool().unwrap_or(false),
                 "meshing" => snapshot.meshing["idle"].as_bool().unwrap_or(false),
@@ -954,6 +1025,10 @@ impl Scenario {
 /// Composition-owned transient state. A scenario lease overrides human/legacy drivers per tick.
 #[derive(Default)]
 pub struct ControlState {
+    pub diagnostics: diagnostics::Diagnostics,
+    pub selector: diagnostics::Selector,
+    pub selected_chunk: Option<[i32; 3]>,
+    pub selected_entity: Option<String>,
     pub fixed: FixedControl,
     pub leased: bool,
     pub intent: AgentIntent,
@@ -973,17 +1048,14 @@ impl ControlState {
                 Action::Pause => self.fixed.pause(),
                 Action::Resume => self.fixed.resume(),
                 Action::Step(n) => self.fixed.step(*n)?,
-                Action::DebugPage(name) => self.page = name.clone(),
+                Action::DebugPage(_)
+                | Action::Overlay { .. }
+                | Action::DebugUi(_)
+                | Action::InspectChunk { .. }
+                | Action::InspectEntity(_) => self.view_action(action)?,
                 Action::EntityPage(page) => {
                     self.page = "entities".into();
                     self.entity_offset = (*page as usize).min(7) * 8;
-                }
-                Action::Overlay { name, enabled } => {
-                    if *enabled {
-                        self.overlays.insert(name.clone());
-                    } else {
-                        self.overlays.remove(name);
-                    }
                 }
                 Action::Capture(name) => {
                     if self.captures.len() >= 8 {
@@ -1251,6 +1323,17 @@ mod tests {
     fn future_chat_has_no_developer_power() {
         let c = Context::read_only(Source::FutureChat);
         assert!(c.require("world.read").is_ok());
+        for action in [
+            Action::InspectChunk {
+                x: 0,
+                z: 0,
+                section_y: 0,
+            },
+            Action::InspectEntity("00000000000000000000000000000001".into()),
+            Action::DebugUi(DebugInput::Open),
+        ] {
+            assert!(c.require(action.capability()).is_err());
+        }
         for cap in [
             "world.write",
             "player.control",

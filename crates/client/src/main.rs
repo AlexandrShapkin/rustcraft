@@ -338,6 +338,7 @@ struct ClientApp {
     dx_probe: Option<devtools::Probe>,
     dx_abort_frame: Option<u64>,
     dx_text: String,
+    dux_fixture: bool,
     dx_boxes: Vec<rustcraft_engine_core::Aabb>,
     dx_colors: Vec<[f32; 3]>,
     dx_snapshot_at: Instant,
@@ -1512,6 +1513,7 @@ impl ClientApp {
             dx_probe: None,
             dx_abort_frame: None,
             dx_text: String::new(),
+            dux_fixture: false,
             dx_boxes: Vec::new(),
             dx_colors: Vec::new(),
             dx_snapshot_at: Instant::now(),
@@ -2367,6 +2369,7 @@ impl ClientApp {
         deadline.is_none_or(|deadline| Instant::now() < deadline)
     }
     fn fixed_step(&mut self) {
+        let developer_focus = self.dev_focus();
         let tick_started = Instant::now();
         if let Some(previous) = self.responsiveness.last_fixed_tick.replace(tick_started) {
             self.responsiveness
@@ -2566,7 +2569,7 @@ impl ClientApp {
             };
             let intent = if self.control_state.leased {
                 self.control_state.intent
-            } else if self.devtools.as_ref().is_some_and(|d| d.console_open) {
+            } else if developer_focus {
                 Default::default()
             } else {
                 intent
@@ -4193,6 +4196,7 @@ impl ClientApp {
         self.observe_stream_stage(4, upload_pending, completed_count > 0, true, false);
     }
     fn render(&mut self, event_loop: &ActiveEventLoop) {
+        let legacy_debug = self.legacy_debug_visible();
         if let Some(input_at) = self.responsiveness.input_consumed_at.take() {
             self.responsiveness
                 .input_to_render
@@ -4224,7 +4228,7 @@ impl ClientApp {
         );
         let aspect = renderer.width() as f32 / renderer.height().max(1) as f32;
         renderer.telemetry_enabled = self.debug || self.measure_seconds.is_some();
-        if self.debug || self.measure_seconds.is_some() {
+        if legacy_debug || self.measure_seconds.is_some() {
             self.process.sample();
             if let Some(g) = &mut self.gpu_metrics {
                 g.sample();
@@ -4313,7 +4317,7 @@ impl ClientApp {
         if self.diagnostic.is_none()
             && let Some(sim) = self.simulation.as_ref()
         {
-            if self.debug && self.last_snapshot.elapsed().as_millis() >= 1_000 {
+            if legacy_debug && self.last_snapshot.elapsed().as_millis() >= 1_000 {
                 self.process.sample();
                 self.last_snapshot = Instant::now();
                 self.debug_text = debug::DebugMetricsSnapshot::collect(
@@ -5243,7 +5247,9 @@ impl ApplicationHandler for ClientApp {
                 self.cursor_position = [position.x as f32, position.y as f32];
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.controller.wheel(delta);
+                if !self.dev_focus() {
+                    self.controller.wheel(delta);
+                }
             }
             WindowEvent::Focused(false) => {
                 self.controller.break_held = false;
@@ -5294,6 +5300,9 @@ impl ApplicationHandler for ClientApp {
             WindowEvent::MouseInput { state, button, .. }
                 if self.diagnostic.is_none_or(Stage::normal_world) =>
             {
+                if self.dev_focus() {
+                    return;
+                }
                 if self.inventory_open {
                     if state == ElementState::Pressed
                         && (button == MouseButton::Left || button == MouseButton::Right)
@@ -5346,6 +5355,7 @@ impl ApplicationHandler for ClientApp {
                 .get_or_insert(event_started);
         }
         if self.controller.captured
+            && !self.dev_focus()
             && let DeviceEvent::MouseMotion { delta } = event
         {
             self.controller.look.x += delta.0 as f32;
@@ -6105,7 +6115,7 @@ fn main() {
         std::env::var("RUSTCRAFT_WORLD_NAME").unwrap_or_else(|_| "default".to_owned());
     while let Some(flag) = args.next() {
         match flag.as_str() {
-            "--devtools" | "--dx-overhead" => {}
+            "--devtools" | "--dx-overhead" | "--dux-acceptance" => {}
             "--dx-abort-after-frames" => {
                 args.next().expect("--dx-abort-after-frames requires N");
             }
@@ -6184,7 +6194,31 @@ fn main() {
             .position(|a| a == "--scenario")
             .and_then(|i| args.get(i + 1).cloned());
     }
-    app.world_name = world_name;
+    if std::env::args().any(|a| a == "--dux-acceptance") {
+        app.dux_fixture = true;
+        app.devtools = Some(
+            rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), {
+                let mut r = rustcraft_control::engine_registry();
+                rustcraft_minecraft_b173::control::register_commands(&mut r)
+                    .expect("package commands");
+                r
+            })
+            .expect("devtools"),
+        );
+        app.scenario_path = Some("scripts/scenarios/dux1.rhai".into());
+    }
+    app.world_name = if app.dux_fixture {
+        format!(
+            "dux1-acceptance-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        )
+    } else {
+        world_name
+    };
     app.survival_start = std::env::args().any(|a| a == "--survival");
     app.stream_perf = std::env::args().any(|a| a == "--stream-perf");
     if app.stream_perf {

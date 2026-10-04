@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const RHAI_VERSION: &str = "1.26.1";
-pub const API_HELP: &str = "console automation: console_open(BOOL), console_line(LINE); control_version(), tick(), player_position(), player(), world(), block_at(X,Y,Z), streaming(), entities(), entity(STABLE_ID), persistence(), renderer(), scripts(), lighting(), meshing(), has_capability(ID), command(LINE), pause(), resume(), step(N), teleport(X,Y,Z), set_block(X,Y,Z,SEMANTIC_KEY), capture(NAME), debug_page(NAME), overlay(NAME,BOOL); scenario: reload_script(PATH) requests and cooperatively waits for a compile job; checkpoint(), assert_tick_delta(N), wait_tick_delta(N,MS), assert_player_unchanged(), wait_ticks(N), wait_frames(N), wait_tick(T,MS), assert_tick(T), assert_block(X,Y,Z,KEY), move_player(FORWARD,STRAFE,TICKS); bounded assert_true(BOOL), assert_eq(INT,INT), fail(MESSAGE). No filesystem, network, process, sleep or imports.";
+pub const API_HELP: &str = "console automation: console_open(BOOL), console_line(LINE); DUX1: debug(), chunk_inspection(), entity_inspection(), assert_debug(PATH, BOOL/STRING/INT); /debug ui open/close/next/previous/tab/activate/help/target/entity; /debug chunk X Z SECTION_Y; /debug entity HEX_ID; control_version(), tick(), player_position(), player(), world(), block_at(X,Y,Z), streaming(), entities(), entity(STABLE_ID), persistence(), renderer(), scripts(), lighting(), meshing(), has_capability(ID), command(LINE), pause(), resume(), step(N), teleport(X,Y,Z), set_block(X,Y,Z,SEMANTIC_KEY), capture(NAME), debug_page(NAME), overlay(NAME,BOOL); scenario: reload_script(PATH) requests and cooperatively waits for a compile job; checkpoint(), assert_tick_delta(N), wait_tick_delta(N,MS), assert_player_unchanged(), wait_ticks(N), wait_frames(N), wait_tick(T,MS), assert_tick(T), assert_block(X,Y,Z,KEY), move_player(FORWARD,STRAFE,TICKS); bounded assert_true(BOOL), assert_eq(INT,INT), fail(MESSAGE). No filesystem, network, process, sleep or imports.";
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
     pub session: String,
@@ -195,6 +195,9 @@ impl RhaiRuntime {
             ("scripts", "scripts", "debug.inspect"),
             ("lighting", "lighting", "debug.inspect"),
             ("meshing", "meshing", "debug.inspect"),
+            ("debug", "debug", "debug.inspect"),
+            ("chunk_inspection", "chunk", "debug.inspect"),
+            ("entity_inspection", "entity", "debug.inspect"),
         ] {
             let query = bridge.clone();
             let caps = context.clone();
@@ -210,6 +213,9 @@ impl RhaiRuntime {
                     "renderer" => &b.snapshot.renderer,
                     "lighting" => &b.snapshot.lighting,
                     "meshing" => &b.snapshot.meshing,
+                    "debug" => &b.snapshot.debug,
+                    "chunk" => &b.snapshot.chunk,
+                    "entity" => &b.snapshot.entity,
                     _ => &b.snapshot.scripts,
                 };
                 Ok(semantic_value(value, 0))
@@ -265,6 +271,9 @@ impl RhaiRuntime {
         step_fn!("assert_tick_delta",(n:i64),Step::AssertTickDelta(count(n)?));
         step_fn!("wait_tick_delta",(n:i64,timeout:i64),Step::WaitTickDelta {delta:count(n)?,timeout_ms:count(timeout)?.clamp(1,30000)});
         step_fn!("assert_player_unchanged", (), Step::AssertPlayerUnchanged);
+        step_fn!("assert_debug", (path:&str, value:bool), Step::Assert {predicate:Predicate::DebugEquals{path:path.into(),value:serde_json::json!(value)},message:format!("debug {path} == {value}")});
+        step_fn!("assert_debug", (path:&str, value:&str), Step::Assert {predicate:Predicate::DebugEquals{path:path.into(),value:serde_json::json!(value)},message:format!("debug {path} == {value}")});
+        step_fn!("assert_debug", (path:&str, value:i64), Step::Assert {predicate:Predicate::DebugEquals{path:path.into(),value:serde_json::json!(value)},message:format!("debug {path} == {value}")});
         Self {
             engine,
             bridge,
@@ -469,6 +478,7 @@ impl ScriptRoot {
     }
 }
 pub struct LoadedScript {
+    pub domains: Vec<rustcraft_control::diagnostics::Domain>,
     pub path: PathBuf,
     pub ast: AST,
     pub generation: u64,
@@ -491,23 +501,31 @@ impl LoadedScript {
             hash: blake3::hash(text.as_bytes()).to_hex().to_string(),
             last_error: None,
             compile_us: 0,
+            domains: rustcraft_control::diagnostics::query_domains(&text),
         })
     }
     /// Compile before swapping. Broken edits retain the last working AST and generation.
     pub fn reload(&mut self, root: &ScriptRoot, runtime: &RhaiRuntime) -> ControlResult<bool> {
-        let candidate: ControlResult<Option<(AST, String)>> = (|| {
+        let candidate: ControlResult<
+            Option<(AST, String, Vec<rustcraft_control::diagnostics::Domain>)>,
+        > = (|| {
             let (_, text) = root.read(&self.path)?;
             let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
             if hash == self.hash {
                 return Ok(None);
             }
             let ast = runtime.compile(&text)?;
-            Ok(Some((ast, hash)))
+            Ok(Some((
+                ast,
+                hash,
+                rustcraft_control::diagnostics::query_domains(&text),
+            )))
         })();
         match candidate {
-            Ok(Some((ast, hash))) => {
+            Ok(Some((ast, hash, domains))) => {
                 self.ast = ast;
                 self.hash = hash;
+                self.domains = domains;
                 self.generation += 1;
                 self.last_error = None;
                 Ok(true)
@@ -553,6 +571,7 @@ pub struct DevTools {
     pub root: ScriptRoot,
     pub loaded: std::collections::BTreeMap<PathBuf, LoadedScript>,
     command_files: std::collections::BTreeMap<String, PathBuf>,
+    repl_domains: std::collections::BTreeSet<rustcraft_control::diagnostics::Domain>,
     pub scenario: Option<rustcraft_control::Scenario>,
     pub events: rustcraft_control::EventRing,
     pub output: std::collections::VecDeque<String>,
@@ -598,6 +617,7 @@ impl DevTools {
             bundle_started: Instant::now(),
             loaded: Default::default(),
             command_files: Default::default(),
+            repl_domains: Default::default(),
             scenario: None,
             events: Default::default(),
             output: Default::default(),
@@ -753,15 +773,7 @@ impl DevTools {
         }
     }
     pub fn text(&self, state: &rustcraft_control::ControlState) -> String {
-        self.raw_text(state)
-            .lines()
-            .take(20)
-            .map(|line| line.chars().take(100).collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n")
-            .chars()
-            .take(800)
-            .collect()
+        rustcraft_control::diagnostics::bounded_text(&self.raw_text(state))
     }
     fn raw_text(&self, state: &rustcraft_control::ControlState) -> String {
         if self.console_open {
@@ -781,97 +793,11 @@ impl DevTools {
             text.push('|');
             text.push_str(&self.line[self.cursor..]);
             text
-        } else if !state.page.is_empty() && state.page != "overview" {
-            if state.page == "entities" {
-                let rows = state
-                    .domains
-                    .entities
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .skip(state.entity_offset)
-                            .take(8)
-                            .map(|e| {
-                                format!(
-                                    "{} {}\npos {} owner {} vel {} age {} revision {}",
-                                    e["id"],
-                                    e["type"],
-                                    e["position"],
-                                    e["owner_chunk"],
-                                    e["velocity"],
-                                    e["age"],
-                                    e["revision"]
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_else(|| "unavailable".into());
-                return format!(
-                    "ENTITIES page {} (bounded active subset)\n{rows}",
-                    state.entity_offset / 8
-                );
-            }
-            if state.page == "streaming" {
-                let s = &state.domains.streaming;
-                return format!(
-                    "STREAMING chunk {}\nDesired {} radius {} | Retained radius {} | resident {}\nSafe {} Visible {} Pending {}\nLoad {}\nGenerate {}\nMesh {}\nLighting {}\nCritical age {} ms\nFrontier {}",
-                    s["player_chunk"],
-                    s["desired"],
-                    s["desired_radius"],
-                    s["retained_radius"],
-                    s["resident"],
-                    s["safe"],
-                    s["visible"],
-                    s["pending"],
-                    s["load"],
-                    s["generation"],
-                    state.domains.meshing,
-                    state.domains.lighting,
-                    s["oldest_critical_ms"],
-                    s["frontier"]
-                );
-            }
-            if state.page == "scripts" {
-                let s = &state.domains.scripts;
-                return format!(
-                    "SCRIPTS / JOBS\nCompile pending {} | Scenario step {}\nLimits {}\nREPL error {}\nLoaded {}\nJobs {}",
-                    s["compile_pending"],
-                    s["step"],
-                    s["limits"],
-                    s["repl"]["error"],
-                    s["loaded"],
-                    s["jobs"]
-                );
-            }
-            let value = match state.page.as_str() {
-                "streaming" => &state.domains.streaming,
-                "world" => &state.domains.world,
-                "entities" => &state.domains.entities,
-                "lighting" => &state.domains.lighting,
-                "renderer" => &state.domains.renderer,
-                "persistence" => &state.domains.persistence,
-                _ => &state.domains.scripts,
-            };
-            format!(
-                "DEBUG {}\n{}",
-                state.page,
-                serde_json::to_string_pretty(value)
-                    .unwrap_or_default()
-                    .lines()
-                    .take(20)
-                    .map(|s| s
-                        .chars()
-                        .take(100)
-                        .filter(|c| !matches!(c, '"' | '{' | '}'))
-                        .collect::<String>())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
         } else {
-            String::new()
+            state.diagnostic_text()
         }
     }
+
     pub fn submit(
         &mut self,
         host: &mut impl rustcraft_control::Host,
@@ -913,6 +839,23 @@ impl DevTools {
         host: &mut impl rustcraft_control::Host,
         _state_leased: bool,
     ) -> ControlResult<()> {
+        let mut demand = rustcraft_control::diagnostics::query_domains(line);
+        if line.contains("fn ") {
+            self.repl_domains.extend(demand.iter().copied());
+        }
+        demand.extend(self.repl_domains.iter().copied());
+        if let Some(name) = line
+            .trim_start()
+            .strip_prefix('/')
+            .and_then(|s| s.split_whitespace().next())
+            && let Some(script) = self
+                .command_files
+                .get(name)
+                .and_then(|p| self.loaded.get(p))
+        {
+            demand.extend(script.domains.iter().copied());
+        }
+        self.prepare(&demand, host);
         let context = self.runtime.context().clone();
         self.events.push(host.snapshot().tick, "console", line);
         if line.starts_with('/') {
@@ -1020,8 +963,12 @@ impl DevTools {
         if self.compiling_scenario {
             return Err("scenario compilation already pending".into());
         }
+        host.prepare_diagnostics(&[rustcraft_control::diagnostics::Domain::Renderer]);
         let snapshot = host.snapshot();
-        if !snapshot.renderer.is_null() && context.capabilities.contains("debug.capture") {
+        if !snapshot.renderer.is_null()
+            && snapshot.renderer["unavailable"].is_null()
+            && context.capabilities.contains("debug.capture")
+        {
             context.capabilities.insert("render.capture".into());
         }
         self.request_compile(
@@ -1153,6 +1100,7 @@ impl DevTools {
                                 command_handler(script.ast.clone(), spec.capability),
                             )?;
                         }
+                        self.prepare(&script.domains, host);
                         match purpose.as_ref() {
                             Some(Purpose::Scenario { path, context }) => {
                                 self.compiling_scenario = false;
@@ -1370,11 +1318,58 @@ impl DevTools {
             s.cancel(host, &mut self.events);
         }
     }
+    pub fn prepare(
+        &self,
+        domains: &[rustcraft_control::diagnostics::Domain],
+        host: &mut impl rustcraft_control::Host,
+    ) {
+        if domains.contains(&rustcraft_control::diagnostics::Domain::Scripts)
+            && host.diagnostic_due(rustcraft_control::diagnostics::Domain::Scripts)
+        {
+            let started = Instant::now();
+            host.publish_diagnostic(
+                rustcraft_control::diagnostics::Domain::Scripts,
+                serde_json::json!({"repl":self.repl.diagnostic,
+                "loaded":self.loaded.values().take(32).map(|s|serde_json::json!({"path":s.path,
+                "generation":s.generation,
+                "error":s.last_error})).collect::<Vec<_>>(),
+                "loaded_truncated":self.loaded.len()>32,
+                "jobs":self.jobs.snapshot(),
+                "compile_pending":self.compiling_scenario,
+                "step":self.scenario.as_ref().map(|s|s.cursor),
+                "scenario":self.scenario.as_ref().map(|s|&s.result),
+                "recent_output":self.output.iter().rev().take(4).collect::<Vec<_>>(),
+                "frame":self.frame}),
+                started,
+            );
+        }
+        host.prepare_diagnostics(domains);
+    }
     pub fn advance(
         &mut self,
         host: &mut impl rustcraft_control::Host,
         graphical: bool,
     ) -> ControlResult<Option<PathBuf>> {
+        use rustcraft_control::diagnostics::query_domains;
+        let demand = self
+            .scenario
+            .as_ref()
+            .filter(|s| s.active)
+            .and_then(|s| s.steps.get(s.cursor))
+            .map(|step| match step {
+                Step::Command(line) => query_domains(line),
+                Step::Wait {
+                    predicate: Predicate::DomainIdle(name),
+                    ..
+                }
+                | Step::Assert {
+                    predicate: Predicate::DomainIdle(name),
+                    ..
+                } => query_domains(name),
+                _ => vec![],
+            })
+            .unwrap_or_default();
+        self.prepare(&demand, host);
         if let Some((context, action)) = self.pending_actions.pop_front()
             && let Err(error) = rustcraft_control::execute(host, &context, &action)
         {
@@ -1416,6 +1411,11 @@ impl DevTools {
                     &mut self.events,
                 );
             } else {
+                if open {
+                    let _ = host.apply(&Action::DebugUi(
+                        rustcraft_control::diagnostics::DebugInput::Close,
+                    ));
+                }
                 if open != self.console_open {
                     self.input(ConsoleInput::Toggle);
                 }
@@ -1481,6 +1481,7 @@ impl DevTools {
                 let directory = PathBuf::from("target/test-runs")
                     .join("scenario")
                     .join(&s.result.run_id);
+                wrapped.prepare_diagnostics(&rustcraft_control::diagnostics::Domain::ALL);
                 let mut snapshot = wrapped.snapshot();
                 // Expensive host domains may be cadence-cached; terminal control state is current.
                 snapshot.scripts["scenario"] = serde_json::to_value(&s.result).unwrap();
@@ -1508,7 +1509,13 @@ impl DevTools {
                         files.push((format!("{name}.json"), value.clone()));
                     }
                 }
-                files.push(("scripts.json".into(), serde_json::json!({"repl":self.repl.diagnostic,"scenario":self.scenario_diagnostic,"result":s.result,"jobs":self.jobs.snapshot()})));
+                files.push((
+                    "scripts.json".into(),
+                    serde_json::json!({"repl":self.repl.diagnostic,
+                    "scenario":self.scenario_diagnostic,
+                    "result":s.result,
+                    "jobs":self.jobs.snapshot()}),
+                ));
                 let text = vec![
                     (
                         "recent-events.jsonl".into(),
@@ -1573,6 +1580,20 @@ impl<H: rustcraft_control::Host> rustcraft_control::Host for JobHost<'_, H> {
         }
         s.scripts["jobs"] = self.jobs.clone();
         s
+    }
+    fn diagnostic_due(&self, domain: rustcraft_control::diagnostics::Domain) -> bool {
+        self.host.diagnostic_due(domain)
+    }
+    fn prepare_diagnostics(&mut self, domains: &[rustcraft_control::diagnostics::Domain]) {
+        self.host.prepare_diagnostics(domains);
+    }
+    fn publish_diagnostic(
+        &mut self,
+        domain: rustcraft_control::diagnostics::Domain,
+        value: serde_json::Value,
+        started: Instant,
+    ) {
+        self.host.publish_diagnostic(domain, value, started);
     }
     fn block(&self, p: [i32; 3]) -> ControlResult<String> {
         self.host.block(p)

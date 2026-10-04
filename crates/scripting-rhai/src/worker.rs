@@ -108,6 +108,7 @@ impl Worker {
                             };
                             Ok(Payload::Compiled(Some(Box::new((
                                 LoadedScript {
+                                    domains: rustcraft_control::diagnostics::query_domains(&source),
                                     path,
                                     ast,
                                     hash: current,

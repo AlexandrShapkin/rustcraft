@@ -158,4 +158,4 @@ Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the e
 callers/assertions/artifacts and proves scenario equivalence before retirement. No recipe is dead
 merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
 discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
-These stages remain planned/inactive. The audit adds no new command or dependency policy gate.
+C1 and later stages remain planned/inactive. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
