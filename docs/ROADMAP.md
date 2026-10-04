@@ -209,7 +209,7 @@ is green; see DX1_REPORT.md for canonical evidence. M4 remains complete with M4-
 Accepted planning baseline: public main `16c6823a739e83f830b6676bbe0390be769ca17e`,
 2026-10-04; [closeout Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37157185442)
 passed. M0–M4 and DX1 remain closed; M4-009 representative-hardware quantitative evidence remains
-conditional. The audit remains the accepted historical plan. DUX1 is CLOSED with local and Ubuntu/Windows acceptance recorded in [DUX1_REPORT.md](DUX1_REPORT.md); C1 is CLOSED; UX1 is active; RSM1 and later stages remain inactive.
+conditional. The audit remains the accepted historical plan. DUX1 is CLOSED with local and Ubuntu/Windows acceptance recorded in [DUX1_REPORT.md](DUX1_REPORT.md); C1 is CLOSED; UX1 is CLOSED; RSM1 and later stages remain inactive.
 
 The canonical [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) contains source evidence, severity/disposition,
 ownership map, dependencies and executable stage contracts (goal, scope, invariants, measurements,
@@ -220,7 +220,7 @@ do not treat the sequence as authorization to implement everything automatically
 | --- | --- | --- |
 | 1 | DUX1 — In-game developer diagnostics (CLOSED) | Metadata/selector and demand-driven shared DX1 snapshots, then targeted chunk/EntityId inspection; graphical selection/toggle/cost proof. Existing console pages/overlays stay usable. |
 | 2 | C1 — Runtime configuration plane (CLOSED) | Shared typed registry, source/validation/change policy and safe existing operational controls; Control/Rhai/developer UI share effective readback. Structural settings remain immutable/restart-bound. |
-| 2a | UX1 — Developer controls & Unicode text (active) | Held F3 chords, discoverable console and bundled semantic Unicode text; bounded cache, grapheme/IME editing. |
+| 2a | UX1 — Developer controls & Unicode text (CLOSED) | Held F3 chords, discoverable console and bundled semantic Unicode text; bounded cache, grapheme/IME editing. |
 | 3 | RSM1 — Residency and memory lifetime | Ownership ledger and repeated A→B→C→D→A/unique-exploration/stale-revisit tests; logical counts/bytes plateau, safe metadata retirement and bounded pressure. Driver VRAM need not return to startup. |
 | 4 | P1 — Frame pacing and presentation | Separate authoritative/render/request/present-call cadence, refresh/provider evidence and distributions; bounded scheduling/interpolation/input change only after diagnosis. High average FPS is not acceptance. |
 | 5 | S1 — Persistence architecture evaluation and scalability | Benchmark existing storage and justified candidate spikes first; ADR accepts backend limits/component/recovery boundaries or names a separate bounded migration. No automatic database adoption. |

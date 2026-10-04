@@ -1,6 +1,6 @@
 # UX1 — Developer controls and Unicode text
 
-Status: **ACTIVE; local acceptance passed, public implementation CI pending**. Initial public main:
+Status: **CLOSED; local and Ubuntu/Windows implementation acceptance passed**. Initial public main:
 `a3554807a20dc4fff6d9878cb018659c23b1a7b2`.
 Continuation/public UX1 starting baseline and C1 closeout:
 `585de94b666257ddb5e4f2a902429db84be010ca`, Ubuntu and Windows green in
@@ -151,3 +151,12 @@ Final quiet post-panel regressions: console `14-1791134245341815073`, DUX1
 Final fmt/check/workspace-test/strict-Clippy and all required just workflows pass.
 Diagnostic overhead counts remain zero for inactive domains; the final high-page run records
 a 59.66 ms outlier in PERFORMANCE.md rather than discarding it.
+
+## Public acceptance
+
+Implementation: `83c3cdcd954d72f4c8a7ba98f8a3918b4efa652e`,
+[CI 37220087083](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37220087083):
+Ubuntu success, Windows success (format, workspace check/tests, strict all-feature Clippy).
+Closeout is documentation only; final closeout SHA/CI is verified after publication and reported
+externally, avoiding a self-referential commit hash. C1/DUX1 remain CLOSED; RSM1/P1/S1/R2/A1/DX2/
+READY1 and M5/M6/M7 remain inactive. No version bump, tag or release was created.

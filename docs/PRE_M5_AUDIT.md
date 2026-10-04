@@ -720,7 +720,7 @@ publication rather than embedding a self-referential commit hash here. Stop afte
 
 ## UX1 bounded execution addition
 
-C1 is CLOSED with Ubuntu/Windows closeout CI run 37182596219. UX1 is active between C1 and RSM1:
+C1 is CLOSED with Ubuntu/Windows closeout CI run 37182596219. UX1 is CLOSED between C1 and RSM1 (see UX1_REPORT.md, implementation CI 37220087083):
 fix held F3/digit routing, console discovery and Unicode rendering before further manual diagnosis.
 Scope: shared semantic shortcuts, command/Rhai UX, grapheme/IME editor, bundled-font shaping,
 semantic font resources, bounded text caches and C1 scaling. No GUI rewrite, R2 asset migration,
