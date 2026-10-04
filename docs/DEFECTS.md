@@ -87,8 +87,8 @@ shared cached providers and targeted stable inspection; final acceptance/public 
 claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
 Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
 mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
-not represented as zero. C1 and later stages remain inactive.
+not represented as zero. C1 is CLOSED; later stages remain inactive.
 
 ## C1 execution
 
-PM5-008 migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed and all later stages inactive.
+PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed and all later stages inactive.

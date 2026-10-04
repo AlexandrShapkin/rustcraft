@@ -1,6 +1,6 @@
 # C1 runtime configuration acceptance
 
-Status: **implementation complete; local acceptance passed; public acceptance pending**.
+Status: **CLOSED**.
 Starting main: `f8fb1778805761bd65ff3a05f686880877a2b1ea`; origin agrees, and both jobs in
 [baseline CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37174552527) are green.
 The original dirty mounted checkout is preserved; work uses the clean writable publication clone.
@@ -121,7 +121,7 @@ Frozen semantic hashes and thresholds are unchanged. No full unrelated historica
 Cargo machete finds no unused dependencies. Cargo audit finds no known vulnerabilities, with three
 unmaintained warnings: paste (RUSTSEC-2024-0436), smartstring (RUSTSEC-2026-0249), ttf-parser
 (RUSTSEC-2026-0192). Existing serde/serde_json/atomicwrites are reused; no dependency version update.
-Normal server dependency tree remains free of render/wgpu/winit. Public CI is pending publication.
+Normal server dependency tree remains free of render/wgpu/winit. Implementation `a3554807a20dc4fff6d9878cb018659c23b1a7b2`: Ubuntu and Windows green in [CI run 37178493694](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37178493694).
 
 ## Deferred scope and stop
 
@@ -130,5 +130,5 @@ see CONFIGURATION inventory with owners/reasons/future stages. Polished settings
 hot pool resizing, general resource reload, persistence backend, GPU lifetime/queue/eviction fixes,
 presentation timing/interpolation and external Agent/Bot identity migration are deferred.
 DUX1 remains CLOSED; its added Settings registration raises graphical views 17->18 without a second
-backend. C1 closure requires local acceptance and both public platform jobs green. Stop before RSM1.
+backend. C1 local acceptance and both public platform jobs are green. C1 is CLOSED; RSM1 remains inactive.
 No version bump, tag or release is part of this pass.
