@@ -102,7 +102,7 @@ replacement are deferred breadth, not reopened DUX1/C1 stages. RSM1 and later st
 ## RSM1 execution
 
 PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime causes recorded in
-[RSM1_REPORT.md](RSM1_REPORT.md). Narrow fixes are implemented; final local/public acceptance is
-pending. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
+[RSM1_REPORT.md](RSM1_REPORT.md). PM5-002 is resolved: narrow fixes passed local acceptance and Ubuntu/Windows implementation
+CI 37228702009. RSM1 is CLOSED. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
 This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
 remain mandatory. DUX1/C1/UX1 stay CLOSED; P1 and subsequent stages remain inactive.

@@ -1,6 +1,7 @@
 # RSM1 — Residency & memory lifetime
 
-Status: local acceptance complete; implementation/public CI and closeout pending.
+Status: **CLOSED** — local acceptance and Ubuntu/Windows implementation CI verified;
+this documentation closeout must also pass both public jobs before final publication is accepted.
 Starting main: `097195340437b16901ec067f19789c973855bbc6` (UX1 closeout).
 Verified UX1 implementation run 37220087083 and closeout run 37220398319: Ubuntu and Windows
 successful. DUX1/C1/UX1 remain CLOSED. P1 and all subsequent stages remain inactive.
@@ -221,7 +222,7 @@ bugs is established by these measurements. Driver VRAM returning to startup is n
 
 No P1/S1/R2/A1/DX2/READY1/M5/M6/M7 work, version bump, tag or release. Representative-hardware
 M4-009 evidence remains conditional. Process-specific GPU telemetry, physical fence retirement,
-allocator internals and workload-wide optimization remain deferred. PM5-002 stays open until Ubuntu/Windows public acceptance is complete.
+allocator internals and workload-wide optimization remain deferred. PM5-002 is **resolved** by the measured fixes and verified implementation acceptance.
 
 ## Final local gate evidence
 
@@ -254,3 +255,17 @@ and text work and concurrent system activity; differing pages are not an isolate
 `cargo machete` clean; `cargo audit` no known vulnerabilities, three unchanged allowed unmaintained
 warnings: paste RUSTSEC-2024-0436, smartstring RUSTSEC-2026-0249, ttf-parser RUSTSEC-2026-0192.
 No dependencies, lockfile, font resources or third-party licenses changed. Server remains headless.
+
+
+## Public acceptance
+
+Implementation: `e3117949d2d90473ae4be3263b24fc04867bbc19`, **Bound residency and mesh lifetime**.
+[CI run 37228702009](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37228702009):
+Ubuntu **success**, Windows **success**, including formatting, check, workspace tests and strict Clippy.
+The documentation closeout records RSM1 CLOSED and PM5-002 resolved. Its final Ubuntu/Windows CI
+is monitored separately before the final report; no further stage starts during that wait.
+
+PM5-002 closure rests on current-only metadata, bounded payload pressure and forward progress,
+late-result rejection, five-cycle and unique-exploration logical bounds, render/snapshot/GPU ownership
+agreement, drained light cleanup, preserved dirty/recovery pins and clean shutdown accounting.
+It does not depend on a flat driver-VRAM graph or RSS returning to startup.

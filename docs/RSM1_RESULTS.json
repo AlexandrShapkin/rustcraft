@@ -11,7 +11,16 @@
     "settled_samples": 31,
     "backend": "Gl",
     "adapter": "llvmpipe LLVM 23.1.1",
-    "process_vram": "unavailable"
+    "process_vram": "unavailable",
+    "effective_config": {
+      "rustcraft:diagnostics/sample_interval_ms": 250,
+      "rustcraft:lighting/work_budget": 256,
+      "rustcraft:meshing/upload_bytes": 8388608,
+      "rustcraft:meshing/upload_sections": 64,
+      "rustcraft:streaming/load_radius": 3,
+      "rustcraft:streaming/main_budget_ms": 8.0,
+      "rustcraft:streaming/retain_radius": 4
+    }
   },
   "before": {
     "unique_removed_section_metadata": 10000,
@@ -660,5 +669,11 @@
       "render_snapshot_bytes": 23514624,
       "retired_light_sources": 0
     }
-  ]
+  ],
+  "implementation_sha": "e3117949d2d90473ae4be3263b24fc04867bbc19",
+  "implementation_ci": {
+    "run": 37228702009,
+    "ubuntu": "success",
+    "windows": "success"
+  }
 }
