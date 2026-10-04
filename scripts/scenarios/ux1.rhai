@@ -1,0 +1,24 @@
+// Actual client shortcut routing, console service, shared text and configuration.
+pause();
+command("/debug key Digit3 down");step(1);wait_frames(2);assert_debug("hotbar_selected",2);
+command("/debug key F3 down");command("/debug key Digit1 down");command("/debug key Digit1 down repeat");command("/debug key F3 up");
+assert_debug("active_page","streaming");assert_debug("hotbar_selected",2);
+wait_frames(3);capture("ux1_f3_streaming");wait_frames(3);
+command("/debug key F3 down");command("/debug key F3 up");wait_frames(3);command("/debug key F3 down");command("/debug key F3 up");wait_frames(3);capture("ux1_overview");wait_frames(3);
+command("/debug key Digit1 down");step(1);assert_debug("hotbar_selected",0);
+command("/debug key F4 down");wait_frames(3);capture("ux1_selector");wait_frames(3);command("/debug ui close");
+command("/debug key Slash down");wait_frames(3);capture("ux1_command_entry");wait_frames(3);
+command("/debug console insert hel");command("/debug console complete");wait_frames(3);capture("ux1_completion");wait_frames(3);
+console_line("/help config");wait_frames(3);capture("ux1_command_help");wait_frames(3);
+console_line("/config get rustcraft:streaming/load_radius");
+console_line("/unknown_ux1");wait_frames(3);capture("ux1_command_error");wait_frames(3);
+console_open(false);command("/debug key Backquote down");
+console_line("let x = 40;");console_line("x + 2");wait_frames(3);capture("ux1_rhai");wait_frames(3);
+console_line("\"English: The quick brown fox 123\\nРусский: Состояние чанка: загружен\\nУкраїнська: Налаштування світу\\nΕλληνικά: Δοκιμή κειμένου\\nCombining: café café\\nGraphemes: 🦀 👨‍👩‍👧‍👦 🇺🇦\\nArabic: مرحبا بالعالم\\nHebrew: שלום עולם\\n日本語 中文 한국어\\nDevanagari: नमस्ते दुनिया\\nMissing: 􏿿\"");
+wait_frames(3);capture("ux1_unicode");wait_frames(3);
+console_open(false);command("/debug ui open");debug_page("settings");command("/config select rustcraft:ui/font_scale");
+command("/config set rustcraft:ui/font_scale 1.5");wait_frames(3);assert_config("rustcraft:ui/font_scale",1.5);capture("ux1_scale");wait_frames(3);
+command("/config reset rustcraft:ui/font_scale");wait_frames(3);
+assert_debug("text_cache.gpu_pages",1);
+command("/debug ui close");resume();move_player(1.0,0.0,2);wait_ticks(2);pause();
+assert_debug("selector_open",false);

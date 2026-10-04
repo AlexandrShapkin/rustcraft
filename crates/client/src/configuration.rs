@@ -54,6 +54,7 @@ impl ClientApp {
             self.world_state_autosave_interval =
                 Duration::from_millis(c.effective(keys::WORLD_SAVE_MS).integer() as u64);
         } else if policy == Policy::NextFrame {
+            self.font_scale = c.effective(keys::FONT_SCALE).float() as f32;
             self.mesh_upload_section_budget = c.effective(keys::UPLOAD_SECTIONS).integer() as usize;
             self.mesh_upload_byte_budget = c.effective(keys::UPLOAD_BYTES).integer() as usize;
             self.stream_main_budget =

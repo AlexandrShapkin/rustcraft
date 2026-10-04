@@ -717,3 +717,13 @@ This pass changes Markdown only: canonical roadmap, root roadmap navigation, thi
 and concise reconciliations. No stage implemented; no product/Cargo/just/scripts/workflow edits,
 no version bump/tag/release. Documentation commit/main SHA and its public CI are reported after
 publication rather than embedding a self-referential commit hash here. Stop after that CI.
+
+## UX1 bounded execution addition
+
+C1 is CLOSED with Ubuntu/Windows closeout CI run 37182596219. UX1 is active between C1 and RSM1:
+fix held F3/digit routing, console discovery and Unicode rendering before further manual diagnosis.
+Scope: shared semantic shortcuts, command/Rhai UX, grapheme/IME editor, bundled-font shaping,
+semantic font resources, bounded text caches and C1 scaling. No GUI rewrite, R2 asset migration,
+world residency or P1 work. Gates: graphical input/console/multilingual evidence, no-system-font
+and package replacement proofs, cache soak and full relevant local/platform validation.
+Order: DUX1 -> C1 -> UX1 -> RSM1 -> P1 -> S1 -> R2 -> A1 -> DX2 -> READY1 -> M5.

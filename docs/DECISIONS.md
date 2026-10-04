@@ -720,3 +720,13 @@ general settings registry or a future mod UI framework. See DEBUGGING.md and DUX
 ## D-047 — Typed operational policy and acknowledged application
 
 Use a composition-owned leaf registry, not a mutable process global. Resolve default < startup user file < environment < CLI < runtime. Apply atomic coupled requests only at declared boundaries; publish effective values after native acknowledgement and preserve old state on failure. Structural identities remain immutable and worker pools restart-bound. Explicit user-file edits are independent from world saves and affect next launch. Shared Control/Rhai/Settings adapters expose the same observation. See CONFIGURATION.md and C1_REPORT.md.
+
+## D-048 — Bundled semantic Unicode text and held developer chords
+
+Use cosmic-text with fontconfig disabled and an explicit empty font database populated only from
+content font resources. Resource roles select primary fonts; pinned bundled fallback faces and a
+fixed locale make fallback independent of the OS. CPU glyph generations and the reusable GPU text
+surface are bounded; unchanged runs avoid shaping/upload. Keep wgpu26 rather than introducing a
+second GPU stack through incompatible glyphon releases. Console edits extended graphemes and routes
+winit text/IME commits separately from physical shortcuts. Held F3 consumes digits; semantic view
+metadata owns shortcut discovery. No new console privileges or broader GUI framework.

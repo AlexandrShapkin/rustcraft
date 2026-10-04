@@ -132,6 +132,11 @@ def package_license_files(metadata: dict, stage: Path) -> tuple[list[str], list[
     return missing_expressions, copied_files
 
 
+def package_font_resources(stage: Path) -> None:
+    """Embedded fonts also ship their unmodified upstream notices in every staged product."""
+    shutil.copytree(ROOT / "crates/content/fonts", stage / "FONT_RESOURCES")
+
+
 def build(target: str | None = None) -> Path:
     publication_check()
     target = target or host_target()
@@ -167,7 +172,7 @@ def build(target: str | None = None) -> Path:
         shutil.copy2(source, stage / f"{binary}{suffix}")
         os.chmod(stage / f"{binary}{suffix}", 0o755)
 
-    for relative in ("scripts/dev/inspect_player.rhai", "scripts/commands/where.rhai", "scripts/scenarios/dx_smoke.rhai", "scripts/scenarios/dx_console.rhai", "scripts/scenarios/dx_responsive.rhai", "scripts/scenarios/dux1.rhai", "scripts/scenarios/c1.rhai"):
+    for relative in ("scripts/dev/inspect_player.rhai", "scripts/commands/where.rhai", "scripts/scenarios/dx_smoke.rhai", "scripts/scenarios/dx_console.rhai", "scripts/scenarios/dx_responsive.rhai", "scripts/scenarios/dux1.rhai", "scripts/scenarios/c1.rhai", "scripts/scenarios/ux1.rhai"):
         destination = stage / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, destination)
@@ -181,6 +186,7 @@ def build(target: str | None = None) -> Path:
             raise RuntimeError(f"required project license file is missing: {license_path}")
         shutil.copyfile(license_path, stage / license_name)
     metadata = json.loads(run(["cargo", "metadata", "--locked", "--format-version", "1"], capture=True))
+    package_font_resources(stage)
     missing, copied = package_license_files(metadata, stage)
     (stage / "BUILD-INFO.txt").write_text(
         f"RustCraft {version}\nTarget: {target}\nProfile: release\n"

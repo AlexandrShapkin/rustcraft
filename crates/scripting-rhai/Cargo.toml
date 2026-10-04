@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+unicode-segmentation = "1.12"
 rustcraft-control.workspace = true
 rhai.workspace = true
 blake3.workspace = true

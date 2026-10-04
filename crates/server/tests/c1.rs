@@ -56,7 +56,7 @@ fn configuration_sources_and_headless_application_pass() {
         } else {
             assert!(
                 String::from_utf8_lossy(&output.stdout)
-                    .contains("C1_HEADLESS pass settings=16 native/control/readback=6")
+                    .contains("C1_HEADLESS pass settings=17 native/control/readback=6")
             );
         }
     }

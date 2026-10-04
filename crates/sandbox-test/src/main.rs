@@ -321,6 +321,25 @@ fn schedule() -> Schedule<SandboxContext> {
 }
 
 fn main() {
+    let mut text =
+        rustcraft_render::text::TextSystem::new(rustcraft_content::fonts::FontResources::builtin())
+            .expect("bundled text");
+    text.update(
+        &[rustcraft_render::text::TextRun {
+            text: "Sandbox: Українська Ελληνικά".into(),
+            position: [0., 0.],
+            pixels: 12.,
+            role: "rustcraft:font/ui".into(),
+            color: [255; 3],
+        }],
+        640,
+        64,
+        None,
+    );
+    assert!(text.rgba.iter().any(|b| *b != 0));
+    assert_eq!(text.metrics.replacements, 0);
+    println!("SANDBOX_TEXT bundled semantic Unicode pass");
+
     use rustcraft_control::config::{Kind, Policy, Registry as ConfigRegistry, Spec, Value};
     let mut config = ConfigRegistry::default();
     config

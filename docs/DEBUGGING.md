@@ -83,3 +83,21 @@ their read capabilities. Read-only/FutureChat contexts cannot change the selecto
 ## C1 Settings
 
 F4 -> Runtime settings uses the shared configuration plane. Left/Right selects a key, +/- adjusts supported scalar values, R resets its runtime override. Backquote opens the existing console for exact /config values, coupled batch/reset or explicit persistence. Effective/requested/source/type/range/owner/policy/error remain visible; only privileged tooling mutates. Settings adds no broad-provider demand. See [CONFIGURATION.md](CONFIGURATION.md).
+
+## UX1 controls and text
+
+With explicit devtools, hold F3 then press 1 Streaming, 2 World, 3 Entities, 4 Lighting,
+5 Meshing, 6 Renderer, 7 Persistence, 8 Scripts, 9 Settings. Digits are consumed and never select
+hotbar slots. Bare F3 toggles Overview on release. Repeat/focus loss cannot leave a chord active.
+F4 remains the complete selector; shortcuts are metadata conveniences, not view identities.
+
+Slash opens `COMMAND > /`; Backquote opens empty `RHAI >`. Leading slash executes the existing
+Control registry, other text executes the trusted Rhai REPL. `/help config`, `/help debug`,
+`/help scenario` show registry usage/capabilities/aliases. `/commands`, Tab and Up/Down discover
+commands/history; Esc closes. Text input uses winit text/IME; arrows/delete/backspace operate on
+extended graphemes, with IME commit and visible preedit. The caret is drawn at shaped cluster
+positions rather than inserted into the text. Native input tests cover composed/decomposed Latin,
+Cyrillic, emoji, family ZWJ and flags. Real IME composition across all desktop IMEs is not claimed.
+
+Text uses bundled fonts exclusively; see [UX1_REPORT.md](UX1_REPORT.md) for licenses, coverage,
+semantic replacement and bounds. `/config set rustcraft:ui/font_scale 1.5` changes shared scale.

@@ -1,4 +1,5 @@
 mod configuration;
+mod developer_input;
 mod devtools;
 mod render_tests;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
@@ -146,6 +147,7 @@ fn compile_first_party_resources_from(
         .expect("ten destroy stages");
     Ok(FirstPartyCompiled {
         resources: RendererResources {
+            fonts: rustcraft_content::fonts::FontResources::builtin(),
             atlas_pages: compiled
                 .pages
                 .iter()
@@ -329,6 +331,10 @@ impl Controller for LocalHumanController {
 }
 
 struct ClientApp {
+    f3_chord: developer_input::F3Chord,
+    font_scale: f32,
+    console_service_focus: bool,
+    pending_console_input: Option<rustcraft_scripting_rhai::ConsoleInput>,
     devtools: Option<rustcraft_scripting_rhai::DevTools>,
     control_state: rustcraft_control::ControlState,
     scenario_path: Option<String>,
@@ -1516,6 +1522,10 @@ impl ClientApp {
         };
         control_state.sync_config();
         Self {
+            f3_chord: Default::default(),
+            pending_console_input: None,
+            console_service_focus: false,
+            font_scale: control_state.config.effective(keys::FONT_SCALE).float() as f32,
             window: None,
             renderer: None,
             devtools: None,
@@ -4607,6 +4617,7 @@ impl ClientApp {
                     }),
             );
             renderer.set_debug_boxes_colored(&self.dx_boxes, &self.dx_colors);
+            renderer.set_text_scale(self.font_scale);
             renderer.set_hud(
                 &rustcraft_render::hud::HudSnapshot {
                     slots,
@@ -4619,6 +4630,11 @@ impl ClientApp {
                     } else {
                         ""
                     },
+                    caret: self
+                        .devtools
+                        .as_ref()
+                        .and_then(|d| d.console_caret(&self.control_state))
+                        .map(|(line, index)| rustcraft_render::text::Caret { line, index }),
                     items: &[],
                     mining_progress: sim.mining.map(|m| m.progress),
                     inventory_open: self.inventory_open,
@@ -5242,12 +5258,35 @@ impl ApplicationHandler for ClientApp {
                 }
             }
             WindowEvent::Focused(false) => {
+                self.f3_chord.clear();
+                window.set_ime_allowed(false);
+                if let Some(tools) = self.devtools.as_mut() {
+                    tools.input(rustcraft_scripting_rhai::ConsoleInput::Preedit(
+                        String::new(),
+                    ));
+                }
                 self.controller.break_held = false;
                 self.controller.place_pressed = false;
                 if self.controller.captured {
                     self.controller.release(&window);
                 } else {
                     self.controller.look = Vec3::ZERO;
+                }
+            }
+            WindowEvent::Focused(true) => {
+                window.set_ime_allowed(self.devtools.as_ref().is_some_and(|d| d.console_open))
+            }
+            WindowEvent::Ime(ime) if self.dev_focus() => {
+                if let Some(tools) = self.devtools.as_mut().filter(|d| d.console_open) {
+                    use rustcraft_scripting_rhai::ConsoleInput;
+                    match ime {
+                        winit::event::Ime::Commit(text) => tools.input(ConsoleInput::Commit(text)),
+                        winit::event::Ime::Preedit(text, _) => {
+                            tools.input(ConsoleInput::Preedit(text))
+                        }
+                        _ => {}
+                    }
+                    self.dx_text.clear();
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -6118,7 +6157,8 @@ fn main() {
         std::env::var("RUSTCRAFT_WORLD_NAME").unwrap_or_else(|_| "default".to_owned());
     while let Some(flag) = args.next() {
         match flag.as_str() {
-            "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance" => {}
+            "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance"
+            | "--ux1-acceptance" => {}
             "--set-config" | "--config-file" => {
                 args.next().expect("configuration option requires value");
             }
@@ -6200,7 +6240,9 @@ fn main() {
             .position(|a| a == "--scenario")
             .and_then(|i| args.get(i + 1).cloned());
     }
-    if std::env::args().any(|a| a == "--dux-acceptance" || a == "--c1-acceptance") {
+    if std::env::args()
+        .any(|a| a == "--dux-acceptance" || a == "--c1-acceptance" || a == "--ux1-acceptance")
+    {
         app.dux_fixture = true;
         app.devtools = Some(
             rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), {
@@ -6212,7 +6254,9 @@ fn main() {
             .expect("devtools"),
         );
         app.scenario_path = Some(
-            if std::env::args().any(|a| a == "--c1-acceptance") {
+            if std::env::args().any(|a| a == "--ux1-acceptance") {
+                "scripts/scenarios/ux1.rhai"
+            } else if std::env::args().any(|a| a == "--c1-acceptance") {
                 "scripts/scenarios/c1.rhai"
             } else {
                 "scripts/scenarios/dux1.rhai"

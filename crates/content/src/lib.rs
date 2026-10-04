@@ -1,4 +1,5 @@
 //! Server-defined content identity, metadata and deterministic integrity primitives.
+pub mod fonts;
 
 use std::{
     fmt,

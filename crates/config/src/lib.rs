@@ -897,3 +897,31 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod ux_scale_tests {
+    use super::*;
+    #[test]
+    fn font_scale_validates_defers_applies_and_resets() {
+        let mut r = settings::engine(true);
+        r.open();
+        let key = settings::FONT_SCALE.to_string();
+        for scale in [0.5, 1., 1.5, 3.] {
+            r.request(&[(key.clone(), Some(Value::Float(scale)))])
+                .unwrap();
+            r.apply(Policy::NextFrame, 1, |_| Ok(())).unwrap();
+            assert_eq!(r.effective(&key), &Value::Float(scale));
+        }
+        for scale in [0.1, 4.] {
+            assert!(
+                r.request(&[(key.clone(), Some(Value::Float(scale)))])
+                    .is_err()
+            );
+            assert_eq!(r.effective(&key), &Value::Float(3.));
+        }
+        r.request(&[(key.clone(), None)]).unwrap();
+        assert_eq!(r.effective(&key), &Value::Float(3.));
+        r.apply(Policy::NextFrame, 2, |_| Ok(())).unwrap();
+        assert_eq!(r.effective(&key), &Value::Float(1.));
+    }
+}

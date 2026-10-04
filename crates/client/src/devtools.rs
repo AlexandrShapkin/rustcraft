@@ -23,10 +23,17 @@ impl ClientApp {
         rustcraft_control::diagnostics::bounded_text(&text)
     }
     pub(super) fn dev_focus(&self) -> bool {
-        self.devtools.as_ref().is_some_and(|d| d.console_open) || self.control_state.selector.open
+        self.devtools
+            .as_ref()
+            .map_or(self.console_service_focus, |d| d.console_open)
+            || self.control_state.selector.open
     }
-    fn dev_focus_transition(&mut self) {
+    pub(super) fn dev_focus_transition(&mut self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_ime_allowed(self.devtools.as_ref().is_some_and(|d| d.console_open));
+        }
         if self.dev_focus() {
+            self.f3_chord.clear();
             if let Some(window) = self.window.as_ref() {
                 self.controller.release(window);
             }
@@ -43,23 +50,13 @@ impl ClientApp {
         let PhysicalKey::Code(code) = event.physical_key else {
             return false;
         };
+        if (code != KeyCode::Slash || event.text.as_deref() == Some("/"))
+            && self.developer_shortcut(code, event.state, event.repeat)
+        {
+            return true;
+        }
         if event.state != ElementState::Pressed {
             return self.dev_focus();
-        }
-        if code == KeyCode::F4 && !event.repeat {
-            self.devtools
-                .as_mut()
-                .unwrap()
-                .input(rustcraft_scripting_rhai::ConsoleInput::Close);
-            use rustcraft_control::diagnostics::DebugInput;
-            let input = if self.control_state.selector.open {
-                DebugInput::Close
-            } else {
-                DebugInput::Open
-            };
-            let _ = self.control_state.selector_input(input);
-            self.dev_focus_transition();
-            return true;
         }
         if self.control_state.selector.open && code != KeyCode::Backquote && code != KeyCode::F10 {
             use rustcraft_control::diagnostics::{DebugInput, Domain};
@@ -106,26 +103,6 @@ impl ClientApp {
                 self.dev_focus_transition();
             }
             return true;
-        }
-        if code == KeyCode::Backquote && !event.repeat {
-            self.control_state.selector.open = false;
-            let tools = self.devtools.as_mut().unwrap();
-            tools.input(rustcraft_scripting_rhai::ConsoleInput::Toggle);
-            if tools.console_open
-                && let Some(window) = self.window.as_ref()
-            {
-                self.controller.release(window);
-                self.controller = LocalHumanController::default();
-            }
-            self.dev_focus_transition();
-            return true;
-        }
-        if code == KeyCode::F3 && !event.repeat && !self.dev_focus() {
-            if !self.control_state.page.is_empty() && self.control_state.page != "overview" {
-                self.debug = false;
-            }
-            self.control_state.page = "overview".into();
-            self.dx_text.clear();
         }
         if code == KeyCode::F10 && !event.repeat {
             if let (Some(mut tools), Some(simulation)) =
@@ -183,6 +160,7 @@ impl ClientApp {
         let dx_started = Instant::now();
         let was_leased = self.control_state.leased;
         let was_focus = self.dev_focus();
+        self.console_service_focus = self.devtools.as_ref().is_some_and(|d| d.console_open);
         let mut tools = self.devtools.take().unwrap();
         if let Some(result) = self.renderer.as_mut().and_then(|r| r.poll_capture()) {
             match result {
@@ -312,6 +290,9 @@ impl ClientApp {
             self.control_state.domains.overlay_geometry =
                 serde_json::json!({"count":0,"boxes":[],"cap":64});
         }
+        if let Some(input) = self.pending_console_input.take() {
+            tools.input(input);
+        }
         if refresh_debug || tools.console_open || self.dx_text.is_empty() {
             self.dx_text = self.developer_text(&tools);
         }
@@ -319,6 +300,7 @@ impl ClientApp {
             tools.input(rustcraft_scripting_rhai::ConsoleInput::Close);
         }
         self.devtools = Some(tools);
+        self.console_service_focus = false;
         if was_focus != self.dev_focus() {
             self.dev_focus_transition();
         }
@@ -575,7 +557,25 @@ impl rustcraft_control::Host for ClientHost<'_> {
         s.config = self.app.control_state.config.snapshot();
         s.config["status"] = serde_json::json!(self.app.control_state.config_status);
         s.debug = self.app.control_state.debug_metadata();
-        s.debug["native_config"] = serde_json::json!({"load_radius":self.app.residency.load_radius(),"retain_radius":self.app.residency.retain_radius(),"diagnostic_ms":self.app.control_state.diagnostics.cadence.as_millis(),"upload_sections":self.app.mesh_upload_section_budget,"lighting_work":self.app.lighting_work_budget,"player_save_ms":self.app.player_autosave_interval.as_millis(),"world_save_ms":self.app.world_state_autosave_interval.as_millis()});
+        s.debug["hotbar_selected"] = serde_json::json!(
+            self.app
+                .simulation
+                .as_ref()
+                .map(|s| s.inventory.selected())
+                .unwrap_or(0)
+        );
+        s.debug["console_mode"] = serde_json::json!(self.app.devtools.as_ref().map(|d| {
+            if d.line.trim_start().starts_with('/') {
+                "COMMAND"
+            } else {
+                "RHAI"
+            }
+        }));
+        s.debug["native_config"] = serde_json::json!({"font_scale":self.app.font_scale,"load_radius":self.app.residency.load_radius(),"retain_radius":self.app.residency.retain_radius(),"diagnostic_ms":self.app.control_state.diagnostics.cadence.as_millis(),"upload_sections":self.app.mesh_upload_section_budget,"lighting_work":self.app.lighting_work_budget,"player_save_ms":self.app.player_autosave_interval.as_millis(),"world_save_ms":self.app.world_state_autosave_interval.as_millis()});
+        if let Some(renderer) = self.app.renderer.as_ref() {
+            let m = renderer.text_metrics();
+            s.debug["text_cache"] = serde_json::json!({"glyphs":m.glyphs,"cpu_bytes":m.cpu_bytes,"surface_bytes":m.surface_bytes,"gpu_capacity_bytes":2048*2048*4,"gpu_pages":1,"rebuilds":m.rebuilds,"layouts":m.layouts,"layout_us":m.layout_us,"raster_us":m.raster_us,"upload_enqueue_us":m.upload_us,"replacements":m.replacements});
+        }
         s.debug["configuration_status"] = serde_json::json!(self.app.control_state.config_status);
         s.debug["entity_coverage"] =
             self.app.control_state.domains.debug["entity_coverage"].clone();
@@ -773,6 +773,32 @@ impl rustcraft_control::Host for ClientHost<'_> {
         &mut self,
         action: &rustcraft_control::Action,
     ) -> rustcraft_control::ControlResult<serde_json::Value> {
+        if let rustcraft_control::Action::ConsoleEdit { operation, text } = action {
+            use rustcraft_scripting_rhai::ConsoleInput;
+            let input = match operation.as_str() {
+                "insert" => ConsoleInput::Insert(text.clone()),
+                "complete" => ConsoleInput::Complete,
+                "home" => ConsoleInput::Home,
+                "end" => ConsoleInput::End,
+                "left" => ConsoleInput::Left,
+                "right" => ConsoleInput::Right,
+                "backspace" => ConsoleInput::Backspace,
+                "delete" => ConsoleInput::Delete,
+                _ => return Err("unknown console edit operation".into()),
+            };
+            self.app.console_input(input);
+            return Ok(serde_json::Value::Null);
+        }
+        if let rustcraft_control::Action::DebugKey {
+            key,
+            pressed,
+            repeat,
+        } = action
+        {
+            self.app.developer_automation_key(key, *pressed, *repeat)?;
+            return Ok(serde_json::Value::Null);
+        }
+
         let simulation = self
             .app
             .simulation

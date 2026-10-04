@@ -77,7 +77,7 @@ fn apply_world_fog(input: Out, rgba: vec4<f32>) -> vec4<f32> {
 @fragment fn fs_hud(input: Out) -> @location(0) vec4<f32> {
     if input.shade < 0.0 { return vec4<f32>(input.color,1.0); }
     let color=textureSample(atlas,sampler_atlas,input.uv);
-    if color.a<0.5 {discard;}
+    if color.a<0.01 {discard;}
     return vec4<f32>(color.rgb*input.color,color.a);
 }
 // Inspector-only overlay markers use a negative shade; gameplay pipelines are unchanged.

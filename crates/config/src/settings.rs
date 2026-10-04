@@ -1,5 +1,6 @@
 //! Existing engine operational policy inventory and startup compatibility adapter.
 use crate::*;
+pub const FONT_SCALE: &str = "rustcraft:ui/font_scale";
 pub const LOAD_RADIUS: &str = "rustcraft:streaming/load_radius";
 pub const RETAIN_RADIUS: &str = "rustcraft:streaming/retain_radius";
 pub const LOOKAHEAD: &str = "rustcraft:streaming/lookahead";
@@ -21,6 +22,14 @@ pub fn engine(graphical: bool) -> Registry {
         .saturating_sub(5)
         .clamp(1, 3) as i64;
     let defs = [
+        (
+            FONT_SCALE,
+            Kind::Float { min: 0.5, max: 3. },
+            Value::Float(1.),
+            Policy::NextFrame,
+            "Shared text pixel scale; resource-family replacement is startup-only.",
+            "scale",
+        ),
         (
             LOAD_RADIUS,
             Kind::Integer { min: 3, max: 12 },
@@ -168,7 +177,8 @@ pub fn engine(graphical: bool) -> Registry {
         ),
     ];
     for (key, kind, default, policy, description, unit) in defs {
-        let local = key.contains("meshing/")
+        let local = key == FONT_SCALE
+            || key.contains("meshing/")
             || key.contains("renderer/")
             || key == LOOKAHEAD
             || key == LIGHT_WORK

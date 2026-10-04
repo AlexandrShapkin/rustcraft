@@ -223,3 +223,9 @@ or mutation capability. See [DEBUGGING.md](DEBUGGING.md) for focus/cadence and [
 ## C1 configuration adapter
 
 Trusted local Rhai uses config_get(key), config_describe(key), config_set(key, string_value), config_reset(key). Queued mutation keeps validation/capabilities/boundaries; another read in the same evaluation sees its original immutable snapshot. Scenarios use assert_config(key, integer) and assert_config_field(key, field, integer_or_string). config.read/write/persist do not derive privilege from a source label. Diagnostic cadence defaults250ms but effective C1 configuration now controls it; Settings remains demand-driven. See [CONFIGURATION.md](CONFIGURATION.md).
+
+
+UX1 console: `/` enters COMMAND with a slash prefilled; Backquote enters empty RHAI.
+`/help <command>` reads registry metadata; Tab completes commands, subcommands and config keys.
+The console uses extended Unicode grapheme editing and IME commit/preedit where supported.
+These usability paths preserve existing Control capabilities and trusted-local Rhai boundaries.

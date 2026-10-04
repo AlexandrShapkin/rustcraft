@@ -112,3 +112,11 @@ Remaining intentional boundaries, with owner/reason/future work:
 The inventory was verified by repository-wide env/CLI/constant/duration/budget/queue searches across
 client/server/runtime/world/render/content/render-profile/control/scripting-rhai and minecraft-b173.
 No historical specialist workflow is deleted. RSM1/P1/S1/R2/A1/DX2 remain separate stages.
+
+## UX1 text scale
+
+`rustcraft:ui/font_scale`: engine text owner; Float 0.5..3, default 1; NextFrame, persist allowed,
+graphical-only availability. Native renderer caches the effective value. Control/Rhai/Settings
+use the same registry; invalid requests preserve effective scale. Pixel sizes are rounded and
+positions snapped. Font-resource family replacement is startup/profile composition only, not a
+second live settings system. UX1 increases engine registration from 16 to 17 settings.

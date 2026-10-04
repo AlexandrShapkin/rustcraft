@@ -260,7 +260,20 @@ impl ViewRegistry {
                 owner: "rustcraft:engine".into(),
                 kind: ViewKind::Page,
                 cost,
-                shortcut: (name == "overview").then(|| "F3".into()),
+                shortcut: match name {
+                    "overview" => Some("F3"),
+                    "streaming" => Some("F3+1"),
+                    "world" => Some("F3+2"),
+                    "entities" => Some("F3+3"),
+                    "lighting" => Some("F3+4"),
+                    "meshing" => Some("F3+5"),
+                    "renderer" => Some("F3+6"),
+                    "persistence" => Some("F3+7"),
+                    "scripts" => Some("F3+8"),
+                    "settings" => Some("F3+9"),
+                    _ => None,
+                }
+                .map(str::to_owned),
                 requirements,
             })
             .unwrap();

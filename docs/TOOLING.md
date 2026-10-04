@@ -158,8 +158,16 @@ Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the e
 callers/assertions/artifacts and proves scenario equivalence before retirement. No recipe is dead
 merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
 discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
-C1 and later stages remain planned/inactive. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
+DUX1 and C1 are CLOSED; RSM1 and later stages remain inactive. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
 
 ## C1 workflows
 
 `just config-test` runs registry/control/native application tests; `just config-smoke` runs headless acceptance. Client/server `--config-report` gives non-graphical readback; `--set-config KEY=VALUE` and `--config-file PATH` select startup sources. `rustcraft-client --c1-acceptance` exercises real Settings/boundaries/captures in a disposable world. Existing DX/DUX and specialist recipes remain. See [CONFIGURATION.md](CONFIGURATION.md) and [C1_REPORT.md](C1_REPORT.md).
+
+## UX1 acceptance
+
+`just ux-test` runs focused input/editor/font/resource/cache checks. `just ux-client` runs the
+real disposable graphical acceptance (F3/hotbar, F4, slash/Backquote console, multilingual text,
+scale/reset/captures). Existing dx/dux/C1 workflows remain. Fonts are embedded; development and
+release runs do not look up repository font paths or system fonts. Release staging includes
+FONT_RESOURCES with all upstream font license texts. See [UX1_REPORT.md](UX1_REPORT.md).

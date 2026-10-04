@@ -444,3 +444,8 @@ are local contracts and must not be serialized unchanged as network schemas. M5 
 ## C1 operational configuration
 
 The composition-owned rustcraft-config leaf supplies typed semantic policy, validation and requested/effective acknowledgement. Control, Rhai, native consumers and developer Settings share it; startup sources resolve once and native loops use typed fields. See [CONFIGURATION.md](CONFIGURATION.md) and [C1_REPORT.md](C1_REPORT.md). Engine mechanism remains independent of game policy; server remains headless.
+
+UX1 text: `content::fonts` resolves bounded semantic role stacks through ordered startup package
+composition; RendererResources supplies them to generic `render::text`. cosmic-text shapes/rasterizes
+an explicitly populated bundled-only database. The renderer owns bounded CPU glyph generations and
+one reusable GPU composite page. HUD/debug/console share this path; no game-policy/font-atlas leakage.

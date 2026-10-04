@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use unicode_segmentation::UnicodeSegmentation;
 
 pub const RHAI_VERSION: &str = "1.26.1";
 pub const API_HELP: &str = "console automation: console_open(BOOL), console_line(LINE); DUX1: debug(), chunk_inspection(), entity_inspection(), assert_debug(PATH, BOOL/STRING/INT); /debug ui open/close/next/previous/tab/activate/help/target/entity; /debug chunk X Z SECTION_Y; /debug entity HEX_ID; control_version(), tick(), player_position(), player(), world(), block_at(X,Y,Z), streaming(), entities(), entity(STABLE_ID), persistence(), renderer(), scripts(), lighting(), meshing(), has_capability(ID), command(LINE), pause(), resume(), step(N), teleport(X,Y,Z), set_block(X,Y,Z,SEMANTIC_KEY), capture(NAME), debug_page(NAME), overlay(NAME,BOOL); scenario: reload_script(PATH) requests and cooperatively waits for a compile job; checkpoint(), assert_tick_delta(N), wait_tick_delta(N,MS), assert_player_unchanged(), wait_ticks(N), wait_frames(N), wait_tick(T,MS), assert_tick(T), assert_block(X,Y,Z,KEY), move_player(FORWARD,STRAFE,TICKS); bounded assert_true(BOOL), assert_eq(INT,INT), fail(MESSAGE). No filesystem, network, process, sleep or imports.";
@@ -281,6 +282,7 @@ impl RhaiRuntime {
         step_fn!("wait_frames", (n:i64), Step::WaitFrames(count(n)?));
         step_fn!("wait_tick", (tick:i64,timeout:i64), Step::Wait { predicate:Predicate::TickAtLeast(count(tick)?),timeout_ms:count(timeout)?.clamp(1,30_000) });
         step_fn!("assert_config", (key:&str,value:i64), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:"effective".into(),value:serde_json::json!(value)},message:format!("config {key} effective={value}")});
+        step_fn!("assert_config", (key:&str,value:f64), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:"effective".into(),value:serde_json::json!(value)},message:format!("config {key} effective={value}")});
         step_fn!("assert_config_field", (key:&str,field:&str,value:&str), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:field.into(),value:serde_json::json!(value)},message:format!("config {key} {field}={value}")});
         step_fn!("assert_config_field", (key:&str,field:&str,value:i64), Step::Assert {predicate:Predicate::ConfigEquals{key:key.into(),field:field.into(),value:serde_json::json!(value)},message:format!("config {key} {field}={value}")});
         step_fn!("assert_tick", (tick:i64), Step::Assert { predicate:Predicate::TickAtLeast(count(tick)?),message:format!("tick >= {tick}") });
@@ -573,6 +575,9 @@ enum Purpose {
 #[derive(Debug, Clone)]
 pub enum ConsoleInput {
     Toggle,
+    OpenCommand,
+    Preedit(String),
+    Commit(String),
     Close,
     Insert(String),
     Left,
@@ -602,6 +607,7 @@ pub struct DevTools {
     pub console_open: bool,
     pub line: String,
     pub cursor: usize,
+    pub preedit: String,
     pub history: Vec<String>,
     pub history_index: usize,
     pub scroll: usize,
@@ -648,6 +654,7 @@ impl DevTools {
             console_open: false,
             line: String::new(),
             cursor: 0,
+            preedit: String::new(),
             history: vec![],
             history_index: 0,
             scroll: 0,
@@ -726,8 +733,27 @@ impl DevTools {
     }
     pub fn input(&mut self, input: ConsoleInput) {
         match input {
-            ConsoleInput::Toggle => self.console_open = !self.console_open,
-            ConsoleInput::Close => self.console_open = false,
+            ConsoleInput::Toggle => {
+                self.console_open = !self.console_open;
+                self.line.clear();
+                self.cursor = 0;
+                self.preedit.clear();
+            }
+            ConsoleInput::OpenCommand => {
+                self.console_open = true;
+                self.line = "/".into();
+                self.cursor = 1;
+                self.preedit.clear();
+            }
+            ConsoleInput::Preedit(text) => self.preedit = text.chars().take(256).collect(),
+            ConsoleInput::Commit(text) => {
+                self.preedit.clear();
+                self.insert(&text);
+            }
+            ConsoleInput::Close => {
+                self.console_open = false;
+                self.preedit.clear();
+            }
             ConsoleInput::Insert(text) => self.insert(&text),
             ConsoleInput::Left => self.left(),
             ConsoleInput::Right => self.right(),
@@ -738,6 +764,7 @@ impl DevTools {
                 let end = self.cursor;
                 self.line.replace_range(start..end, "");
                 self.cursor = start;
+                self.snap_cursor();
             }
             ConsoleInput::Home => self.cursor = 0,
             ConsoleInput::End => self.cursor = self.line.len(),
@@ -754,17 +781,29 @@ impl DevTools {
         if self.line.len() + text.len() <= 4096 {
             self.line.insert_str(self.cursor, text);
             self.cursor += text.len();
+            // Insertion can join clusters on either side (combining/ZWJ); snap to the next boundary.
+            self.cursor = self
+                .line
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .chain(std::iter::once(self.line.len()))
+                .find(|i| *i >= self.cursor)
+                .unwrap_or(self.line.len());
         }
     }
     pub fn left(&mut self) {
         self.cursor = self.line[..self.cursor]
-            .char_indices()
+            .grapheme_indices(true)
             .next_back()
             .map_or(0, |(i, _)| i);
     }
     pub fn right(&mut self) {
         if self.cursor < self.line.len() {
-            self.cursor += self.line[self.cursor..].chars().next().unwrap().len_utf8();
+            self.cursor += self.line[self.cursor..]
+                .graphemes(true)
+                .next()
+                .unwrap()
+                .len();
         }
     }
     pub fn backspace(&mut self) {
@@ -772,7 +811,18 @@ impl DevTools {
             let end = self.cursor;
             self.left();
             self.line.replace_range(self.cursor..end, "");
+            self.snap_cursor();
         }
+    }
+    fn snap_cursor(&mut self) {
+        self.cursor = self
+            .line
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .chain(std::iter::once(self.line.len()))
+            .take_while(|i| *i <= self.cursor)
+            .last()
+            .unwrap_or(0);
     }
     pub fn history_move(&mut self, older: bool) {
         self.history_index = if older {
@@ -808,13 +858,20 @@ impl DevTools {
                 .skip(self.scroll)
                 .take(12)
                 .collect::<Vec<_>>();
-            let mut text = String::from("DEV CONSOLE /COMMAND OR RHAI | ESC CLOSE | F10 ABORT\n");
+            let mut text = String::from(
+                "Developer console | Esc close | F10 abort\n/command executes Control; other text executes Rhai\n/help [command] | /commands | Tab complete | Up/Down history\n",
+            );
             for line in tail.into_iter().rev() {
                 text.push_str(line);
                 text.push('\n');
             }
+            text.push_str(if self.line.trim_start().starts_with('/') {
+                "COMMAND > "
+            } else {
+                "RHAI > "
+            });
             text.push_str(&self.line[..self.cursor]);
-            text.push('|');
+            text.push_str(&self.preedit);
             text.push_str(&self.line[self.cursor..]);
             text
         } else {
@@ -822,6 +879,19 @@ impl DevTools {
         }
     }
 
+    pub fn console_caret(&self, state: &rustcraft_control::ControlState) -> Option<(usize, usize)> {
+        if !self.console_open {
+            return None;
+        }
+        let text = self.raw_text(state);
+        let row = text.lines().count().saturating_sub(1);
+        let prefix = if self.line.trim_start().starts_with('/') {
+            10
+        } else {
+            7
+        };
+        Some((row, prefix + self.cursor + self.preedit.len()))
+    }
     pub fn submit(
         &mut self,
         host: &mut impl rustcraft_control::Host,
@@ -1363,7 +1433,7 @@ impl DevTools {
                 "step":self.scenario.as_ref().map(|s|s.cursor),
                 "scenario":self.scenario.as_ref().map(|s|&s.result),
                 "recent_output":self.output.iter().rev().take(4).collect::<Vec<_>>(),
-                "frame":self.frame}),
+                "frame":self.frame,"console_mode":if self.line.trim_start().starts_with('/'){"COMMAND"}else{"RHAI"},"console_open":self.console_open,"console_line":self.line,"preedit":self.preedit}),
                 started,
             );
         }
@@ -2380,5 +2450,59 @@ fn semantic_value(v: &serde_json::Value, depth: usize) -> Dynamic {
                 .map(|(k, v)| (k.clone().into(), semantic_value(v, depth + 1)))
                 .collect::<rhai::Map>(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod ux_editor_tests {
+    use super::*;
+    #[test]
+    fn grapheme_navigation_editing_history_completion_and_ime() {
+        let mut t = DevTools::new(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts"),
+            rustcraft_control::engine_registry(),
+        )
+        .unwrap();
+        for cluster in ["a", "Ж", "e\u{301}", "🦀", "👨‍👩‍👧‍👦", "🇺🇦"] {
+            t.line.clear();
+            t.cursor = 0;
+            t.insert(cluster);
+            t.left();
+            assert_eq!(t.cursor, 0);
+            t.right();
+            assert_eq!(t.cursor, cluster.len());
+            t.backspace();
+            assert!(t.line.is_empty());
+            t.insert(cluster);
+            t.input(ConsoleInput::Home);
+            t.input(ConsoleInput::Delete);
+            assert!(t.line.is_empty());
+            t.insert(cluster);
+            t.input(ConsoleInput::End);
+            assert_eq!(t.cursor, cluster.len());
+            t.history = vec![cluster.into()];
+            t.history_index = 1;
+            t.history_move(true);
+            assert_eq!(t.line, cluster);
+            assert!(t.line.is_char_boundary(t.cursor));
+        }
+        t.input(ConsoleInput::OpenCommand);
+        assert_eq!(t.line, "/");
+        assert!(t.text(&Default::default()).contains("COMMAND >"));
+        t.input(ConsoleInput::Toggle);
+        t.input(ConsoleInput::Toggle);
+        assert!(t.line.is_empty());
+        assert!(t.text(&Default::default()).contains("RHAI >"));
+        t.input(ConsoleInput::Preedit("日本".into()));
+        assert_eq!(t.line, "");
+        t.input(ConsoleInput::Commit("日本語".into()));
+        assert_eq!(t.line, "日本語");
+        assert!(t.preedit.is_empty());
+        t.input(ConsoleInput::Close);
+        assert!(t.preedit.is_empty());
+        t.line = "/config ge".into();
+        t.cursor = t.line.len();
+        t.complete();
+        assert_eq!(t.line, "/config get");
     }
 }

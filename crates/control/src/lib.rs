@@ -73,6 +73,15 @@ impl Context {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Action {
+    ConsoleEdit {
+        operation: String,
+        text: String,
+    },
+    DebugKey {
+        key: String,
+        pressed: bool,
+        repeat: bool,
+    },
     ConfigSet(Vec<(String, String)>),
     ConfigReset(String),
     ConfigResetBatch(Vec<String>),
@@ -108,6 +117,7 @@ pub enum Action {
 impl Action {
     pub fn capability(&self) -> &'static str {
         match self {
+            Self::DebugKey { .. } | Self::ConsoleEdit { .. } => "debug.configure",
             Self::ConfigSet(_) | Self::ConfigReset(_) | Self::ConfigResetBatch(_) => "config.write",
             Self::ConfigPersist { .. } => "config.persist",
             Self::ConfigSelect(_) => "debug.configure",
@@ -128,6 +138,10 @@ impl Action {
     }
     pub fn validate(&self) -> ControlResult<()> {
         match self {
+            Self::ConsoleEdit { operation, text } if operation.len() > 32 || text.len() > 256 => {
+                Err("bounded console edit exceeded".into())
+            }
+            Self::DebugKey { key, .. } if key.len() > 32 => Err("debug key name too long".into()),
             Self::ConfigSet(values)
                 if values.is_empty()
                     || values.len() > 16
@@ -354,16 +368,35 @@ impl Registry {
         let (spec, handler) = &self.entries[canonical];
         context.require(&spec.capability)?;
         if canonical == "help" || canonical == "commands" {
-            return Ok(CommandResult::output(
+            let specs = if let Some(name) = args.get(1) {
+                let canonical = self
+                    .aliases
+                    .get(name)
+                    .ok_or_else(|| format!("Unknown command: {name}. Use /commands or /help"))?;
+                vec![self.entries[canonical].0.clone()]
+            } else {
                 self.specs()
+            };
+            return Ok(CommandResult::output(
+                specs
                     .iter()
-                    .map(|s| format!("/{} {} [{}] {}", s.name, s.usage, s.capability, s.help))
+                    .map(|s| {
+                        format!(
+                            "/{} {}\n{}\nAliases: {} | Capability: {}",
+                            s.name,
+                            s.usage,
+                            s.help,
+                            s.aliases.join(", "),
+                            s.capability
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n"),
-                json!(self.specs()),
+                json!(specs),
             ));
         }
-        let result = handler(&args[1..], snapshot)?;
+        let result = handler(&args[1..], snapshot)
+            .map_err(|e| format!("{e}\nUsage: /{} {}", spec.name, spec.usage))?;
         if let Some(action) = &result.action {
             context
                 .require(action.capability())
@@ -550,7 +583,23 @@ pub fn engine_registry() -> Registry {
     }
     registry.cache_completion(
         "config",
-        config::settings::engine(true).keys().map(str::to_owned),
+        config::settings::engine(true)
+            .keys()
+            .map(str::to_owned)
+            .chain(
+                [
+                    "list",
+                    "get",
+                    "describe",
+                    "set",
+                    "batch",
+                    "reset",
+                    "persist",
+                    "unpersist",
+                    "select",
+                ]
+                .map(str::to_owned),
+            ),
     );
     let views = diagnostics::ViewRegistry::engine();
     registry.cache_completion(
@@ -599,6 +648,25 @@ fn capture_command(args: &[String], _: &Snapshot) -> ControlResult<CommandResult
     Ok(CommandResult::action(Action::Capture(name.clone())))
 }
 fn debug_command(args: &[String], _: &Snapshot) -> ControlResult<CommandResult> {
+    if args.first().is_some_and(|s| s == "console") {
+        return Ok(CommandResult::action(Action::ConsoleEdit {
+            operation: args.get(1).ok_or("Missing console edit operation")?.clone(),
+            text: args.get(2).cloned().unwrap_or_default(),
+        }));
+    }
+    if args.first().is_some_and(|s| s == "key") {
+        let key = args.get(1).ok_or("Missing argument: key")?.clone();
+        let pressed = match args.get(2).map(String::as_str) {
+            Some("down") => true,
+            Some("up") => false,
+            _ => return Err("key requires down/up".into()),
+        };
+        return Ok(CommandResult::action(Action::DebugKey {
+            key,
+            pressed,
+            repeat: args.get(3).is_some_and(|s| s == "repeat"),
+        }));
+    }
     match args {
         [verb, input] if verb == "ui" => Ok(CommandResult::action(Action::DebugUi(
             match input.as_str() {

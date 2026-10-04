@@ -28,6 +28,7 @@ pub mod hud;
 pub mod inspection;
 pub mod meshing;
 pub mod offscreen;
+pub mod text;
 mod timing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -877,6 +878,7 @@ pub enum TextureSampling {
 /// Compiled physical pages plus game-selected semantic presentation roles.
 #[derive(Debug, Clone)]
 pub struct RendererResources {
+    pub fonts: rustcraft_content::fonts::FontResources,
     pub atlas_pages: Vec<RgbaTexture>,
     pub container_background: AtlasRegion,
     pub hud: AtlasRegion,
@@ -1010,6 +1012,8 @@ pub struct Renderer {
     crack_pipeline: wgpu::RenderPipeline,
     selection_pipeline: wgpu::RenderPipeline,
     hud_geometry: hud::HudGeometry,
+    text_surface: TextSurface,
+    text_scale: f32,
     hud_buffer: wgpu::Buffer,
     selection_buffer: wgpu::Buffer,
     debug_boxes: Vec<(rustcraft_engine_core::Aabb, [f32; 3])>,
@@ -1412,7 +1416,11 @@ impl Renderer {
         });
         let adapter_info = adapter.get_info();
         let timing = timing::GpuTiming::new(&device);
+        let text_surface =
+            TextSurface::new(&device, &layout, &camera_buffer, resources.fonts.clone())?;
         Ok(Self {
+            text_surface,
+            text_scale: 1.,
             surface,
             device,
             queue,
@@ -1494,9 +1502,35 @@ impl Renderer {
                 .map(|(i, b)| (*b, colors.get(i).copied().unwrap_or([0.1, 0.8, 0.4]))),
         );
     }
+    pub fn set_text_scale(&mut self, scale: f32) {
+        self.text_scale = scale;
+        self.hud_geometry.set_text_scale(scale);
+    }
+    pub fn text_metrics(&self) -> &text::TextMetrics {
+        &self.text_surface.system.metrics
+    }
     pub fn set_hud(&mut self, snapshot: &hud::HudSnapshot, camera: Camera) {
         self.hud_geometry
             .build(snapshot, self.width(), self.height(), camera);
+        let runs = self
+            .hud_geometry
+            .debug_runs
+            .iter()
+            .chain(&self.hud_geometry.text_runs)
+            .cloned()
+            .map(|mut r| {
+                r.pixels *= self.text_scale;
+                r
+            })
+            .collect::<Vec<_>>();
+        self.text_surface.update(
+            &self.device,
+            &self.queue,
+            &runs,
+            self.width(),
+            self.height(),
+            snapshot.caret,
+        );
         for (bounds, color) in &self.debug_boxes {
             let point = |i: usize| {
                 [
@@ -2448,6 +2482,27 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.hud_buffer.slice(256 * 1024..));
                 pass.draw(0..self.hud_geometry.debug_vertices.len() as u32, 0..1);
             }
+        }
+        if !self.text_surface.system.rgba.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("unicode-text"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.hud_pipeline);
+            pass.set_bind_group(0, &self.text_surface.bind, &[]);
+            pass.set_vertex_buffer(0, self.text_surface.vertices.slice(..));
+            pass.draw(0..6, 0..1);
         }
         if timed {
             self.timing.as_ref().unwrap().resolve(&mut encoder);
@@ -3584,5 +3639,126 @@ mod liquid_tests {
             let (_, liquid, _) = counts(&world);
             assert_eq!(liquid, 10 * 6);
         }
+    }
+}
+
+/// One fixed-capacity reusable composite text texture. Glyphs are cached on CPU, never one GPU
+/// allocation per glyph. Resize changes clipped UVs, not resource count.
+struct TextSurface {
+    system: text::TextSystem,
+    texture: wgpu::Texture,
+    bind: wgpu::BindGroup,
+    vertices: wgpu::Buffer,
+}
+impl TextSurface {
+    fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        camera: &wgpu::Buffer,
+        fonts: rustcraft_content::fonts::FontResources,
+    ) -> Result<Self, String> {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bounded-text-composite"),
+            size: wgpu::Extent3d {
+                width: text::SURFACE_LIMIT,
+                height: text::SURFACE_LIMIT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("text-composite"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("text-quad"),
+            size: (6 * std::mem::size_of::<Vertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Ok(Self {
+            system: text::TextSystem::new(fonts)?,
+            texture,
+            bind,
+            vertices,
+        })
+    }
+    fn update(
+        &mut self,
+        _device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        runs: &[text::TextRun],
+        width: u32,
+        height: u32,
+        caret: Option<text::Caret>,
+    ) {
+        if !self.system.update(runs, width, height, caret) {
+            return;
+        }
+        let w = width.clamp(1, text::SURFACE_LIMIT);
+        let h = height.clamp(1, text::SURFACE_LIMIT);
+        let upload_started = std::time::Instant::now();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &self.system.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.system.metrics.upload_us = upload_started.elapsed().as_micros();
+        let vertices = [0, 1, 2, 0, 2, 3].map(|i| {
+            let p = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]][i];
+            Vertex {
+                position: [
+                    p[0] * w as f32 / width.max(1) as f32 * 2. - 1.,
+                    1. - p[1] * h as f32 / height.max(1) as f32 * 2.,
+                    0.,
+                ],
+                uv: [
+                    p[0] * w as f32 / text::SURFACE_LIMIT as f32,
+                    p[1] * h as f32 / text::SURFACE_LIMIT as f32,
+                ],
+                shade: 1.,
+                color: [1.; 3],
+            }
+        });
+        queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
     }
 }

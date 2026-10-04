@@ -761,3 +761,27 @@ Native steady state caches typed values and checks a pending flag at boundaries;
 lookup/lock enters voxel/entity inner loops. Transaction costs are rare tooling costs. These
 measurements are evidence, not universal timing limits or representative GPU performance.
 See [C1_REPORT.md](C1_REPORT.md) for source, streaming, persistence and adapter gates.
+
+
+## UX1 text and diagnostic acceptance
+
+See [UX1_REPORT](UX1_REPORT.md) for optimized layout/raster samples and text cache bounds.
+Unchanged text skips shaping/rasterization/upload (observed CPU update 2.37–7.19 µs).
+The glyph soak rebuilds at capacity; one fixed 16 MiB GPU composite page is retained.
+These are local diagnostic measurements, not hardware performance gates or P1 scanout evidence.
+
+Final DX overhead fixture, microseconds; 220 measured service samples per mode:
+
+| Mode | Mean | p50 | p95 | p99 | Max | Heavy provider collections |
+|---|---:|---:|---:|---:|---:|---|
+| disabled | 3.91 | 3.84 | 4.82 | 5.38 | 5.80 | none |
+| overview | 99.92 | 63.63 | 448.59 | 573.89 | 625.99 | none |
+| low_page | 114.44 | 74.52 | 504.33 | 639.61 | 694.58 | {'lighting': 30} |
+| high_page | 397.56 | 73.54 | 572.07 | 715.46 | 59664.35 | {'lighting': 0, 'renderer': 30} |
+| overlay | 135.16 | 72.56 | 536.39 | 674.67 | 1051.82 | {'lighting': 0, 'overlays': 31, 'renderer': 0} |
+
+Text shaping is measured separately from DX service. llvmpipe graphical acceptance establishes
+correctness only. Existing script wall-clock limits and frozen M4 hashes remain unchanged.
+
+The final high-page run includes one 59.66 ms service outlier (p99 715 µs); this is recorded,
+not hidden or promoted to a universal threshold. Heavy collection remains demand-suppressed.

@@ -132,3 +132,6 @@ presentation timing/interpolation and external Agent/Bot identity migration are 
 DUX1 remains CLOSED; its added Settings registration raises graphical views 17->18 without a second
 backend. C1 local acceptance and both public platform jobs are green. C1 is CLOSED; RSM1 remains inactive.
 No version bump, tag or release is part of this pass.
+
+Closeout `585de94b666257ddb5e4f2a902429db84be010ca`: Ubuntu/Windows green in
+[final C1 CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37182596219).

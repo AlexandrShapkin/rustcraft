@@ -1,4 +1,4 @@
-//! Project-authored 5x7 pixel lettering and read-only presentation geometry.
+//! Generic Unicode text runs and read-only presentation geometry.
 use crate::{AtlasRegion, Camera, PageVertices, Vertex, page_vertices_mut};
 use rustcraft_engine_core::BlockPos;
 
@@ -51,6 +51,7 @@ pub struct HudSnapshot<'a> {
     pub selected: usize,
     pub target: Option<BlockPos>,
     pub text: &'a str,
+    pub caret: Option<crate::text::Caret>,
     pub items: &'a [[f32; 3]],
     pub mining_progress: Option<f32>,
     pub inventory_open: bool,
@@ -67,6 +68,7 @@ impl Default for HudSnapshot<'_> {
             selected: 0,
             target: None,
             text: "",
+            caret: None,
             items: &[],
             mining_progress: None,
             inventory_open: false,
@@ -189,12 +191,22 @@ pub struct HudGeometry {
     pub debug_vertices: Vec<Vertex>,
     pub selection_vertices: Vec<Vertex>,
     pub debug_changed: bool,
+    pub text_runs: Vec<crate::text::TextRun>,
+    pub debug_runs: Vec<crate::text::TextRun>,
+    debug_scale: f32,
     cached_text: String,
     cached_size: (u32, u32),
     width: f32,
     height: f32,
 }
 impl HudGeometry {
+    pub fn set_text_scale(&mut self, scale: f32) {
+        if self.debug_scale != scale {
+            self.debug_scale = scale;
+            self.cached_size = (0, 0);
+        }
+    }
+
     pub fn build_gui_background(&mut self, width: u32, height: u32, open: bool, selected: usize) {
         self.gui_vertices.clear();
         self.hotbar_vertices.clear();
@@ -384,6 +396,7 @@ impl HudGeometry {
         }
     }
     pub fn build(&mut self, s: &HudSnapshot, width: u32, height: u32, camera: Camera) {
+        self.text_runs.clear();
         self.vertices.clear();
         self.selection_vertices.clear();
         self.item_vertices.clear();
@@ -597,124 +610,75 @@ impl HudGeometry {
         self.cached_size = (width, height);
         std::mem::swap(&mut self.vertices, &mut self.debug_vertices);
         self.vertices.clear();
-        let max_columns = s.text.lines().map(str::len).max().unwrap_or(1).max(1);
-        let scale = scale.min(
-            ((width.saturating_sub(10)) as f32 / (max_columns * 6) as f32)
-                .floor()
-                .max(1.),
-        );
-        for (i, line) in s.text.lines().enumerate() {
+        self.debug_runs.clear();
+        if !s.text.is_empty() {
             self.rect(
                 3.,
-                3. + i as f32 * 9. * scale,
-                line.len() as f32 * 6. * scale + 4.,
-                9. * scale,
+                3.,
+                self.width - 6.,
+                (s.text.lines().count() as f32 * 15. * self.debug_scale.max(1.)).min(self.height),
                 [0.035; 3],
                 None,
             );
-            self.text(line, 5., 4. + i as f32 * 9. * scale, scale);
+            self.debug_runs.push(crate::text::TextRun {
+                text: s.text.into(),
+                position: [5., 4.],
+                pixels: 12.,
+                role: "rustcraft:font/debug".into(),
+                color: [255; 3],
+            });
         }
         std::mem::swap(&mut self.vertices, &mut self.debug_vertices);
     }
     fn text(&mut self, text: &str, x: f32, y: f32, scale: f32) {
-        for (i, c) in text.chars().enumerate() {
-            for (row, bits) in glyph(c.to_ascii_uppercase()).iter().enumerate() {
-                for col in 0..5 {
-                    if bits & (1 << (4 - col)) != 0 {
-                        self.rect(
-                            x + (i * 6 + col) as f32 * scale,
-                            y + row as f32 * scale,
-                            scale,
-                            scale,
-                            [1.; 3],
-                            None,
-                        );
-                    }
-                }
-            }
-        }
+        self.text_runs.push(crate::text::TextRun {
+            text: text.into(),
+            position: [x, y],
+            pixels: 12. * scale,
+            role: "rustcraft:font/ui".into(),
+            color: [255; 3],
+        });
     }
 }
-/// Project-owned lettering for diagnostic labels; positions are framebuffer pixels.
+/// Specialist offscreen fixtures use the SAME Unicode shaper and rasterizer, converted to
+/// opaque pixel geometry for their existing capture path. Normal HUD uses the reusable texture.
 pub fn diagnostic_label(text: &str, origin: [f32; 2], viewport: [f32; 2]) -> Vec<Vertex> {
+    let mut system =
+        crate::text::TextSystem::new(rustcraft_content::fonts::FontResources::builtin()).unwrap();
+    system.update(
+        &[crate::text::TextRun {
+            text: text.into(),
+            position: origin,
+            pixels: 12.,
+            role: "rustcraft:font/debug".into(),
+            color: [255; 3],
+        }],
+        viewport[0] as u32,
+        viewport[1] as u32,
+        None,
+    );
     let mut h = HudGeometry {
         width: viewport[0],
         height: viewport[1],
         ..Default::default()
     };
-    h.text(text, origin[0], origin[1], 1.);
-    for v in &mut h.vertices {
-        v.position[2] = 0.;
+    for (i, p) in system.rgba.as_chunks::<4>().0.iter().enumerate() {
+        if p[3] >= 128 {
+            h.rect(
+                (i % (viewport[0] as usize)) as f32,
+                (i / (viewport[0] as usize)) as f32,
+                1.,
+                1.,
+                [1.; 3],
+                None,
+            );
+        }
     }
     for tri in h.vertices.as_chunks_mut::<3>().0 {
         tri.swap(1, 2);
     }
     h.vertices
 }
-fn glyph(c: char) -> [u8; 7] {
-    match c {
-        'A' => [14, 17, 17, 31, 17, 17, 17],
-        'B' => [30, 17, 17, 30, 17, 17, 30],
-        'C' => [14, 17, 16, 16, 16, 17, 14],
-        'D' => [30, 17, 17, 17, 17, 17, 30],
-        'E' => [31, 16, 16, 30, 16, 16, 31],
-        'F' => [31, 16, 16, 30, 16, 16, 16],
-        'G' => [14, 17, 16, 23, 17, 17, 15],
-        'H' => [17, 17, 17, 31, 17, 17, 17],
-        'I' => [14, 4, 4, 4, 4, 4, 14],
-        'J' => [7, 2, 2, 2, 18, 18, 12],
-        'K' => [17, 18, 20, 24, 20, 18, 17],
-        'L' => [16, 16, 16, 16, 16, 16, 31],
-        'M' => [17, 27, 21, 21, 17, 17, 17],
-        'N' => [17, 25, 25, 21, 19, 19, 17],
-        'O' => [14, 17, 17, 17, 17, 17, 14],
-        'P' => [30, 17, 17, 30, 16, 16, 16],
-        'Q' => [14, 17, 17, 17, 21, 18, 13],
-        'R' => [30, 17, 17, 30, 20, 18, 17],
-        'S' => [15, 16, 16, 14, 1, 1, 30],
-        'T' => [31, 4, 4, 4, 4, 4, 4],
-        'U' => [17, 17, 17, 17, 17, 17, 14],
-        'V' => [17, 17, 17, 17, 17, 10, 4],
-        'W' => [17, 17, 17, 21, 21, 21, 10],
-        'X' => [17, 17, 10, 4, 10, 17, 17],
-        'Y' => [17, 17, 10, 4, 4, 4, 4],
-        'Z' => [31, 1, 2, 4, 8, 16, 31],
-        '0' => [14, 17, 19, 21, 25, 17, 14],
-        '1' => [4, 12, 4, 4, 4, 4, 14],
-        '2' => [14, 17, 1, 2, 4, 8, 31],
-        '3' => [30, 1, 1, 14, 1, 1, 30],
-        '4' => [2, 6, 10, 18, 31, 2, 2],
-        '5' => [31, 16, 16, 30, 1, 1, 30],
-        '6' => [14, 16, 16, 30, 17, 17, 14],
-        '7' => [31, 1, 2, 4, 8, 8, 8],
-        '8' => [14, 17, 17, 14, 17, 17, 14],
-        '9' => [14, 17, 17, 15, 1, 1, 14],
-        '.' => [0, 0, 0, 0, 0, 12, 12],
-        ':' => [0, 12, 12, 0, 12, 12, 0],
-        '-' => [0, 0, 0, 31, 0, 0, 0],
-        '/' => [1, 1, 2, 4, 8, 16, 16],
-        '%' => [17, 2, 4, 8, 17, 0, 0],
-        '(' => [2, 4, 8, 8, 8, 4, 2],
-        ')' => [8, 4, 2, 2, 2, 4, 8],
-        '_' => [0, 0, 0, 0, 0, 0, 31],
-        '|' => [4, 4, 4, 4, 4, 4, 4],
-        '>' => [16, 8, 4, 2, 4, 8, 16],
-        '<' => [1, 2, 4, 8, 4, 2, 1],
-        '[' => [14, 8, 8, 8, 8, 8, 14],
-        ']' => [14, 2, 2, 2, 2, 2, 14],
-        '{' => [6, 4, 4, 8, 4, 4, 6],
-        '}' => [12, 4, 4, 2, 4, 4, 12],
-        '=' => [0, 0, 31, 0, 31, 0, 0],
-        '+' => [0, 4, 4, 31, 4, 4, 0],
-        ',' => [0, 0, 0, 0, 0, 4, 8],
-        ';' => [0, 4, 0, 0, 0, 4, 8],
-        '"' => [10, 10, 0, 0, 0, 0, 0],
-        '`' => [8, 4, 0, 0, 0, 0, 0],
-        ' ' => [0; 7],
-        _ => [31, 17, 1, 2, 4, 0, 4],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,6 +911,7 @@ mod tests {
     fn debug_text_is_cached_invalidated_on_resize_and_cleared_when_hidden() {
         let mut h = HudGeometry::default();
         let mut s = HudSnapshot {
+            caret: None,
             slots: [None; 9],
             selected: 0,
             target: None,
@@ -972,6 +937,11 @@ mod tests {
         assert!(!h.debug_changed);
         h.build(&s, 1280, 720, camera);
         assert!(h.debug_changed);
+        h.set_text_scale(1.5);
+        h.build(&s, 1280, 720, camera);
+        assert!(h.debug_changed);
+        h.build(&s, 1280, 720, camera);
+        assert!(!h.debug_changed);
         s.text = "";
         h.build(&s, 1280, 720, camera);
         assert!(h.debug_vertices.is_empty());

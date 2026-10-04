@@ -283,3 +283,15 @@ config-test:
 
 config-smoke:
     cargo run -p rustcraft-server -- --config-smoke
+
+# Focused developer controls, Unicode editor, bundled-font/resource/cache acceptance.
+ux-test:
+    cargo test -p rustcraft-client developer_input
+    cargo test -p rustcraft-scripting-rhai ux_editor
+    cargo test -p rustcraft-render text::
+    cargo test -p rustcraft-config ux_scale
+    cargo test -p rustcraft-content fonts::
+
+# Real graphical surface, disposable acceptance world; no normal save mutation.
+ux-client:
+    cargo run --release -p rustcraft-client -- --ux1-acceptance

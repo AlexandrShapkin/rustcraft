@@ -10,6 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+ttf-parser = "0.25"
+unicode-script = "0.5"
+rustcraft-content.workspace = true
 bytemuck.workspace = true
 png.workspace = true
 rustcraft-engine-core.workspace = true

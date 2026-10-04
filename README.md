@@ -81,3 +81,7 @@ vendored into this archive. See `reference/SOURCES.md` and `docs/REFERENCE_POLIC
 - bots are native platform participants rather than simulated graphical clients;
 - connecting clients/bots automatically resolve the server content they require;
 - optimization claims must be measured.
+
+Developer tools use F4 for discovery, held F3+1..9 for pages, `/` for commands and Backquote for
+Rhai. Unicode text ships with bundled open fonts; no system-font installation is required.
+See [debugging](docs/DEBUGGING.md) and [UX1 text/licenses](docs/UX1_REPORT.md).

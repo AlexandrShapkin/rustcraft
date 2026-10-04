@@ -92,3 +92,9 @@ not represented as zero. C1 is CLOSED; later stages remain inactive.
 ## C1 execution
 
 PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed and all later stages inactive.
+
+
+UX1 acceptance addresses developer F3/digit hotbar leakage and the diagnostic ASCII glyph
+limitation. Unicode glyph coverage is explicitly bounded by bundled fonts; unknown codepoints
+use deterministic tofu. Real-platform IME automation, visual bidi editing, clipboard and hot font
+replacement are deferred breadth, not reopened DUX1/C1 stages. RSM1 and later stages remain inactive.
