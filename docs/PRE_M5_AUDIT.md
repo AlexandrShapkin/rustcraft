@@ -10,7 +10,8 @@ accepted execution plan, not implementation or newly measured hardware acceptanc
 The original findings/counts below describe the audited baseline and remain historical evidence.
 DUX1 implementation starts from the accepted planning commit `195f53ca3025c9f001f0338d7a51a6e6c6626a80`.
 Generic native metadata/selection, shared demand/cadence and targeted inspection now replace the
-PM5-007 hard-coded discovery/all-domain refresh path. Acceptance/public CI closure is recorded in
+PM5-007 hard-coded discovery/all-domain refresh path. DUX1 is CLOSED; PM5-007 is resolved.
+Local and Ubuntu/Windows public CI acceptance is recorded in
 [DUX1_REPORT.md](DUX1_REPORT.md); C1 and every later stage remain inactive. New debug contracts use
 ChunkPos/section coordinates and stable EntityId; PM5-001 remains an A1 blocker for older contracts.
 No residency lifetime, pacing, storage or legacy-resource cleanup is part of DUX1.

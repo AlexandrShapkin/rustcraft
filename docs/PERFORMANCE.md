@@ -723,15 +723,15 @@ performance. Each mode has 240 event turns, excluding 20 warmup turns for percen
 
 | Mode | Mean | p50 | p95 | p99 | Max |
 |---|---:|---:|---:|---:|---:|
-| disabled | 4.66 | 4.26 | 5.31 | 5.66 | 68.72 |
-| overview | 104.84 | 74.38 | 320.99 | 430.29 | 683.74 |
-| low_page | 119.01 | 83.67 | 350.81 | 446.07 | 512.35 |
-| high_page | 131.60 | 80.53 | 323.64 | 507.81 | 1333.06 |
-| overlay | 146.36 | 79.27 | 479.04 | 676.27 | 818.12 |
-| scenario | 709.17 | 678.51 | 982.17 | 1388.51 | 2743.84 |
+| disabled | 3.99 | 3.91 | 5.31 | 5.66 | 5.80 |
+| overview | 99.51 | 74.94 | 296.34 | 379.38 | 428.48 |
+| low_page | 117.25 | 83.95 | 333.56 | 456.76 | 825.46 |
+| high_page | 120.38 | 80.74 | 323.16 | 434.83 | 712.46 |
+| overlay | 139.89 | 79.76 | 454.32 | 553.85 | 675.02 |
+| scenario | 668.63 | 643.45 | 916.32 | 1138.14 | 1339.36 |
 
 Disabled and Overview requested no broad providers. Lighting, Renderer and representative
-residency/collision overlays each collected 35 times when active; all earlier providers
+residency/collision overlays collected 34, 32 and 33 times respectively when active; all earlier providers
 collected zero after their consumers were removed. Cached domains remain bounded at eleven.
 Text refresh follows the inherited 250 ms cadence, with immediate UI-action updates; hidden
 legacy F3 collection is suppressed. Low/Medium/High labels are guidance rather than hard

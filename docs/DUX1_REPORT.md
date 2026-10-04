@@ -1,6 +1,8 @@
 # DUX1 in-game developer diagnostics acceptance
 
-Status: **local acceptance passed; public CI acceptance pending**.
+Status: **CLOSED — local acceptance and Ubuntu/Windows public CI passed**.
+Implementation: `f6ede4ceeca2be153cd29a51c525454759de6a3f`.
+Ubuntu and Windows: **green** in [implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37174284855).
 Starting public main: `195f53ca3025c9f001f0338d7a51a6e6c6626a80`.
 The starting Ubuntu and Windows jobs passed in [baseline CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37167717973).
 The original dirty mounted checkout is preserved; publication uses `/tmp/rustcraft-dux1`.
@@ -82,15 +84,15 @@ Final isolated `just dx-overhead` measurements (service microseconds):
 
 | Mode | Mean | p50 | p95 | p99 | Max |
 |---|---:|---:|---:|---:|---:|
-| disabled | 4.66 | 4.26 | 5.31 | 5.66 | 68.72 |
-| overview | 104.84 | 74.38 | 320.99 | 430.29 | 683.74 |
-| low_page | 119.01 | 83.67 | 350.81 | 446.07 | 512.35 |
-| high_page | 131.60 | 80.53 | 323.64 | 507.81 | 1333.06 |
-| overlay | 146.36 | 79.27 | 479.04 | 676.27 | 818.12 |
-| scenario | 709.17 | 678.51 | 982.17 | 1388.51 | 2743.84 |
+| disabled | 3.99 | 3.91 | 5.31 | 5.66 | 5.80 |
+| overview | 99.51 | 74.94 | 296.34 | 379.38 | 428.48 |
+| low_page | 117.25 | 83.95 | 333.56 | 456.76 | 825.46 |
+| high_page | 120.38 | 80.74 | 323.16 | 434.83 | 712.46 |
+| overlay | 139.89 | 79.76 | 454.32 | 553.85 | 675.02 |
+| scenario | 668.63 | 643.45 | 916.32 | 1138.14 | 1339.36 |
 
-Disabled/Overview collect no broad domains; Lighting collected 35 times, Renderer 35 and
-overlays 35. After switching away, each earlier provider collected zero times. These are
+Disabled/Overview collect no broad domains; Lighting collected 34 times, Renderer 32 and
+overlays 33. After switching away, each earlier provider collected zero times. These are
 whole DX service costs, including maintenance/polling, not universal budgets or GPU targets.
 The harness reports
 mean/p50/p95/p99/max service microseconds for disabled, Overview, Lighting, Renderer, representative
@@ -127,7 +129,7 @@ Deferred: polished/mouse-driven UI, profiler/editor/mod UI, precise column-light
 additional game entity kinds, remote admin, future command breadth and general settings controls.
 No C1, RSM1, P1, S1, R2, A1 or DX2 implementation was started. M5/M6/M7 remain inactive. No version
 bump, tag or release was created. See [DEBUGGING.md](DEBUGGING.md), [ROADMAP.md](ROADMAP.md) and
-[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md). Closure requires both public platform jobs green.
+[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md). Both implementation platform jobs are green; publication of this acceptance record is also monitored.
 
 Selection/configuration actions require existing `debug.configure`; shared diagnostic reads retain
 their read capabilities. Read-only/FutureChat contexts cannot change the selector or inspection target.

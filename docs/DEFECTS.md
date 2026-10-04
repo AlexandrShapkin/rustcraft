@@ -80,7 +80,8 @@ VRAM observation is not yet a proven GPU leak. RSM1/P1/S1 investigate before mea
 
 ## DUX1 execution
 
-PM5-007's discovery/demand gap is implemented through generic native view metadata, the F4 selector,
+PM5-007 is resolved and DUX1 CLOSED after local and Ubuntu/Windows CI acceptance.
+The discovery/demand gap is closed through generic native view metadata, the F4 selector,
 shared cached providers and targeted stable inspection; final acceptance/public CI is recorded in
 [DUX1_REPORT.md](DUX1_REPORT.md). No new functional residency/persistence/presentation defect is
 claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
