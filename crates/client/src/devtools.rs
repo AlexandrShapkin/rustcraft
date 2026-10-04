@@ -477,6 +477,10 @@ impl ClientApp {
                         .unwrap(),
                     );
                 }
+                6 => {
+                    self.devtools.as_mut().unwrap().scenario = None;
+                    self.control_state.page = "memory".into();
+                }
                 _ => unreachable!(),
             }
         }
@@ -498,7 +502,8 @@ impl ClientApp {
                 "low_page",
                 "high_page",
                 "overlay",
-                "scenario"][probe.phase]),
+                "scenario",
+                "residency_page"][probe.phase]),
                 "event_turns":probe.turns,
                 "samples":probe.samples.len(),
                 "mean_us":mean,
@@ -515,7 +520,7 @@ impl ClientApp {
             probe.samples.clear();
             probe.turns = 0;
             probe.phase += 1;
-            if probe.phase == 6 {
+            if probe.phase == 7 {
                 if let Some(tools) = self.devtools.as_mut() {
                     tools.scenario = None;
                 }
@@ -537,8 +542,8 @@ impl ClientApp {
 
 /// Graphical composition requests existing subsystem observations into the shared Control cache.
 /// Neither presentation nor scripting owns a second world/entity scanner.
-struct ClientHost<'a> {
-    app: &'a mut ClientApp,
+pub(super) struct ClientHost<'a> {
+    pub(super) app: &'a mut ClientApp,
 }
 impl rustcraft_control::Host for ClientHost<'_> {
     fn script_poll_interval_ms(&self) -> u64 {
@@ -613,6 +618,7 @@ impl rustcraft_control::Host for ClientHost<'_> {
             let started = Instant::now();
             let a = &mut self.app;
             let v = match d {
+                Domain::Residency => a.lifetime_ledger(),
                 Domain::World | Domain::Entities | Domain::Entity => {
                     if let Some(simulation) = a.simulation.as_mut() {
                         let mut value = rustcraft_minecraft_b173::control::MinecraftHost {
@@ -885,6 +891,9 @@ impl ClientApp {
             "mesh_generation":self.mesh_scheduler.current_generation((chunk,y)),
             "dirty":self.persistence_dirty.is_dirty(chunk),
             "save_pin":self.persistence_dirty.is_saving(chunk),
+            "lighting_pin":s.lighting.integrating_column()==Some(chunk),
+            "lighting_cleanup_backpressured":s.lighting.cleanup_backpressured(),
+            "eviction_reason":if self.residency.is_retained_by_radius(chunk){"retained radius"}else if self.persistence_dirty.is_dirty(chunk)||self.persistence_dirty.is_saving(chunk){"dirty/save acknowledgement pin"}else if s.lighting.integrating_column()==Some(chunk){"active lighting pin"}else if s.lighting.cleanup_backpressured(){"lighting cleanup admission pressure"}else{"eligible for bounded eviction service"},
             "active_entities_subset":s.items.iter().take(4096).filter(|e|(e.position.x.floor() as i32).div_euclid(16)==x&&(e.position.z.floor() as i32).div_euclid(16)==z).count(),
             "entity_coverage_truncated":s.items.len()>4096,
             "why":if !resident{"not resident; inspect desired/load state"}else if !safe{"resident but unsafe; neighborhood/lighting/render frontier not released"}else if !visible{"safe column without current ready presentation"}else{"current presentation ready"}})
@@ -930,6 +939,90 @@ mod tests {
         ));
         a.control_state.diagnostics.managed = true;
         a
+    }
+    #[test]
+    fn rsm1_shared_ledger_demand_and_cost() {
+        let mut a = app();
+        let world = &mut a.simulation.as_mut().unwrap().world;
+        for x in -4..=4 {
+            for z in -4..=4 {
+                world
+                    .publish_column(
+                        rustcraft_engine_core::ChunkPos { x, z },
+                        vec![(
+                            0,
+                            rustcraft_engine_core::Chunk::new(
+                                rustcraft_minecraft_b173::blocks::AIR.id,
+                            ),
+                        )],
+                    )
+                    .unwrap();
+            }
+        }
+        let mut host = ClientHost { app: &mut a };
+        for (label, active) in [("disabled", false), ("inactive", false), ("active", true)] {
+            let mut samples = Vec::new();
+            for _ in 0..1000 {
+                if active {
+                    host.app
+                        .control_state
+                        .diagnostics
+                        .invalidate(Domain::Residency);
+                }
+                let start = Instant::now();
+                host.prepare_diagnostics(if active { &[Domain::Residency] } else { &[] });
+                samples.push(start.elapsed().as_nanos());
+            }
+            samples.sort_unstable();
+            println!(
+                "RSM1_COST {label} mean_ns={} p50_ns={} p95_ns={} p99_ns={} max_ns={}",
+                samples.iter().sum::<u128>() / 1000,
+                samples[500],
+                samples[950],
+                samples[990],
+                samples[999]
+            );
+            if !active {
+                assert!(
+                    !host
+                        .app
+                        .control_state
+                        .diagnostics
+                        .samples
+                        .contains_key(&Domain::Residency)
+                );
+            }
+        }
+        let observation = host.snapshot().residency;
+        assert_eq!(observation["world"]["resident_columns"], 81);
+        assert_eq!(
+            host.app.control_state.diagnostics.samples[&Domain::Residency].collections,
+            1000
+        );
+        host.app.control_state.page = "memory".into();
+        assert!(host.app.control_state.diagnostic_text().contains("81"));
+        let mut tools = rustcraft_scripting_rhai::DevTools::new(
+            std::path::Path::new("../../scripts"),
+            rustcraft_control::engine_registry(),
+        )
+        .unwrap();
+        tools
+            .evaluate(
+                "assert_eq(residency().world.resident_columns,81)",
+                &mut host,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            host.app.control_state.diagnostics.samples[&Domain::Residency].collections,
+            1000,
+            "UI/Rhai reuse one observation"
+        );
+        host.prepare_diagnostics(&[]);
+        assert_eq!(
+            host.app.control_state.diagnostics.samples[&Domain::Residency].collections,
+            1000
+        );
     }
     #[test]
     fn config_native_control_console_rhai_and_settings_read_one_registry() {
@@ -1125,8 +1218,11 @@ mod tests {
                 .unwrap()
                 .contains("not found")
         );
-        assert_eq!(a.control_state.diagnostics.registry.len(), 18);
-        assert!(a.control_state.diagnostics.samples.len() <= 11);
+        assert_eq!(
+            a.control_state.diagnostics.registry.len(),
+            rustcraft_control::diagnostics::ViewRegistry::engine().len()
+        );
+        assert!(a.control_state.diagnostics.samples.len() <= Domain::ALL.len());
     }
     #[test]
     fn focus_transition_clears_held_input_and_allows_fresh_input() {

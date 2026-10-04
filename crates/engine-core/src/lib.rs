@@ -292,6 +292,19 @@ impl World {
     pub fn residency_enforced(&self) -> bool {
         self.enforce_column_availability
     }
+    /// Scalar lighting ownership; derived sky sections in resident columns are legitimate.
+    pub fn light_lifetime_counts(&self) -> (usize, usize) {
+        (
+            self.lights.len(),
+            self.lights
+                .keys()
+                .filter(|(c, _)| !self.resident_columns.contains(c))
+                .count(),
+        )
+    }
+    pub fn column_resident(&self, position: ChunkPos) -> bool {
+        self.resident_columns.contains(&position)
+    }
     pub fn column_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
         self.resident_columns.iter().copied()
     }

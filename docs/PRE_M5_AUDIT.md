@@ -727,3 +727,14 @@ semantic font resources, bounded text caches and C1 scaling. No GUI rewrite, R2 
 world residency or P1 work. Gates: graphical input/console/multilingual evidence, no-system-font
 and package replacement proofs, cache soak and full relevant local/platform validation.
 Order: DUX1 -> C1 -> UX1 -> RSM1 -> P1 -> S1 -> R2 -> A1 -> DX2 -> READY1 -> M5.
+
+## RSM1 execution update
+
+RSM1 starts from UX1 closeout `097195340437b16901ec067f19789c973855bbc6`. The pre-fix shared-ledger
+baseline measured generation history and ready-payload growth, saved entity-owner metadata retention,
+and lighting cleanup faults that retained clean outside-radius world/render/GPU ownership.
+Current-token retirement, whole-pipeline admission and narrow entity/lighting corrections are implemented;
+final acceptance is tracked in [RSM1_REPORT.md](RSM1_REPORT.md). PM5-002 remains open pending final
+local and public acceptance. The historical finding table and stage contract above remain audit history.
+DUX1/C1/UX1 remain CLOSED; P1 and every later stage remain inactive. Owner process VRAM is not
+measurable on the available llvmpipe surface; logical retention and allocator capacity are distinct.

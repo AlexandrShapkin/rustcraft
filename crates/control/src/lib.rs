@@ -203,6 +203,8 @@ impl Action {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     #[serde(default)]
+    pub residency: Value,
+    #[serde(default)]
     pub config: Value,
     pub version: u32,
     pub tick: u64,
@@ -228,6 +230,7 @@ pub struct Snapshot {
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
+            residency: Value::Null,
             config: Value::Null,
             version: CONTROL_API_VERSION,
             tick: 0,
@@ -838,6 +841,7 @@ impl Predicate {
                 observed == value
             }
             Self::DomainIdle(domain) => match domain.as_str() {
+                "residency" => snapshot.residency["idle"].as_bool().unwrap_or(false),
                 "streaming" => snapshot.streaming["idle"].as_bool().unwrap_or(false),
                 "meshing" => snapshot.meshing["idle"].as_bool().unwrap_or(false),
                 _ => return Err("unknown idle domain".into()),

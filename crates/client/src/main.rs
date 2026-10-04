@@ -1,7 +1,9 @@
 mod configuration;
 mod developer_input;
 mod devtools;
+mod lifetime;
 mod render_tests;
+mod rsm1;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
 use rustcraft_engine_core::{BlockId, Vec3};
 mod bench;
@@ -331,6 +333,8 @@ impl Controller for LocalHumanController {
 }
 
 struct ClientApp {
+    rsm1_campaign: Option<rsm1::Campaign>,
+    rsm1_failure: Option<String>,
     f3_chord: developer_input::F3Chord,
     font_scale: f32,
     console_service_focus: bool,
@@ -1522,6 +1526,8 @@ impl ClientApp {
         };
         control_state.sync_config();
         Self {
+            rsm1_campaign: None,
+            rsm1_failure: None,
             f3_chord: Default::default(),
             pending_console_input: None,
             console_service_focus: false,
@@ -5426,6 +5432,7 @@ impl ApplicationHandler for ClientApp {
         self.responsiveness.dropped_seconds += budget.dropped_seconds;
         self.metrics.catch_up = budget.catch_up;
         self.service_devtools_measured(_event_loop);
+        self.service_rsm1_campaign();
         if self.dx_exit_pending
             && self.dx_capture.is_none()
             && !self.renderer.as_ref().is_some_and(|r| r.capture_pending())
@@ -6158,7 +6165,7 @@ fn main() {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance"
-            | "--ux1-acceptance" => {}
+            | "--ux1-acceptance" | "--rsm1-acceptance" => {}
             "--set-config" | "--config-file" => {
                 args.next().expect("configuration option requires value");
             }
@@ -6240,9 +6247,12 @@ fn main() {
             .position(|a| a == "--scenario")
             .and_then(|i| args.get(i + 1).cloned());
     }
-    if std::env::args()
-        .any(|a| a == "--dux-acceptance" || a == "--c1-acceptance" || a == "--ux1-acceptance")
-    {
+    if std::env::args().any(|a| {
+        a == "--dux-acceptance"
+            || a == "--c1-acceptance"
+            || a == "--ux1-acceptance"
+            || a == "--rsm1-acceptance"
+    }) {
         app.dux_fixture = true;
         app.devtools = Some(
             rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), {
@@ -6263,6 +6273,10 @@ fn main() {
             }
             .into(),
         );
+    }
+    if std::env::args().any(|a| a == "--rsm1-acceptance") {
+        app.scenario_path = None;
+        app.rsm1_campaign = Some(rsm1::Campaign::new());
     }
     app.world_name = if app.dux_fixture {
         format!(
@@ -6285,6 +6299,16 @@ fn main() {
     app.camera_motion = std::env::args().any(|a| a == "--camera-motion");
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("client event loop failed: {error}");
+        std::process::exit(1);
+    }
+    if app.rsm1_campaign.is_some()
+        || (std::env::args().any(|a| a == "--rsm1-acceptance") && app.dx_capture_failure_recorded)
+    {
+        eprintln!("RSM1 campaign/capture incomplete");
+        std::process::exit(1);
+    }
+    if let Some(error) = app.rsm1_failure.as_ref() {
+        eprintln!("RSM1 acceptance failed: {error}");
         std::process::exit(1);
     }
     if let Some(tools) = app.devtools.as_ref()

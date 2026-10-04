@@ -1759,6 +1759,30 @@ impl Renderer {
         }
         state
     }
+    /// RustCraft-owned objects; driver allocations are deliberately not inferred.
+    pub fn mesh_lifetime_counts(&self) -> (usize, usize, usize, u64) {
+        let pages = self.chunks.values().map(|c| c.pages.len()).sum::<usize>();
+        let created = self.mesh_buffer_allocations + self.mesh_buffer_reallocations;
+        (
+            self.chunks.len(),
+            pages,
+            self.chunks.capacity(),
+            created.saturating_sub((pages * 2) as u64),
+        )
+    }
+
+    pub fn gpu_mesh_byte_components(&self) -> [u64; 4] {
+        self.chunks
+            .values()
+            .flat_map(|chunk| &chunk.pages)
+            .fold([0; 4], |mut totals, p| {
+                totals[0] += (p.vertex_count * std::mem::size_of::<Vertex>()) as u64;
+                totals[1] += u64::from(p.index_count) * 4;
+                totals[2] += p.vertex_capacity_bytes;
+                totals[3] += p.index_capacity_bytes;
+                totals
+            })
+    }
     pub fn gpu_mesh_logical_bytes(&self) -> usize {
         self.chunks
             .values()

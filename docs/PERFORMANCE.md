@@ -785,3 +785,13 @@ correctness only. Existing script wall-clock limits and frozen M4 hashes remain 
 
 The final high-page run includes one 59.66 ms service outlier (p99 715 µs); this is recorded,
 not hidden or promoted to a universal threshold. Heavy collection remains demand-suppressed.
+
+## RSM1 ownership baseline
+
+[RSM1_REPORT.md](RSM1_REPORT.md) records pre-fix and post-fix lifetime measurements. Use
+`just rsm1-test` for focused stale/revisit/pressure correctness and `just rsm1-client` for a disposable,
+C1-controlled graphical five-cycle route plus unique exploration, return and lighting drain.
+Logical counts and payload bytes are correctness evidence; retained buffer/container capacity and
+RSS are separate high-water evidence. Driver/process VRAM is unavailable on the llvmpipe acceptance
+surface. Its frame time is not a representative GPU target. Frozen M4 hashes and existing correctness
+thresholds are unchanged. No P1 presentation change or M7 optimization is included.

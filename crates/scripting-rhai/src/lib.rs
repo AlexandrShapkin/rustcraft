@@ -189,6 +189,7 @@ impl RhaiRuntime {
         for (name, domain, cap) in [
             ("player", "player", "player.read"),
             ("world", "world", "world.read"),
+            ("residency", "residency", "debug.inspect"),
             ("streaming", "streaming", "debug.inspect"),
             ("entities", "entities", "entity.read"),
             ("persistence", "persistence", "debug.inspect"),
@@ -208,6 +209,7 @@ impl RhaiRuntime {
                 let value = match domain {
                     "player" => &b.snapshot.player,
                     "world" => &b.snapshot.world,
+                    "residency" => &b.snapshot.residency,
                     "streaming" => &b.snapshot.streaming,
                     "entities" => &b.snapshot.entities,
                     "persistence" => &b.snapshot.persistence,
@@ -1593,6 +1595,7 @@ impl DevTools {
                 for (name, value) in [
                     ("player", &snapshot.player),
                     ("entities", &snapshot.entities),
+                    ("residency", &snapshot.residency),
                     ("streaming", &snapshot.streaming),
                     ("lighting", &snapshot.lighting),
                     ("meshing", &snapshot.meshing),

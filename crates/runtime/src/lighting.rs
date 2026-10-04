@@ -476,6 +476,11 @@ impl Lighting {
         };
         let low = low - 1;
         let high = high + 1;
+        // A new publication replaces the old residency. Its bulk-lit state already reconciles
+        // the local column; old queued cleanup must never erase these new direct-light seeds.
+        self.queued_removals.retain(|p| *p != column);
+        self.queued_integrations.retain(|job| job.column != column);
+        self.completed_sections.remove(&column);
         self.columns.insert(column, (low, high));
         for (section_y, direct) in direct_sections {
             self.direct.insert((column, section_y), direct);
@@ -835,17 +840,7 @@ impl Lighting {
             if !work.section_ys.is_empty() {
                 self.completed_sections.insert(work.column, work.section_ys);
             }
-            if let Some(removal) = self.queued_removals.pop_front() {
-                let started = self.start_column_removal(removal);
-                debug_assert!(!started || self.integration.is_none());
-            } else if let Some(next) = self.queued_integrations.pop_front() {
-                let started = if next.direct_ready {
-                    self.start_adopted_boundary(next.column, next.section_ys)
-                } else {
-                    self.start_column_integration(next.column, next.section_ys)
-                };
-                debug_assert!(!started || self.integration.is_none());
-            }
+            self.start_next_work(world);
             true
         } else {
             self.integration = Some(work);
@@ -853,6 +848,52 @@ impl Lighting {
         }
     }
 
+    fn start_next_work(&mut self, world: &World) {
+        // A zero-work cleanup can complete synchronously. Drain such entries until real work
+        // starts or the queue empties, rather than leaving an inactive but "unfinished" queue.
+        while let Some(removal) = self.queued_removals.pop_front() {
+            if world.column_resident(removal) {
+                continue;
+            } // obsolete eviction, since revisited
+            if !self.start_column_removal(removal) {
+                return;
+            }
+        }
+        while let Some(next) = self.queued_integrations.pop_front() {
+            if !world.column_resident(next.column) {
+                continue;
+            }
+            let done = if next.direct_ready {
+                self.start_adopted_boundary(next.column, next.section_ys)
+            } else {
+                self.start_column_integration(next.column, next.section_ys)
+            };
+            if !done {
+                return;
+            }
+        }
+    }
+    /// Scalar live/current and retired-but-unfinished ownership only.
+    pub fn retired_source_columns(&self, world: &World) -> usize {
+        self.columns
+            .keys()
+            .filter(|p| !world.column_resident(**p))
+            .count()
+    }
+    pub fn cleanup_backpressured(&self) -> bool {
+        self.queued_integrations.len() + self.queued_removals.len() + 1 >= MAX_COLUMN_LIGHTING_JOBS
+    }
+    pub fn lifetime_counts(&self) -> [usize; 7] {
+        [
+            self.columns.len(),
+            self.direct.len(),
+            self.completed_sections.len(),
+            self.queued_integrations.len(),
+            self.queued_removals.len(),
+            self.integration.as_ref().map_or(0, |w| w.queue.len()),
+            self.integration.as_ref().map_or(0, |w| w.queued.capacity()),
+        ]
+    }
     fn start_adopted_boundary(&mut self, column: ChunkPos, section_ys: Vec<i32>) -> bool {
         let (Some(low), Some(high)) = (
             section_ys.iter().min().copied(),
@@ -961,6 +1002,7 @@ impl Lighting {
     pub fn remove_column(&mut self, column: ChunkPos) {
         self.cancel_queued_for_eviction(column);
         self.columns.remove(&column);
+        self.completed_sections.remove(&column);
         self.direct.retain(|(position, _), _| *position != column);
     }
 
@@ -1137,6 +1179,9 @@ impl Lighting {
     }
 
     fn needs_propagation_at(&self, world: &World, r: &BlockRegistry, p: BlockPos) -> bool {
+        if !world.column_resident(split_block(p).0) {
+            return false;
+        }
         let Some(source) = self.source(p) else {
             return false;
         };
@@ -1181,6 +1226,11 @@ impl Lighting {
             processed += 1;
             self.work_counters.propagation_queue_pops += 1;
             queued.remove(&p);
+            // Source metadata can outlive physical eviction until queued cleanup runs. Never
+            // recreate light-only storage in an evicted column from an old propagation visit.
+            if !world.column_resident(split_block(p).0) {
+                continue;
+            }
             let Some(source) = self.source(p) else {
                 continue;
             };
@@ -1359,6 +1409,106 @@ mod tests {
         })
         .unwrap();
         r
+    }
+    #[test]
+    fn rsm1_empty_cleanup_drains_and_completed_history_retires() {
+        let r = registry();
+        let mut world = World::new(BlockId(0));
+        let mut lighting = Lighting::default();
+        let mut dirty = HashSet::new();
+        for x in 0..50 {
+            let c = ChunkPos { x, z: 0 };
+            world
+                .publish_column(c, vec![(0, Chunk::new(BlockId(0)))])
+                .unwrap();
+            lighting.begin_column_integration(c, vec![0]);
+            while !lighting.advance_column_integration(&mut world, &r, &mut dirty, 16384) {}
+            world.remove_column(c);
+            lighting.remove_column(c);
+        }
+        println!(
+            "RSM1_LIGHT_HISTORY_ACCEPTED completed_columns={} live_columns={}",
+            lighting.completed_sections.len(),
+            world.column_positions().count()
+        );
+        assert_eq!(lighting.completed_sections.len(), 0);
+        let c = ChunkPos { x: 0, z: 0 };
+        world
+            .publish_column(c, vec![(0, Chunk::new(BlockId(0)))])
+            .unwrap();
+        assert!(!lighting.begin_column_integration(c, vec![0]));
+        lighting
+            .queued_removals
+            .extend([ChunkPos { x: 100, z: 0 }, ChunkPos { x: 200, z: 0 }]);
+        for _ in 0..200 {
+            if lighting.advance_column_integration(&mut world, &r, &mut dirty, 16384) {
+                break;
+            }
+        }
+        println!(
+            "RSM1_EMPTY_CLEANUP_ACCEPTED active={:?} queued={} unfinished={}",
+            lighting.integrating_column(),
+            lighting.queued_removals.len(),
+            lighting.has_integration_work()
+        );
+        assert!(lighting.integrating_column().is_none());
+        assert!(!lighting.has_integration_work());
+    }
+    #[test]
+    fn rsm1_revisit_cancels_obsolete_cleanup() {
+        let r = registry();
+        let column = ChunkPos { x: 0, z: 0 };
+        let mut world = World::new(BlockId(0));
+        world
+            .publish_column(column, vec![(0, Chunk::new(BlockId(0)))])
+            .unwrap();
+        let mut lighting = Lighting::initialize(&mut world, &r);
+        world.remove_column(column);
+        world
+            .publish_column(column, vec![(0, Chunk::new(BlockId(0)))])
+            .unwrap();
+        lighting.queued_removals.push_back(column);
+        lighting.adopt_initial_column(column, vec![0], vec![(0, vec![15; 4096])]);
+        assert_eq!(lighting.source(BlockPos { x: 0, y: 0, z: 0 }), Some(15));
+        // Dequeue cleanup carrying only the old physical column key after a new publication.
+        assert!(lighting.queued_removals.is_empty());
+        lighting.start_next_work(&world);
+        println!(
+            "RSM1_REVISIT_LIGHT_ACCEPTED resident={} direct_source={:?}",
+            world.column_resident(column),
+            lighting.source(BlockPos { x: 0, y: 0, z: 0 })
+        );
+        assert_eq!(lighting.source(BlockPos { x: 0, y: 0, z: 0 }), Some(15));
+    }
+    #[test]
+    fn rsm1_retired_lighting_cannot_resurrect_storage() {
+        let r = registry();
+        let mut world = World::new(BlockId(0));
+        for x in 0..100 {
+            let c = ChunkPos { x, z: 0 };
+            world
+                .publish_column(c, vec![(0, Chunk::new(BlockId(0)))])
+                .unwrap();
+            let mut lighting = Lighting::initialize(&mut world, &r);
+            world.remove_column(c);
+            // A queued visit still holds direct-light source metadata until removal is serviced.
+            let mut queue = VecDeque::from([BlockPos {
+                x: x * 16,
+                y: 0,
+                z: 0,
+            }]);
+            let mut queued = queue.iter().copied().collect();
+            let mut dirty = HashSet::new();
+            let _ = lighting.propagate_work(&mut world, &r, &mut queue, &mut queued, &mut dirty, 1);
+            lighting.remove_column(c);
+        }
+        assert_eq!(world.light_lifetime_counts(), (0, 0));
+        println!(
+            "RSM1_LIGHT_ACCEPTED live_columns={} light_sections={} orphan_light_sections={}",
+            world.column_positions().count(),
+            world.light_lifetime_counts().0,
+            world.light_lifetime_counts().1
+        );
     }
     #[test]
     fn sky_emission_removal_and_signed_boundaries() {

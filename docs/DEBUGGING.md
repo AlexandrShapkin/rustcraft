@@ -101,3 +101,16 @@ Cyrillic, emoji, family ZWJ and flags. Real IME composition across all desktop I
 
 Text uses bundled fonts exclusively; see [UX1_REPORT.md](UX1_REPORT.md) for licenses, coverage,
 semantic replacement and bounds. `/config set rustcraft:ui/font_scale 1.5` changes shared scale.
+
+## RSM1 residency and memory view
+
+F4 exposes **Residency / Memory** (`memory`, Medium cost). It reads the same demand-driven
+`Residency` sample as Control snapshots and Rhai `residency()`; captures include `residency.json`.
+Counts distinguish live world/render/snapshot/GPU ownership, retired-but-unfinished jobs/lighting,
+logical payload bytes and reusable capacity. Chunk inspection explains active-lighting, dirty/save
+acknowledgement and cleanup-pressure blockers. Inactive pages do not collect this domain.
+
+Current generation entries should track current render sections, not all visited positions. The mesh
+result window includes submitted-unconsumed plus ready results. Device-wide GPU counters are labelled
+as such; process VRAM may be unavailable. Fixed UX1 text capacity is global, not travel growth.
+See [RSM1_REPORT.md](RSM1_REPORT.md) for bounds, workloads and telemetry limitations.

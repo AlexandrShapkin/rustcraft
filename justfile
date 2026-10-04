@@ -295,3 +295,14 @@ ux-test:
 # Real graphical surface, disposable acceptance world; no normal save mutation.
 ux-client:
     cargo run --release -p rustcraft-client -- --ux1-acceptance
+
+# Shared ownership/race/pressure gates; full travel remains world-travel-test.
+rsm1-test:
+    cargo test -p rustcraft-world rsm1_
+    cargo test -p rustcraft-render meshing::
+    cargo test -p rustcraft-runtime rsm1_
+    cargo test -p rustcraft-client rsm1_ -- --test-threads=1
+
+# Real surface, disposable world, shared C1 policy and scalar lifetime receipts.
+rsm1-client:
+    cargo run --release -p rustcraft-client -- --rsm1-acceptance --set-config rustcraft:streaming/load_radius=3 --set-config rustcraft:streaming/retain_radius=4 --set-config rustcraft:lighting/work_budget=256 --set-config rustcraft:streaming/main_budget_ms=8 --set-config rustcraft:meshing/upload_sections=64

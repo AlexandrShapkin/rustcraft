@@ -1,0 +1,664 @@
+{
+  "schema": 1,
+  "baseline_sha": "097195340437b16901ec067f19789c973855bbc6",
+  "workload": {
+    "load_radius": 3,
+    "retain_radius": 4,
+    "cycles": 5,
+    "unique_points": 8,
+    "hops": 380,
+    "elapsed_ms": 697499,
+    "settled_samples": 31,
+    "backend": "Gl",
+    "adapter": "llvmpipe LLVM 23.1.1",
+    "process_vram": "unavailable"
+  },
+  "before": {
+    "unique_removed_section_metadata": 10000,
+    "saved_evicted_entity_metadata": 1000,
+    "stalled_upload_ready_meshes": 256,
+    "orphan_light_sections": 100,
+    "async_completed_light_columns": 50,
+    "failed_route": {
+      "resident_columns": 88,
+      "clean_outside_retained": 34,
+      "render_sections": 704,
+      "generation_entries": 2136,
+      "gpu_logical_bytes": 43984080,
+      "gpu_capacity_bytes": 68092928
+    }
+  },
+  "after_focused": {
+    "unique_removed_section_metadata": 0,
+    "saved_evicted_entity_metadata": 0,
+    "stalled_upload_ready_meshes": 6,
+    "focused_pipeline_window": 6,
+    "orphan_light_sections": 0,
+    "async_completed_light_columns": 0,
+    "production_pipeline_window": 9,
+    "production_result_logical_byte_bound": 37158912,
+    "production_result_capacity_byte_bound": 99090432
+  },
+  "samples": [
+    {
+      "phase": 0,
+      "fully_drained": false,
+      "columns": 49,
+      "sections": 392,
+      "generation_entries": 392,
+      "gpu_pages": 243,
+      "gpu_logical_bytes": 22022112,
+      "gpu_capacity_bytes": 33241600,
+      "rss_bytes": 292352000,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 20575296,
+      "retired_light_sources": 0
+    },
+    {
+      "phase": 1,
+      "fully_drained": false,
+      "columns": 57,
+      "sections": 456,
+      "generation_entries": 456,
+      "gpu_pages": 345,
+      "gpu_logical_bytes": 28317576,
+      "gpu_capacity_bytes": 42504960,
+      "rss_bytes": 318062592,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23934528,
+      "retired_light_sources": 62
+    },
+    {
+      "phase": 2,
+      "fully_drained": false,
+      "columns": 57,
+      "sections": 456,
+      "generation_entries": 456,
+      "gpu_pages": 343,
+      "gpu_logical_bytes": 29035944,
+      "gpu_capacity_bytes": 42319872,
+      "rss_bytes": 334163968,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23934528,
+      "retired_light_sources": 132
+    },
+    {
+      "phase": 3,
+      "fully_drained": false,
+      "columns": 57,
+      "sections": 456,
+      "generation_entries": 456,
+      "gpu_pages": 335,
+      "gpu_logical_bytes": 28552104,
+      "gpu_capacity_bytes": 41776128,
+      "rss_bytes": 334884864,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23934528,
+      "retired_light_sources": 202
+    },
+    {
+      "phase": 4,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 291,
+      "gpu_logical_bytes": 29494752,
+      "gpu_capacity_bytes": 45292544,
+      "rss_bytes": 401227776,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 197
+    },
+    {
+      "phase": 5,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 325,
+      "gpu_logical_bytes": 20566896,
+      "gpu_capacity_bytes": 31821056,
+      "rss_bytes": 392724480,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 199
+    },
+    {
+      "phase": 6,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 330,
+      "gpu_logical_bytes": 21745248,
+      "gpu_capacity_bytes": 32467456,
+      "rss_bytes": 394592256,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 198
+    },
+    {
+      "phase": 7,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 331,
+      "gpu_logical_bytes": 25084416,
+      "gpu_capacity_bytes": 36960256,
+      "rss_bytes": 394596352,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 195
+    },
+    {
+      "phase": 8,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 292,
+      "gpu_logical_bytes": 30985416,
+      "gpu_capacity_bytes": 47085568,
+      "rss_bytes": 402370560,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 195
+    },
+    {
+      "phase": 9,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 341,
+      "gpu_logical_bytes": 26212368,
+      "gpu_capacity_bytes": 39413504,
+      "rss_bytes": 398610432,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 197
+    },
+    {
+      "phase": 10,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 339,
+      "gpu_logical_bytes": 27018600,
+      "gpu_capacity_bytes": 39476992,
+      "rss_bytes": 398610432,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 194
+    },
+    {
+      "phase": 11,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 331,
+      "gpu_logical_bytes": 25875192,
+      "gpu_capacity_bytes": 38589440,
+      "rss_bytes": 398610432,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 192
+    },
+    {
+      "phase": 12,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 292,
+      "gpu_logical_bytes": 29584128,
+      "gpu_capacity_bytes": 45078528,
+      "rss_bytes": 398598144,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 196
+    },
+    {
+      "phase": 13,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 341,
+      "gpu_logical_bytes": 26658240,
+      "gpu_capacity_bytes": 40462592,
+      "rss_bytes": 316182528,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 198
+    },
+    {
+      "phase": 14,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 317,
+      "gpu_logical_bytes": 18589200,
+      "gpu_capacity_bytes": 27945216,
+      "rss_bytes": 316735488,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 194
+    },
+    {
+      "phase": 15,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 326,
+      "gpu_logical_bytes": 23168376,
+      "gpu_capacity_bytes": 34951424,
+      "rss_bytes": 317239296,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 192
+    },
+    {
+      "phase": 16,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 292,
+      "gpu_logical_bytes": 26568360,
+      "gpu_capacity_bytes": 40597504,
+      "rss_bytes": 317120512,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 195
+    },
+    {
+      "phase": 17,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 341,
+      "gpu_logical_bytes": 25837224,
+      "gpu_capacity_bytes": 39653120,
+      "rss_bytes": 317116416,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 194
+    },
+    {
+      "phase": 18,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 339,
+      "gpu_logical_bytes": 26523336,
+      "gpu_capacity_bytes": 39001856,
+      "rss_bytes": 317124608,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 198
+    },
+    {
+      "phase": 19,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 331,
+      "gpu_logical_bytes": 25809840,
+      "gpu_capacity_bytes": 38269184,
+      "rss_bytes": 317140992,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 196
+    },
+    {
+      "phase": 20,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 292,
+      "gpu_logical_bytes": 28967568,
+      "gpu_capacity_bytes": 44333056,
+      "rss_bytes": 327340032,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 193
+    },
+    {
+      "phase": 21,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 306,
+      "gpu_logical_bytes": 23518320,
+      "gpu_capacity_bytes": 35392000,
+      "rss_bytes": 344260608,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 147
+    },
+    {
+      "phase": 22,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 315,
+      "gpu_logical_bytes": 24768744,
+      "gpu_capacity_bytes": 36850688,
+      "rss_bytes": 344260608,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 111
+    },
+    {
+      "phase": 23,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 294,
+      "gpu_logical_bytes": 24582432,
+      "gpu_capacity_bytes": 36642560,
+      "rss_bytes": 344260608,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 82
+    },
+    {
+      "phase": 24,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 299,
+      "gpu_logical_bytes": 23713536,
+      "gpu_capacity_bytes": 36664064,
+      "rss_bytes": 344260608,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 44
+    },
+    {
+      "phase": 25,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 298,
+      "gpu_logical_bytes": 23664984,
+      "gpu_capacity_bytes": 36216320,
+      "rss_bytes": 344252416,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 13
+    },
+    {
+      "phase": 26,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 303,
+      "gpu_logical_bytes": 23906568,
+      "gpu_capacity_bytes": 36838656,
+      "rss_bytes": 344252416,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 6
+    },
+    {
+      "phase": 27,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 292,
+      "gpu_logical_bytes": 23415504,
+      "gpu_capacity_bytes": 36217088,
+      "rss_bytes": 344252416,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 76
+    },
+    {
+      "phase": 28,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 283,
+      "gpu_logical_bytes": 23067912,
+      "gpu_capacity_bytes": 35415296,
+      "rss_bytes": 344252416,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 146
+    },
+    {
+      "phase": 29,
+      "fully_drained": false,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 288,
+      "gpu_logical_bytes": 30944424,
+      "gpu_capacity_bytes": 47604224,
+      "rss_bytes": 1034629120,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 189
+    },
+    {
+      "phase": 30,
+      "fully_drained": true,
+      "columns": 56,
+      "sections": 448,
+      "generation_entries": 448,
+      "gpu_pages": 288,
+      "gpu_logical_bytes": 30093168,
+      "gpu_capacity_bytes": 47604224,
+      "rss_bytes": 1034629120,
+      "mesh_pending_inflight_completed_ready": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "job_snapshots": 0,
+      "render_snapshot_bytes": 23514624,
+      "retired_light_sources": 0
+    }
+  ]
+}

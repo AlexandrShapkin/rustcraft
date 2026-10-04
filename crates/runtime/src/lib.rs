@@ -921,6 +921,21 @@ impl Simulation {
                     .get(id)
                     .is_some_and(|revision| *revision >= durable.revision)
         });
+        // An evicted destination may have been kept only for an unfinished source cleanup.
+        // Once the last recovery reference retires, disk records remain the durable owner.
+        let referenced = self
+            .items
+            .iter()
+            .map(|e| e.id)
+            .chain(self.pickup_receipts.keys().copied())
+            .chain(
+                self.entity_tombstones
+                    .values()
+                    .flat_map(|m| m.keys().copied()),
+            )
+            .collect::<HashSet<_>>();
+        self.entity_durable
+            .retain(|id, state| self.world.column_resident(state.owner) || referenced.contains(id));
         !removed_receipts.is_empty()
     }
 
@@ -1020,8 +1035,31 @@ impl Simulation {
         self.frozen_entity_columns.remove(&position);
     }
 
+    /// Scalar ownership only; no references or entity payloads escape into diagnostic history.
+    pub fn entity_lifetime_counts(&self) -> [usize; 6] {
+        [
+            self.items.len(),
+            self.entity_durable.len(),
+            self.entity_tombstones.values().map(BTreeMap::len).sum(),
+            self.pickup_receipts.len(),
+            self.frozen_entity_columns.len(),
+            self.entity_durable.capacity(),
+        ]
+    }
+
     pub fn evict_entity_column(&mut self, position: ChunkPos) {
         self.items.retain(|entity| entity.column() != position);
+        // Stable saved owner metadata is reconstructed on activation. Keep recovery/transfer
+        // references and active entities until their existing persistence acknowledgements retire.
+        self.entity_durable.retain(|id, state| {
+            state.owner != position
+                || self.items.iter().any(|e| e.id == *id)
+                || self.pickup_receipts.contains_key(id)
+                || self
+                    .entity_tombstones
+                    .values()
+                    .any(|markers| markers.contains_key(id))
+        });
         self.frozen_entity_columns.remove(&position);
     }
     fn mine_tick(&mut self, dt: f32) {
@@ -1581,6 +1619,50 @@ mod interaction_tests {
         let mut w = World::new(BlockId(0));
         w.set(BlockPos { x: 15, y: 16, z: 3 }, BlockId(1));
         Simulation::new(w, r, Vec3::new(15.5, 15., 0.5))
+    }
+    #[test]
+    fn rsm1_saved_entity_metadata_retires_with_owner() {
+        let mut s = scene();
+        for x in 0..1000 {
+            let column = ChunkPos { x, z: 0 };
+            s.spawn_item(ItemId(1), 1, Vec3::new(x as f32 * 16. + 1., 2., 1.));
+            let saved = s.entity_column_snapshot(column);
+            s.note_entity_column_persisted(&saved);
+            s.evict_entity_column(column);
+        }
+        let c = s.entity_lifetime_counts();
+        assert_eq!(s.entity_lifetime_counts()[..5], [0; 5]);
+        println!(
+            "RSM1_ENTITY_ACCEPTED active={} durable={} tombstones={} receipts={} frozen={} capacity={}",
+            c[0], c[1], c[2], c[3], c[4], c[5]
+        );
+    }
+
+    #[test]
+    fn rsm1_evicted_transfer_keeps_recovery_until_source_acknowledgement() {
+        let mut s = scene();
+        let source = ChunkPos { x: 0, z: 0 };
+        let destination = ChunkPos { x: 1, z: 0 };
+        s.spawn_item(ItemId(1), 1, Vec3::new(15., 2., 1.));
+        let id = s.items[0].id;
+        let saved = s.entity_column_snapshot(source);
+        s.note_entity_column_persisted(&saved);
+        s.items[0].position.x = 17.;
+        s.items[0].persistence_revision += 1;
+        let saved = s.entity_column_snapshot(destination);
+        s.note_entity_column_persisted(&saved);
+        s.world.remove_column(destination);
+        s.evict_entity_column(destination);
+        assert!(s.entity_durable.contains_key(&id));
+        assert_eq!(
+            s.entity_lifetime_counts()[2],
+            1,
+            "unfinished source cleanup retains transfer marker"
+        );
+        let cleaned = s.entity_column_snapshot(source);
+        s.note_entity_column_persisted(&cleaned);
+        assert!(!s.entity_durable.contains_key(&id));
+        assert_eq!(s.entity_lifetime_counts()[2], 0);
     }
     #[test]
     fn selection_target_face_count_and_boundary_invalidation() {

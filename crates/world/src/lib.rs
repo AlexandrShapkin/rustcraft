@@ -3507,6 +3507,56 @@ mod tests {
     }
 
     #[test]
+    fn rsm1_delayed_failed_and_stale_saves_keep_eviction_pin_until_retry_ack() {
+        let old = ChunkPos { x: -8, z: 0 };
+        let center = ChunkPos { x: 8, z: -8 };
+        let residents = HashSet::from([old]);
+        let mut residency = WorldResidency::new(2, 1);
+        let mut dirty = PersistenceDirtyTracker::default();
+        dirty.mark_dirty(old);
+        let delayed = dirty.begin_save(old).unwrap();
+        let pinned = |dirty: &PersistenceDirtyTracker| {
+            residents
+                .iter()
+                .copied()
+                .filter(|p| dirty.is_dirty(*p) || dirty.is_saving(*p))
+                .collect::<HashSet<_>>()
+        };
+        assert!(
+            !residency
+                .update(center, &residents, &pinned(&dirty))
+                .evict
+                .contains(&old)
+        );
+        dirty.mark_dirty(old); // edit while the older snapshot is in flight
+        dirty.complete_save(delayed, true);
+        assert!(
+            !residency
+                .update(center, &residents, &pinned(&dirty))
+                .evict
+                .contains(&old)
+        );
+        let failed = dirty.begin_save(old).unwrap();
+        dirty.complete_save(failed, false);
+        assert!(dirty.is_dirty(old));
+        assert!(
+            !residency
+                .update(center, &residents, &pinned(&dirty))
+                .evict
+                .contains(&old)
+        );
+        let retry = dirty.begin_save(old).unwrap();
+        dirty.complete_save(retry, true);
+        assert!(!dirty.is_dirty(old) && !dirty.is_saving(old));
+        assert!(
+            residency
+                .update(center, &residents, &pinned(&dirty))
+                .evict
+                .contains(&old)
+        );
+    }
+
+    #[test]
     fn lifecycle_requires_request_then_complete_publication() {
         let mut life = ChunkLifecycle::default();
         let pos = ChunkPos { x: 1, z: -1 };

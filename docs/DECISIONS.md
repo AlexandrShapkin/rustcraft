@@ -730,3 +730,14 @@ surface are bounded; unchanged runs avoid shaping/upload. Keep wgpu26 rather tha
 second GPU stack through incompatible glyphon releases. Console edits extended graphemes and routes
 winit text/IME commits separately from physical shortcuts. Held F3 consumes digits; semantic view
 metadata owns shortcut discovery. No new console privileges or broader GUI framework.
+
+## D-049 — Current residency tokens and whole-pipeline mesh pressure
+
+Measured RSM1 baseline proved historical generation/entity metadata retention and lighting cleanup
+lifetime faults. Use globally non-reused mesh work tokens with current-only per-section metadata;
+recheck results at poll and upload handoff. Bound submitted-unconsumed plus ready ownership by the
+worker/queue window instead of blocking worker result sends. Coalesce pending snapshots per current
+section. Retain recovery references and dirty/save pins until acknowledged; stale light propagation
+must not recreate evicted storage, and obsolete cleanup must not erase revisited seeds. A shared
+scalar ledger distinguishes live ownership, unfinished retirement, reusable capacity, RSS and optional
+process VRAM. No forced allocator shrinking or driver-baseline requirement. See RSM1_REPORT.md.

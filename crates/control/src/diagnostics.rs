@@ -10,6 +10,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Domain {
+    Residency,
     World,
     Entities,
     Streaming,
@@ -23,7 +24,8 @@ pub enum Domain {
     Overlays,
 }
 impl Domain {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
+        Self::Residency,
         Self::World,
         Self::Entities,
         Self::Streaming,
@@ -38,6 +40,7 @@ impl Domain {
     ];
     pub fn key(self) -> &'static str {
         match self {
+            Self::Residency => "residency",
             Self::World => "world",
             Self::Entities => "entities",
             Self::Streaming => "streaming",
@@ -53,6 +56,7 @@ impl Domain {
     }
     pub fn value(self, s: &Snapshot) -> &Value {
         match self {
+            Self::Residency => &s.residency,
             Self::World => &s.world,
             Self::Entities => &s.entities,
             Self::Streaming => &s.streaming,
@@ -68,6 +72,7 @@ impl Domain {
     }
     pub fn set(self, s: &mut Snapshot, v: Value) {
         match self {
+            Self::Residency => s.residency = v,
             Self::World => s.world = v,
             Self::Entities => s.entities = v,
             Self::Streaming => s.streaming = v,
@@ -167,6 +172,13 @@ impl ViewRegistry {
     pub fn engine() -> Self {
         let mut r = Self::default();
         for (name, title, description, cost, requirements) in [
+            (
+                "memory",
+                "Residency / Memory",
+                "Scalar lifetime ledger: live ownership, retired work, reusable capacity and provider scope.",
+                Cost::Medium,
+                vec![Domain::Residency],
+            ),
             (
                 "overview",
                 "Overview",
@@ -718,6 +730,19 @@ impl ControlState {
                             text.push_str(&format!("{p}: {k}\n"));
                         }
                     }
+                } else if d == Domain::Residency {
+                    if let Some(reason) = value["unavailable"].as_str() {
+                        text.push_str(&format!("UNAVAILABLE: {reason}\n"));
+                        return bounded_text(&text);
+                    }
+                    let w = &value["world"];
+                    let m = &value["meshing"];
+                    let g = &value["gpu"];
+                    let r = &value["render"];
+                    let e = &value["simulation"];
+                    text.push_str(&format!("Settled {} | core ready {} | player chunk {}\nDesired {} Retained/live {} Safe {} Visible {}\nWorld columns {} sections {} | load {} generate {}\nDirty {} persistence pins {} lighting pins {} other/transient {}\nRender sections {} snapshots {} bytes {}\nEntities active {} durable {} tombstones {} receipts {}\nMesh metadata {} capacity {}\nMesh pending {} inflight {} completed {} ready {}\nReady bytes {} completed bytes {}\nJob snapshots {} bytes {} | stale {} coalesced {}\nGPU sections {} pages {} vertex/index buffers {}/{}\nGPU logical {} bytes | owned capacity {} bytes\nBuffers created {} reused {} retired {}\nGlobal text {} bytes / {} page\nRSS {} [{}] | process VRAM unavailable\n",value["idle"],value["core_ready"],value["player_chunk"],w["desired"],w["retained_resident"],w["safe"],w["visible"],w["resident_columns"],w["resident_sections"],w["pending_load"],w["pending_generation"],w["dirty"],w["persistence_pinned"],w["lighting_pinned"],w["other_or_transient_eviction_blocked"],r["sections"],r["snapshots"],r["snapshot_bytes"],e["active_entities"],e["durable_entities"],e["tombstones"],e["pickup_receipts"],m["generations"],m["generation_capacity"],m["pending"],m["inflight_submitted_unconsumed"],m["completed_unconsumed"],m["ready"],m["ready_bytes"],m["completed_bytes"],m["live_job_snapshots"],m["live_job_snapshot_bytes"],m["stale"],m["coalesced"],g["sections"],g["mesh_pages"],g["vertex_buffers"],g["index_buffers"],g["logical_bytes"],g["capacity_bytes"],g["created"],g["reused"],g["retired"],g["fixed_text_capacity_bytes"],g["fixed_text_pages"],value["process"]["rss_bytes"],value["process"]["status"]));
+                    let light = &value["lighting_lifetime"];
+                    text.push_str(&format!("Lighting sources {} retired {} | queued integration {} cleanup {}\nCleanup pressure {} | active {} queue {}\n",light["columns"],light["retired_source_columns"],light["queued_integration"],light["queued_cleanup"],light["cleanup_backpressured"],light["active_column"],light["active_queue"]));
                 } else if d == Domain::Entities {
                     text.push_str(&format!(
                         "Active list: returned {} (cap 64); {}\n",

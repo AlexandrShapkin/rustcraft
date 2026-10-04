@@ -171,3 +171,15 @@ real disposable graphical acceptance (F3/hotbar, F4, slash/Backquote console, mu
 scale/reset/captures). Existing dx/dux/C1 workflows remain. Fonts are embedded; development and
 release runs do not look up repository font paths or system fonts. Release staging includes
 FONT_RESOURCES with all upstream font license texts. See [UX1_REPORT.md](UX1_REPORT.md).
+
+## Residency lifetime acceptance
+
+- `just rsm1-test`: focused meshing/runtime/shared-ledger tests, including pressure and late results.
+- `just rsm1-client`: explicit developer graphical campaign with disposable state and C1 workload
+  overrides; 5 bounded route cycles, unique exploration, return, final drain and capture. Requires
+  the normal graphical resource/backend setup. Scalar evidence is ignored `target/rsm1/*/samples.json`;
+  captures use the existing DX capture workflow. No generated evidence is a repository resource.
+
+These complement `world-stream-bench`, `world-travel-test` and `render-camera-motion`, whose gates
+remain intact. They are correctness/acceptance workflows; any DX2 retirement requires equivalent
+coverage. See [RSM1_REPORT.md](RSM1_REPORT.md).

@@ -209,7 +209,7 @@ is green; see DX1_REPORT.md for canonical evidence. M4 remains complete with M4-
 Accepted planning baseline: public main `16c6823a739e83f830b6676bbe0390be769ca17e`,
 2026-10-04; [closeout Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37157185442)
 passed. M0–M4 and DX1 remain closed; M4-009 representative-hardware quantitative evidence remains
-conditional. The audit remains the accepted historical plan. DUX1 is CLOSED with local and Ubuntu/Windows acceptance recorded in [DUX1_REPORT.md](DUX1_REPORT.md); C1 is CLOSED; UX1 is CLOSED; RSM1 and later stages remain inactive.
+conditional. The audit remains the accepted historical plan. DUX1 is CLOSED with local and Ubuntu/Windows acceptance recorded in [DUX1_REPORT.md](DUX1_REPORT.md); C1 is CLOSED; UX1 is CLOSED; RSM1 is ACTIVE for measurement and bounded lifetime fixes; P1 and later stages remain inactive.
 
 The canonical [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) contains source evidence, severity/disposition,
 ownership map, dependencies and executable stage contracts (goal, scope, invariants, measurements,

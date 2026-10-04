@@ -98,3 +98,11 @@ UX1 acceptance addresses developer F3/digit hotbar leakage and the diagnostic AS
 limitation. Unicode glyph coverage is explicitly bounded by bundled fonts; unknown codepoints
 use deterministic tofu. Real-platform IME automation, visual bidi editing, clipboard and hot font
 replacement are deferred breadth, not reopened DUX1/C1 stages. RSM1 and later stages remain inactive.
+
+## RSM1 execution
+
+PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime causes recorded in
+[RSM1_REPORT.md](RSM1_REPORT.md). Narrow fixes are implemented; final local/public acceptance is
+pending. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
+This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
+remain mandatory. DUX1/C1/UX1 stay CLOSED; P1 and subsequent stages remain inactive.

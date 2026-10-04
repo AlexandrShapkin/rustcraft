@@ -5,12 +5,22 @@ use rustcraft_engine_core::{SectionPos, Vec3};
 use std::{
     collections::{HashMap, VecDeque},
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::Instant,
 };
 
 pub const MAX_MESH_WORKERS: usize = 32;
+// Current section emitter visits 16^3 blocks, at most six quads per block; four vertices/six
+// indices per quad. Vec growth is bounded by twice the occupied payload for nonempty pages.
+pub const MAX_RESULT_LOGICAL_BYTES: usize =
+    16 * 16 * 16 * 6 * (4 * std::mem::size_of::<crate::Vertex>() + 6 * 4);
+pub const MAX_RESULT_CAPACITY_BYTES: usize =
+    2 * MAX_RESULT_LOGICAL_BYTES + 2 * 16 * 16 * 16 * 6 * std::mem::size_of::<PageMesh>();
 
 #[must_use]
 pub const fn bounded_mesh_worker_count(requested: usize) -> usize {
@@ -23,12 +33,30 @@ pub const fn bounded_mesh_worker_count(requested: usize) -> usize {
     }
 }
 
+#[derive(Debug, Default)]
+struct LifetimeAccounting {
+    snapshots: AtomicUsize,
+    snapshot_bytes: AtomicUsize,
+    completed: AtomicUsize,
+    completed_bytes: AtomicUsize,
+    completed_capacity: AtomicUsize,
+}
 #[derive(Debug)]
 struct MeshJob {
+    accounting: Arc<LifetimeAccounting>,
     section: SectionPos,
     generation: u64,
     snapshot: RenderChunk,
     enqueued_at: Instant,
+}
+
+impl Drop for MeshJob {
+    fn drop(&mut self) {
+        self.accounting.snapshots.fetch_sub(1, Ordering::Relaxed);
+        self.accounting
+            .snapshot_bytes
+            .fetch_sub(self.snapshot.snapshot_bytes(), Ordering::Relaxed);
+    }
 }
 
 #[derive(Debug)]
@@ -42,6 +70,17 @@ pub struct CompletedMesh {
 }
 
 impl CompletedMesh {
+    pub fn capacity_bytes(&self) -> usize {
+        self.pages.capacity() * std::mem::size_of::<PageMesh>()
+            + self
+                .pages
+                .iter()
+                .map(|p| {
+                    p.mesh.vertices.capacity() * std::mem::size_of::<crate::Vertex>()
+                        + p.mesh.indices.capacity() * std::mem::size_of::<u32>()
+                })
+                .sum::<usize>()
+    }
     #[must_use]
     pub fn logical_bytes(&self) -> usize {
         self.pages
@@ -62,10 +101,28 @@ enum WorkerResult {
     },
 }
 
+struct WorkerMessage {
+    result: Option<WorkerResult>,
+    accounting: Arc<LifetimeAccounting>,
+    bytes: usize,
+    capacity: usize,
+}
+impl Drop for WorkerMessage {
+    fn drop(&mut self) {
+        self.accounting.completed.fetch_sub(1, Ordering::Relaxed);
+        self.accounting
+            .completed_bytes
+            .fetch_sub(self.bytes, Ordering::Relaxed);
+        self.accounting
+            .completed_capacity
+            .fetch_sub(self.capacity, Ordering::Relaxed);
+    }
+}
 struct WorkerPool {
     sender: Option<mpsc::SyncSender<MeshJob>>,
-    receiver: mpsc::Receiver<WorkerResult>,
+    receiver: mpsc::Receiver<WorkerMessage>,
     threads: Vec<thread::JoinHandle<()>>,
+    accounting: Arc<LifetimeAccounting>,
 }
 
 impl WorkerPool {
@@ -77,11 +134,13 @@ impl WorkerPool {
         let (result_sender, result_receiver) = mpsc::channel();
         let jobs = Arc::new(Mutex::new(job_receiver));
         let resolver = Arc::new(resolver);
+        let accounting = Arc::new(LifetimeAccounting::default());
         let mut threads = Vec::with_capacity(worker_count);
         for index in 0..bounded_mesh_worker_count(worker_count) {
             let jobs = Arc::clone(&jobs);
             let results = result_sender.clone();
             let resolver = Arc::clone(&resolver);
+            let accounting = Arc::clone(&accounting);
             threads.push(
                 thread::Builder::new()
                     .name(format!("rustcraft-mesh-{index}"))
@@ -114,7 +173,28 @@ impl WorkerPool {
                                     generation,
                                 },
                             };
-                            if results.send(result).is_err() {
+                            let bytes = match &result {
+                                WorkerResult::Completed(r) => r.logical_bytes(),
+                                _ => 0,
+                            };
+                            let capacity = match &result {
+                                WorkerResult::Completed(r) => r.capacity_bytes(),
+                                _ => 0,
+                            };
+                            accounting
+                                .completed_capacity
+                                .fetch_add(capacity, Ordering::Relaxed);
+                            accounting.completed.fetch_add(1, Ordering::Relaxed);
+                            accounting
+                                .completed_bytes
+                                .fetch_add(bytes, Ordering::Relaxed);
+                            let message = WorkerMessage {
+                                result: Some(result),
+                                accounting: Arc::clone(&accounting),
+                                bytes,
+                                capacity,
+                            };
+                            if results.send(message).is_err() {
                                 break;
                             }
                         }
@@ -126,6 +206,7 @@ impl WorkerPool {
             sender: Some(job_sender),
             receiver: result_receiver,
             threads,
+            accounting,
         }
     }
 
@@ -168,14 +249,32 @@ pub struct MeshingStats {
     pub pending_snapshot_bytes: usize,
     pub in_flight_snapshot_bytes: usize,
     pub worker_count: usize,
+    pub generation_entries: usize,
+    pub generation_capacity: usize,
+    pub pending_capacity: usize,
+    pub retired_inflight: usize,
+    pub cancelled_pending: u64,
+    pub ready_capacity: usize,
+    pub completed_unconsumed: usize,
+    pub completed_cpu_bytes: usize,
+    pub completed_capacity_bytes: usize,
+    pub ready_capacity_bytes: usize,
+    pub pending_order_entries: usize,
+    pub pipeline_limit: usize,
+    pub result_logical_byte_limit: usize,
+    pub result_capacity_byte_limit: usize,
+    pub live_snapshots: usize,
+    pub live_snapshot_bytes: usize,
 }
 
 pub struct MeshScheduler {
     pool: WorkerPool,
     generations: HashMap<SectionPos, u64>,
+    next_token: u64,
+    pipeline_limit: usize,
     pending: HashMap<SectionPos, MeshJob>,
     pending_order: VecDeque<SectionPos>,
-    in_flight: HashMap<SectionPos, usize>,
+    in_flight: HashMap<SectionPos, (usize, u64)>,
     ready: Vec<CompletedMesh>,
     counters: MeshingStats,
 }
@@ -196,6 +295,9 @@ impl MeshScheduler {
         Self {
             pool: WorkerPool::new(worker_count, queue_capacity, resolver),
             generations: HashMap::new(),
+            next_token: 0,
+            pipeline_limit: bounded_mesh_worker_count(worker_count)
+                .saturating_add(queue_capacity.max(1)),
             pending: HashMap::new(),
             pending_order: VecDeque::new(),
             in_flight: HashMap::new(),
@@ -206,10 +308,15 @@ impl MeshScheduler {
 
     pub fn mark_dirty(&mut self, snapshot: RenderChunk) -> u64 {
         let section = (snapshot.position, snapshot.section_y);
-        let generation = self.generations.entry(section).or_default();
-        *generation = generation.saturating_add(1);
-        let generation = *generation;
+        let generation = self.allocate_token();
+        self.generations.insert(section, generation);
+        let accounting = Arc::clone(&self.pool.accounting);
+        accounting.snapshots.fetch_add(1, Ordering::Relaxed);
+        accounting
+            .snapshot_bytes
+            .fetch_add(snapshot.snapshot_bytes(), Ordering::Relaxed);
         let job = MeshJob {
+            accounting,
             section,
             generation,
             snapshot,
@@ -227,10 +334,20 @@ impl MeshScheduler {
         generation
     }
 
+    fn allocate_token(&mut self) -> u64 {
+        self.next_token = self
+            .next_token
+            .checked_add(1)
+            .expect("mesh work token space exhausted");
+        self.next_token
+    }
     pub fn remove_section(&mut self, section: SectionPos) -> u64 {
-        let generation = self.generations.entry(section).or_default();
-        *generation = generation.saturating_add(1);
-        self.pending.remove(&section);
+        let generation = self.allocate_token();
+        self.generations.remove(&section);
+        self.pending_order.retain(|p| *p != section);
+        if self.pending.remove(&section).is_some() {
+            self.counters.cancelled_pending += 1;
+        }
         self.ready.retain(|result| {
             let keep = result.section != section;
             if !keep {
@@ -238,7 +355,7 @@ impl MeshScheduler {
             }
             keep
         });
-        *generation
+        generation
     }
 
     #[must_use]
@@ -247,7 +364,9 @@ impl MeshScheduler {
     }
 
     pub fn poll(&mut self) {
-        while let Ok(result) = self.pool.receiver.try_recv() {
+        while let Ok(mut message) = self.pool.receiver.try_recv() {
+            let result = message.result.take().expect("mesh message result");
+            drop(message);
             let (section, generation) = match &result {
                 WorkerResult::Completed(result) => (result.section, result.generation),
                 WorkerResult::Failed {
@@ -281,7 +400,13 @@ impl MeshScheduler {
     }
 
     fn pump(&mut self) {
-        while let Some(section) = self.pending_order.pop_front() {
+        // in_flight includes queued, running and completed-unconsumed jobs. Moving a result
+        // into ready preserves this count. Nonblocking result sends therefore cannot exceed the
+        // window, and shutdown never waits on a producer blocked behind the consumer.
+        while self.in_flight.len() + self.ready.len() < self.pipeline_limit {
+            let Some(section) = self.pending_order.pop_front() else {
+                break;
+            };
             if self.in_flight.contains_key(&section) {
                 continue;
             }
@@ -289,9 +414,10 @@ impl MeshScheduler {
                 continue;
             };
             let snapshot_bytes = job.snapshot.snapshot_bytes();
+            let token = job.generation;
             match self.pool.try_submit(job) {
                 Ok(()) => {
-                    self.in_flight.insert(section, snapshot_bytes);
+                    self.in_flight.insert(section, (snapshot_bytes, token));
                     self.counters.mesh_jobs_submitted += 1;
                 }
                 Err(job) => {
@@ -385,6 +511,31 @@ impl MeshScheduler {
     #[must_use]
     pub fn stats(&self) -> MeshingStats {
         MeshingStats {
+            retired_inflight: self
+                .in_flight
+                .iter()
+                .filter(|(p, (_, token))| self.generations.get(p) != Some(token))
+                .count(),
+            completed_capacity_bytes: self
+                .pool
+                .accounting
+                .completed_capacity
+                .load(Ordering::Relaxed),
+            ready_capacity_bytes: self.ready.iter().map(CompletedMesh::capacity_bytes).sum(),
+            pending_order_entries: self.pending_order.len(),
+            pipeline_limit: self.pipeline_limit,
+            result_logical_byte_limit: self.pipeline_limit.saturating_mul(MAX_RESULT_LOGICAL_BYTES),
+            result_capacity_byte_limit: self
+                .pipeline_limit
+                .saturating_mul(MAX_RESULT_CAPACITY_BYTES),
+            generation_entries: self.generations.len(),
+            generation_capacity: self.generations.capacity(),
+            pending_capacity: self.pending.capacity(),
+            ready_capacity: self.ready.capacity(),
+            completed_unconsumed: self.pool.accounting.completed.load(Ordering::Relaxed),
+            completed_cpu_bytes: self.pool.accounting.completed_bytes.load(Ordering::Relaxed),
+            live_snapshots: self.pool.accounting.snapshots.load(Ordering::Relaxed),
+            live_snapshot_bytes: self.pool.accounting.snapshot_bytes.load(Ordering::Relaxed),
             pending: self.pending.len(),
             in_flight: self.in_flight.len(),
             ready: self.ready.len(),
@@ -394,7 +545,7 @@ impl MeshScheduler {
                 .values()
                 .map(|job| job.snapshot.snapshot_bytes())
                 .sum(),
-            in_flight_snapshot_bytes: self.in_flight.values().sum(),
+            in_flight_snapshot_bytes: self.in_flight.values().map(|(b, _)| b).sum(),
             worker_count: self.pool.threads.len(),
             ..self.counters
         }
@@ -413,7 +564,7 @@ impl MeshScheduler {
         }
     }
 
-    /// Read-only lifetime evidence; generation retention policy remains unchanged.
+    /// Read-only current-section ownership; retired tokens do not require historical map keys.
     pub fn generation_entry_count(&self) -> usize {
         self.generations.len()
     }
@@ -442,6 +593,181 @@ mod tests {
     use super::*;
     use crate::{AtlasRegion, Face, RenderWorld, TextureHandle};
     use rustcraft_engine_core::{BlockId, BlockPos, World};
+
+    #[test]
+    fn rsm1_unique_metadata_and_upload_pressure_are_bounded() {
+        let mut history = MeshScheduler::new(2, 4, StaticMaterials);
+        let template = snapshot(1, 0);
+        for x in 0..10000 {
+            let mut next = template.clone();
+            next.position.x = x;
+            history.mark_dirty(next);
+            history.remove_section((rustcraft_engine_core::ChunkPos { x, z: 0 }, 0));
+        }
+        assert_eq!(history.stats().generation_entries, 0);
+        assert_eq!(history.stats().pending_order_entries, 0);
+        drop(history);
+        let mut scheduler = MeshScheduler::new(2, 4, StaticMaterials);
+        for x in 0..256 {
+            scheduler.mark_dirty(snapshot(1, x));
+        }
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while scheduler.stats().ready < 6 {
+            scheduler.poll();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        for _ in 0..1000 {
+            scheduler.poll();
+        }
+        let m = scheduler.stats();
+        assert_eq!(m.ready, 6);
+        assert_eq!(m.pending, 250);
+        assert_eq!(m.in_flight, 0);
+        assert!(m.ready_capacity_bytes <= m.result_capacity_byte_limit);
+        println!(
+            "RSM1_PRESSURE ready={} pending={} ready_bytes={} ready_capacity_bytes={} window={} logical_limit={} capacity_limit={}",
+            m.ready,
+            m.pending,
+            m.ready_cpu_bytes,
+            m.ready_capacity_bytes,
+            m.pipeline_limit,
+            m.result_logical_byte_limit,
+            m.result_capacity_byte_limit
+        );
+        let mut accepted = 0;
+        while accepted < 256 {
+            scheduler.poll();
+            accepted += scheduler
+                .take_ready(Vec3::ZERO, Vec3::ZERO, 6, usize::MAX)
+                .len();
+            assert!(scheduler.stats().in_flight + scheduler.stats().ready <= 6);
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(scheduler.is_idle());
+        let accounting = Arc::clone(&scheduler.pool.accounting);
+        drop(scheduler);
+        assert_eq!(accounting.snapshots.load(Ordering::Relaxed), 0);
+        assert_eq!(accounting.completed.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn rsm1_stalled_poll_and_shutdown_release_all_owned_messages() {
+        let mut scheduler = MeshScheduler::new(2, 4, StaticMaterials);
+        for x in 0..256 {
+            scheduler.mark_dirty(snapshot(1, x));
+        }
+        let accounting = Arc::clone(&scheduler.pool.accounting);
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while accounting.completed.load(Ordering::Relaxed) < scheduler.stats().in_flight {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(accounting.completed.load(Ordering::Relaxed) <= 6);
+        drop(scheduler); // Nonblocking producers drain/join without polling or uploading.
+        assert_eq!(accounting.snapshots.load(Ordering::Relaxed), 0);
+        assert_eq!(accounting.completed.load(Ordering::Relaxed), 0);
+        assert_eq!(accounting.completed_bytes.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn rsm1_large_payload_pressure_obeys_byte_envelope_and_resumes() {
+        let mut world = World::new(BlockId(0));
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    if (x + y + z) % 2 == 0 {
+                        world.set(BlockPos { x, y, z }, BlockId(1));
+                    }
+                }
+            }
+        }
+        let template = RenderWorld::from_world(&world)
+            .chunks()
+            .next()
+            .unwrap()
+            .clone();
+        let mut scheduler = MeshScheduler::new(2, 2, StaticMaterials);
+        for x in 0..16 {
+            let mut next = template.clone();
+            next.position.x = x;
+            scheduler.mark_dirty(next);
+        }
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        while scheduler.stats().ready < 4 {
+            scheduler.poll();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let m = scheduler.stats();
+        assert!(m.ready_cpu_bytes > 4_000_000);
+        assert!(m.ready_cpu_bytes <= m.result_logical_byte_limit);
+        assert!(m.ready_capacity_bytes <= m.result_capacity_byte_limit);
+        println!(
+            "RSM1_LARGE_PRESSURE ready={} logical={} capacity={} limit={}",
+            m.ready, m.ready_cpu_bytes, m.ready_capacity_bytes, m.result_capacity_byte_limit
+        );
+        let mut accepted = 0;
+        while accepted < 16 {
+            scheduler.poll();
+            accepted += scheduler
+                .take_ready(Vec3::ZERO, Vec3::ZERO, 4, usize::MAX)
+                .len();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(scheduler.is_idle());
+    }
+    #[test]
+    fn rsm1_evicted_revisited_section_rejects_late_old_work() {
+        let rendezvous = Arc::new(std::sync::Barrier::new(2));
+        let mut scheduler = MeshScheduler::new(
+            1,
+            1,
+            BlockingMaterials {
+                rendezvous: Arc::clone(&rendezvous),
+                first_call: std::sync::atomic::AtomicBool::new(true),
+            },
+        );
+        let section = (rustcraft_engine_core::ChunkPos { x: 0, z: 0 }, 0);
+        let old = scheduler.mark_dirty(snapshot(1, 0));
+        rendezvous.wait();
+        scheduler.remove_section(section);
+        let new = scheduler.mark_dirty(snapshot(2, 0));
+        assert_ne!(old, new);
+        assert_eq!(scheduler.stats().retired_inflight, 1);
+        rendezvous.wait();
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        let ready = loop {
+            scheduler.poll();
+            let ready = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 2, usize::MAX);
+            if !ready.is_empty() {
+                break ready;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        };
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].generation, new);
+        assert_eq!(ready[0].pages[0].texture, TextureHandle(2));
+        assert_eq!(scheduler.stats().mesh_jobs_discarded_stale, 1);
+        // Even a late old ready payload is rechecked at the upload handoff.
+        scheduler.ready.push(CompletedMesh {
+            section,
+            generation: old,
+            pages: vec![],
+            queue_wait_ms: 0.,
+            mesh_ms: 0.,
+            completed_at: Instant::now(),
+        });
+        assert!(
+            scheduler
+                .take_ready(Vec3::ZERO, Vec3::ZERO, 2, usize::MAX)
+                .is_empty()
+        );
+        scheduler.remove_section(section);
+        assert_eq!(scheduler.stats().generation_entries, 0);
+        assert_eq!(scheduler.stats().pending_order_entries, 0);
+    }
 
     #[test]
     fn worker_count_is_bounded_and_never_zero() {

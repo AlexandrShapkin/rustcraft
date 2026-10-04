@@ -449,3 +449,14 @@ UX1 text: `content::fonts` resolves bounded semantic role stacks through ordered
 composition; RendererResources supplies them to generic `render::text`. cosmic-text shapes/rasterizes
 an explicitly populated bundled-only database. The renderer owns bounded CPU glyph generations and
 one reusable GPU composite page. HUD/debug/console share this path; no game-policy/font-atlas leakage.
+
+## Residency lifetime accounting
+
+RSM1 extends existing shared diagnostics with scalar ownership accounting; inactive consumers do not
+scan resident state. Current mesh tokens are globally non-reused and removed from the current-section
+map on eviction. Admission bounds submitted-unconsumed plus ready payloads, allowing nonblocking
+result sends and clean shutdown. Entity durable-owner metadata retires only after existing recovery
+references permit it. Lighting rejects propagation into physically evicted columns and retires obsolete
+cleanup on revisit. These mechanisms preserve game policy, Safe residency and save-before-evict.
+RustCraft-owned GPU payload/capacity differs from allocator/driver physical residency.
+See [RSM1_REPORT.md](RSM1_REPORT.md) and decision D-049.
