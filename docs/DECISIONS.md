@@ -687,6 +687,8 @@ control. Native REPL parsing is limited to a 4 KiB console line; file compilatio
 
 ## D-045 — Bounded technical consolidation before multiplayer
 
+Historical post-DX1 sequence below; current owner-expanded ordering is in ROADMAP and D-053–059.
+
 Status: accepted planning decision, 2026-10-04; no new implementation stage activated.
 
 Public DX1 closeout main 16c6823a is verified with green Ubuntu/Windows CI. Preserve completed
@@ -780,3 +782,76 @@ an oversized player checkpoint unsaveable. Ordinary simulation and unrelated ent
 Every terminal column-save completion removes its snapshot, including failures. Only successful
 completions advance ownership or prune receipts; failure leaves the latest dirty generation retryable.
 No database, production backend switch, generic journal or S1.3 is introduced.
+
+## D-053 — One client path; authority, grants and gameplay are independent
+
+Status: accepted target; implementation owned by F1/A1, authenticated grants by M5.
+
+One normal rustcraft-client runtime/input path serves sessions/principals with different roles and
+capabilities. Process responsibility, session authority, player gameplay state and security grants
+are distinct. Roles grant capabilities; mechanisms do not branch on role names. Game-owned modes
+are not executable variants or developer privilege. F3/F4 semantic actions route normally and check
+capabilities; trusted local Rhai stays explicitly authorized. Specialist harnesses use the same
+composition and DX2 retires them only with equivalent coverage. See [ARCHITECTURE](ARCHITECTURE.md) and [DEBUGGING](DEBUGGING.md).
+
+## D-054 — Common content uses composition and compiled local state
+
+Status: accepted target; C2 after A1.
+
+Common identity/metadata/tags/typed properties/capabilities/handlers/resources compose with category
+contracts, not OOP inheritance or meaningless universal fields. Tag/property/capability/handler/state/
+resource are distinct. Compile semantic authoring into typed indexed hot data and compact definition-local
+state schemas; no dynamic string property bag per voxel/entity. Semantic events/queries produce
+commands, not raw mutable World. Native and future sandbox adapters share contracts. See [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
+
+## D-055 — Generalized geometry separates visible and simulation contracts
+
+Status: accepted target; BG1 consumes C2.
+
+Full cube is the optimized common case, not a block definition. Semantic model providers compile to
+local handles; independent render/collision/selection/occlusion/light coverage support boxes, compound
+shapes, 45-degree wedges and bounded static meshes. A new ordinary decorative shape requires package
+definitions/resources and optional handler, not switches throughout engine/renderer/serializer/raycast.
+Shared semantic shapes may compile differently for physics aggregation. See [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
+
+## D-056 — Measured structural refactor precedes spatial expansion
+
+Status: accepted target; RF1 after C2/BG1/DX2, before VS1/READY1.
+
+Inventory crate/module graphs, ownership/change hotspots, large connected orchestration, cycles and
+transitional duplication before moving code. Improve change locality/search cost/public boundaries,
+not cosmetic LOC. Produce concise docs/CODE_MAP.md; preserve behavior, performance, formats and specialized
+storage unless a separately tracked defect requires change. No ECS rewrite or trait-object graph.
+
+## D-057 — Voxel spaces are the fundamental spatial model
+
+Status: accepted target; VS1 after RF1; not implemented.
+
+Stable space identity, local integer grids and parent transforms cover Static/Kinematic/Dynamic motion
+without converting content representation. Local adjacency/lighting remain local; cross-space contact
+requires explicit mechanisms. Space-aware commands, entities/reference frames, meshes and persistence
+replace the universal root-grid assumption. Bound hierarchy and lifecycle, including foundational split.
+The complete concept and migration/acceptance contract are in [VOXEL_SPACES](VOXEL_SPACES.md).
+
+## D-058 — Optional composite physics, generic effects and bounded cost
+
+Status: accepted target; VS1 with C2/BG1 inputs.
+
+Selected dynamic spaces pay physics cost; static path remains cheap. Aggregate structures rather than
+one body per voxel. Typed content/shape properties contribute mass/inertia/collision and bounded dirty
+aggregate rebuilds. Engine applies generic forces/torques/contacts, not vehicle classes; games explain
+why effects exist. Kinematic structures use the same space model. No solver/library chosen here.
+S1 storage triggers and RSM1 lifetime evidence must be revalidated for representative space workloads.
+
+## D-059 — Networking starts after spatial and readiness closure
+
+Status: accepted target; M5 remains inactive.
+
+RF1 and VS1 must complete and READY1 validate the expanded architecture before a separate pass starts
+M5. Protocol starts space-aware: stable identities, transform/motion revisions, local content, entity
+frames/lifecycle and interest/prediction; moving unchanged structures send transforms, not N block moves.
+Host-authenticated grants are not source labels/local flags/Rhai contexts/gamemodes. QUIC remains the
+measured leading candidate, not a selected dependency. See [NETWORKING](NETWORKING.md) and [VOXEL_SPACES](VOXEL_SPACES.md).
+
+D-052 remains the implemented durable transfer decision. Its general source-before-retirement rule
+also binds future cross-space transitions; this pass adds no backend, journal or save-format change.

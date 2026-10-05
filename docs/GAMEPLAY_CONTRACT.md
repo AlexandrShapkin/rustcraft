@@ -23,3 +23,17 @@ diagnostics; this distinction is not a renderer-only flag.
 
 When choosing between historical quirk compatibility and a clear native mechanic, prefer the clear
 mechanic unless the quirk is central to the expected play style.
+
+## Current and target ownership
+
+Current Development/Survival state and legacy runtime rules remain transitional. Target F1 keeps
+survival/creative/spectator as game-owned player state, separate from host roles/capability grants;
+developer privilege is not a gameplay mode. See [ARCHITECTURE](ARCHITECTURE.md).
+
+Target C2/BG1/VS1 engine mechanisms include typed content compilation, shapes, spaces, transforms,
+commands/events, physics interfaces and rendering infrastructure. Games own block/item meaning,
+gameplay modes, recipes, transport semantics, why forces exist, connectivity and split/merge gameplay
+rules, and game-level permissions distinct from host security. No Minecraft-specific classes or
+vehicle taxonomy enters engine-core. AABB/cube paths remain efficient common cases, not permanent
+restrictions on gameplay geometry. [VOXEL_SPACES](VOXEL_SPACES.md) defines cross-space contact separately
+from local voxel adjacency; movement must preserve local block logic.

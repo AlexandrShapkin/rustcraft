@@ -1,7 +1,8 @@
 # Developer diagnostics
 
-Diagnostics require explicit `--devtools` (or a developer scenario/harness). Normal startup has no
-selector, console, overlays or diagnostic collection. F3 keeps fast Overview access; **F4 opens the
+Current: the developer selector, console and shared diagnostic providers require explicit
+`--devtools` (or a developer scenario/harness). Normal startup still has legacy F3 Overview,
+but lacks the developer selector/console path. With devtools, **F4 opens the
 in-game selector**. Arrow keys select, Tab switches pages/overlays, Enter activates/toggles, H shows
 provider/shortcut help, C selects the crosshair/player section, E selects the next bounded active
 EntityId, and Escape/F4 closes. Backquote opens the existing console; F10 aborts scenarios.
@@ -55,8 +56,8 @@ Cost classes guide use, not hardware-independent timing guarantees. Metadata dis
 invoke providers. Script summaries also honor cadence before constructing bounded loaded/job/error
 lists. REPL-defined functions retain conservative domain preflight; registered command preflight uses
 that command's source requirements. Comment/name matches can over-request, but never create a second
-scanner. Four Hz is inherited diagnostic cadence, not a general runtime settings registry; C1 will
-own future configurable cadence/settings.
+scanner. C1 now owns configurable diagnostic cadence through the shared settings registry;
+four Hz is the default, not a second settings owner.
 
 Automation and humans use the same `Snapshot` fields. Rhai adds `debug()`, `chunk_inspection()` and
 `entity_inspection()`; scenario `assert_debug(PATH, BOOL/STRING/INT)` checks current semantic metadata.
@@ -133,3 +134,26 @@ returned by `persistence()` in Rhai/Control and captured in bundles. Totals rese
 exclude checkpoint/failed-write bytes; they are not SSD/NAND write or isolated fsync counters.
 Use `just scenario-client scripts/scenarios/s1_diagnostics.rhai` for a disposable graphical smoke.
 Use isolated save/config paths as for other acceptance runs. Full storage evaluation is headless.
+
+## Target F1 routing and real-human field validation
+
+Current source evidence: `ClientApp::window_event` calls `dev_key` only when `devtools.is_some()`;
+otherwise `debug_key` and normal controller handling run. Thus UX1's held F3+digit router is not the
+normal startup router. `just client-survival` and `just dev-client` select the same executable with
+different launch admission/state. F1 owns correcting this known workflow inconsistency; it is not
+claimed fixed by UX1/R2 unit or specialist acceptance.
+
+Target: one normal rustcraft-client runtime/input path; input → semantic diagnostic action → capability
+check → effect. F3/F4 routing is available through that path; denied actions report availability without
+granting powers. Roles/capabilities and game-owned gamemode are independent. Explicit trusted local
+Rhai authorization remains. Specialist acceptance workloads drive the same composition using Control,
+semantic actions and scenarios; DX2 retires redundant drivers only after equivalence.
+
+F1 field evidence must exercise normal startup and real WindowEvent F3/F4, compare dev/release builds,
+and record AMD Radeon Vega 8 / RADV / Vulkan behavior. Matched phases: stationary, mouse-pan, walk,
+walk+pan. Record frame/render/present-call cadence distributions, duplicate camera states,
+mouse-to-camera response and long-frame/checkpoint events on one monotonic timeline. Application
+present calls are not physical scanout. A background checkpoint `sync_ms` tail is **not automatically
+a frame stall**: correlate overlap and event-thread blocking before assigning causation. If release is
+smooth and dev is not, adjust developer workflow/documentation to measured facts rather than inventing
+a renderer fix. Current P1 software-GPU evidence is not this new hardware acceptance.

@@ -158,7 +158,7 @@ Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the e
 callers/assertions/artifacts and proves scenario equivalence before retirement. No recipe is dead
 merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
 discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
-DUX1 and C1 are CLOSED; RSM1 and later stages remain inactive. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
+DUX1/C1/UX1/RSM1/P1/S1/R2 are CLOSED; F1 and subsequent implementation stages remain planned. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
 
 ## C1 workflows
 
@@ -200,3 +200,19 @@ stores, temporary files or operation logs. A 50k/one-cycle current-only diagnost
 Candidate remains examples/dev-dependencies only, with no normal backend switch or new format.
 These are S1 acceptance aliases for later DX2 review; existing persistence workflows remain.
 See [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md).
+
+## Target DX2 command surface and RF1 navigation
+
+Conceptual long-term core: `just client`, `just server`, `just test`, `just ci`. This is target
+workflow, not a claim that all four recipes already exist with final semantics. Current survival,
+devtools and specialist acceptance recipes remain until F1 path unification and DX2 proven-equivalent
+coverage permit retirement. Scenarios should drive the same client/server composition through Control
+and semantic actions; no alternate product variants. DX2 also owns project-authored diagnostic content
+through the public Game API; READY1 checks independent engine acceptance without Minecraft assets.
+
+RF1 begins with measured crate/module graphs, largest files/types/functions, highly connected modules,
+change hotspots, adapters, cycles (if any) and duplicate policy/mechanism paths. It produces
+`docs/CODE_MAP.md`, a concise current ownership/navigation map for mutation, presentation, persistence,
+content compilation, control and the later space path. No stale symbol dump or hundreds of tiny files.
+See [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) for today's source anchors and [ROADMAP](ROADMAP.md)
+for execution gates. This docs-only pass does not perform RF1 or create its post-refactor code map.

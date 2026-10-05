@@ -11,7 +11,7 @@ game package and compatibility/reference client of a generic voxel runtime. The 
 
 The current pre-M5 sequence is:
 
-`R2 -> F1 -> A1 -> C2 -> BG1 -> DX2 -> RF1 -> READY1 -> M5`
+`R2 -> F1 -> A1 -> C2 -> BG1 -> DX2 -> RF1 -> VS1 -> READY1 -> M5`
 
 Closed stages are not reopened without a reproducible regression. Later stages may update shared
 infrastructure, but must preserve the acceptance evidence and contracts of earlier stages.
@@ -347,6 +347,15 @@ Required field work:
 - explicitly separate application frame timing, filesystem durability latency and physical display
   behavior.
 
+F1 acceptance uses stationary, mouse-pan, walk and walk+pan phases; distributions for frame/render/
+present-call cadence, duplicate camera state and mouse-to-camera response share a monotonic timeline
+with long frames and checkpoint events. A background sync_ms tail is not automatically a frame stall.
+If release is smooth and dev is not, document the developer workflow rather than inventing a renderer
+fix. Separate process responsibility, session authority, principal/roles/capabilities and game-owned
+player state; check capabilities rather than role names. Example grants are play, debug.read/configure/
+control, command.execute, server.admin, script.local and capture, not a frozen namespace. Trusted Rhai
+remains explicitly authorized. See [DEBUGGING](DEBUGGING.md) and [ARCHITECTURE](ARCHITECTURE.md).
+
 F1 is corrective integration/field validation, not networking, remote authorization or a persistence
 backend migration.
 
@@ -367,6 +376,9 @@ Goals:
 - keep capability checks explicit and shared with Control;
 - preserve headless/bot determinism and avoid designing the full M5 wire protocol prematurely.
 
+A1 prohibits new external/network/durable contracts exposing BlockId, ItemId, TextureHandle,
+ModelHandle or dense registry indices without an authoritative profile mapping. Close PlaceIntent
+and Bot entity identity debt; retain separate Game, Control, Agent and Bot semantic surfaces.
 A1 defines the boundary M5 will rely on; it is not M5 networking implementation.
 
 ## C2 — unified content definition & capability model
@@ -419,6 +431,12 @@ Required proof:
 - keep persistence, rendering and future network identity independent from runtime-local dense handles;
 - keep `minecraft-b173` policy in the game package and the common mechanism in generic crates;
 - preserve headless operation and current public Game API direction.
+
+C2 must prove definition-local canonical state schemas (facing/axis/half/shape/powered/connections),
+compiled into compact deterministic encoding with validated semantic serialization, independent of
+Beta metadata and usable by model/handler/collision consumers. This closes R1.0-003 when BG1 supplies
+a real consumer. No global flag proliferation or dynamic map per instance. See
+[CONTENT_SYSTEM](CONTENT_SYSTEM.md) for canonical building-block meanings and handler contract.
 
 C2 is architectural foundation, not a full mod SDK, full ECS rewrite, scripting language or broad
 content migration campaign. It should create the smallest stable common contract needed by BG1 and
@@ -524,18 +542,25 @@ Goals:
   validate the project;
 - keep public CI deterministic, bounded and free of private assets.
 
+DX2 owns a generic first-party diagnostic content package using public Game API and project-owned
+assets, extending independent sandbox-style cube/material/emission/model/item/entity/medium/UI proofs
+where contracts exist; READY1 verifies it. No Minecraft admin blocks hardcoded into engine-core.
+The conceptual core command surface is client/server/test/ci, with specialist harnesses retained where
+they prove unique contracts. See [TOOLING](TOOLING.md).
+
 DX2 is cleanup and equivalence proof, not a feature milestone.
 
 ## RF1 — structural codebase refactor & code-graph optimization
 
-Status: planned; mandatory before READY1.
+Status: planned; starts after DX2; mandatory before VS1 and READY1.
 
 Purpose: perform a comprehensive behavior-preserving structural refactor after the pre-M5 contracts
 have stabilized, so code-graph search, ownership reasoning, future edits and automated maintenance are
 materially cheaper before networking multiplies cross-cutting complexity.
 
 RF1 is deliberately late in the pre-M5 sequence: R2/F1/A1/C2/BG1/DX2 may still change boundaries. The
-refactor happens after those contracts settle and before READY1 freezes readiness.
+refactor happens after those contracts settle and before VS1 expands the spatial model; READY1
+then freezes readiness. RF1 lowers change/search/reasoning cost, not merely file sizes.
 
 ### RF1.1 — architecture/code-graph inventory
 
@@ -632,15 +657,70 @@ RF1 closes only when:
 Create `docs/RF1_REPORT.md` with the inventory, refactor map, before/after dependency/code-graph
 summary, deliberately retained complexity and regression evidence.
 
+## VS1 — voxel spaces, kinematics & optional composite physics
+
+Status: planned; starts only after RF1 closes. Mandatory before READY1 and M5.
+
+Canonical concept: [VOXEL_SPACES.md](VOXEL_SPACES.md). One local-grid model with stable spatial
+identity and parent-relative transforms supports Static, Kinematic and Dynamic motion sources.
+The overworld remains its cheap static fast path; dynamic physics is optional per space and aggregates
+structures rather than creating one body per block. C2 typed physical properties and BG1 shapes feed
+this mechanism; the game owns transport/force/connectivity meaning.
+
+Bounded scope and migration:
+
+- explicit stable SpaceId/local positions in commands, queries, interaction, extraction, entity
+  reference frames, Bot/Agent context and persistence, with deliberate root-space compatibility;
+- transform-only translation/rotation without voxel-coordinate rewrites or unchanged-section remesh;
+- local adjacency/lighting independent of cross-space geometric contact;
+- bounded acyclic parent-child transforms and independent space lifecycle;
+- static/kinematic/dynamic proof, moving-platform/rotating reference-frame behavior and generalized
+  space-vs-world/space-vs-space collision using BG1 semantic shapes;
+- foundational connectivity/split lifecycle preserving identities, local content and motion state;
+  optional merge/connect and future joints/docking evolve the same model, not one-off vehicle systems;
+- versioned space/parent/transform/motion/content/entity/revision persistence and explicit reopen/
+  migration rules; destination durability before source retirement, idempotent partial transfer;
+- bounded accounting for spaces, sections/jobs, GPU/physics resources, transforms, saves and references.
+
+Acceptance:
+
+- unchanged large-space motion has no whole-voxel rewrite or whole-section remesh churn;
+- static performance remains acceptable and body count is independent of block count;
+- dirty aggregate-property rebuilds, hierarchy traversal and cross-space broadphase are bounded;
+- local mechanisms survive movement, generalized shape contact is coherent and entity frames cross
+  spaces without implicit permanent ownership;
+- split/lifecycle and deterministic crash/reopen conserve identity/content and avoid dangling parents;
+- representative moving-space routes, late/cancel/revisit jobs and failure retry show bounded lifetime;
+- S1 reconsideration triggers are measured against many spaces, transform updates, local columns,
+  split/merge and changing ownership; backend reconsideration only if those triggers fire;
+- independent project-authored proof and Ubuntu/Windows regressions remain green.
+
+Create `docs/VS1_REPORT.md` with migration boundaries, measured static/moving evidence, lifecycle and
+fault matrix, storage-trigger results and deferred extensions. No arbitrary numeric budgets, chosen
+physics library or complete transport catalog is mandated here. M5 stays inactive until READY1.
+
 ## READY1 — final pre-M5 readiness gate
 
-Status: planned; starts only after RF1 closes.
+Status: planned; starts only after VS1 closes (and RF1 is complete).
 
-READY1 is a verification/freeze gate, not another implementation campaign.
+READY1 is a verification/freeze gate, not another implementation campaign. It validates the
+owner-approved post-audit expansion, not merely the original PRE_M5 audit. Required entry evidence:
+
+- one normal client path; gameplay mode distinct from privilege; role → capability authorization;
+- A1 semantic external identities and stable entity references/provenance;
+- C2 common composition, block-local canonical state and bounded compiled hot paths;
+- BG1 non-full/arbitrary static geometry, separate collision/selection/occlusion/light contracts;
+- no Minecraft policy in generic engine/renderer; diagnostic content independence;
+- DX2 equivalence and RF1 accepted ownership/code graph/navigation;
+- VS1 static/kinematic/dynamic spaces, reference frames, hierarchy/lifecycle and persistence/reopen;
+- moving-space lifetime bounded; transform motion avoids voxel/remesh churn; static fast path acceptable;
+- S1 triggers rechecked against space workloads, without automatic database/backend migration;
+- current hardware field evidence understood, including checkpoint/frame correlation and build profile;
+- Ubuntu/Windows green; no known P1 durability/identity blocker.
 
 Goals:
 
-- run a fresh whole-repository architecture and risk audit against the post-RF1 tree;
+- run a fresh whole-repository architecture and risk audit against the post-VS1 tree;
 - confirm no pre-M5 BLOCKER/HIGH risk remains without an explicit accepted deferral;
 - verify the canonical client/server/tooling workflows from a clean checkout;
 - verify public Ubuntu/Windows CI and representative local graphical/headless smoke;
@@ -657,7 +737,7 @@ real blocker, create a bounded repair stage before M5 rather than starting netwo
 
 ## M5 — multiplayer + server content resolution (future, inactive)
 
-Starts only after READY1 closes.
+Starts only after RF1 and VS1 are complete and READY1 closes, in a separate activation pass.
 
 - authoritative server;
 - QUIC evaluation/transport;
@@ -667,7 +747,10 @@ Starts only after READY1 closes.
 - semantic manifest handshake;
 - content cache/fetch/integrity;
 - headless remote bot transport;
-- bounded initial multiplayer scale consistent with the accepted S1 storage envelope.
+- space-aware identity/transforms/local content/entity reference frames and lifecycle from the first
+  real protocol design; movement sends transform state rather than every contained block;
+- space-aware interest and reference-frame prediction/reconciliation;
+- bounded initial multiplayer scale consistent with S1 triggers rechecked against VS1 workloads.
 
 M5 does not require Java protocol compatibility.
 

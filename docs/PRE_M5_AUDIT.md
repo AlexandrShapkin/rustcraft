@@ -750,3 +750,28 @@ P1 is CLOSED; PM5-003 is resolved after local acceptance and Ubuntu/Windows impl
 update. The historical audit findings/contracts above remain the planning baseline.
 
 S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required; R2 and subsequent stages remain inactive. Final closeout CI must pass before publication acceptance is reported.
+
+## Owner-approved post-audit architecture expansion (post-R2)
+
+This addition supersedes the earlier recommended sequence and inactive-status statements **for current
+planning only**. Original findings, counts, execution additions and workload observations above remain
+historical evidence; they did not evaluate C2/BG1 or moving voxel spaces. R2 and D-052 are implemented
+and closed at `5eb1770`; see [R2_REPORT](R2_REPORT.md) and [ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md).
+
+Current mandatory direction: R2 → F1 → A1 → C2 → BG1 → DX2 → RF1 → VS1 → READY1 → M5.
+F1 adds one normal client path, authority/gameplay separation and real-human/hardware validation.
+A1 closes external identity/provenance and affected policy debt. C2 composes typed common content and
+block-local state; BG1 proves generalized semantic models and independent shapes. DX2 retires only
+proven-equivalent workflows and owns diagnostic content. RF1 measures and reduces change/ownership
+cost before spatial expansion. [VOXEL_SPACES](VOXEL_SPACES.md) defines VS1's static/kinematic/dynamic
+local grids, hierarchy, optional composite physics, lifecycle and persistence. None of these planned
+implementation stages is started by this documentation pass.
+
+[ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) supplies the current source-to-plan gap table;
+[ROADMAP](ROADMAP.md) owns complete stage/acceptance contracts. S1/RSM1 conclusions remain valid
+for measured single-world workloads. VS1/READY1 must recheck S1 triggers and bounded ownership for
+spaces, transform-only updates, split/merge and reference changes, not claim these were already measured.
+READY1 must validate the expanded foundational checklist, not simply repeat this original audit.
+No known P1 durability/identity blocker may be carried into M5; cube/global-grid limitations are
+planned migrations rather than newly discovered functional bugs. M5 requires RF1/VS1/READY1 closure
+and a separate activation pass, with space-aware networking from its first real design.

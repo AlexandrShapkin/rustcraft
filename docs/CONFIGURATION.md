@@ -131,3 +131,12 @@ settings explicitly and use diagnostic size/cycle/source-rate arguments. They by
 to measure durable physical operations directly. Worker probes use the current composition's one
 save worker/eight slots; these remain inventory-classified startup policy. No security/schema quota
 is casually raised through C1 for the component evaluation.
+
+## Current admission versus target F1 authority
+
+Current `--survival` chooses game state and `--devtools` admits trusted diagnostic/Rhai tooling;
+UX1 diagnostic keyboard routing is gated by tooling presence. These flags are not authenticated roles.
+F1 will unify the normal runtime/input path while keeping session authority, principal, roles/grants
+and game-owned gamemode distinct. Operational config source labels cannot grant capabilities; C1
+remains the single typed settings owner. See [DEBUGGING](DEBUGGING.md) for current routing and field
+validation, and [SECURITY](SECURITY.md) for trusted local versus server/sandbox grants.

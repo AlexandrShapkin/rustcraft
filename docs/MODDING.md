@@ -37,3 +37,16 @@ infrastructure, not mods.
 DX1 Rhai is an explicit local tooling adapter over semantic control, with capabilities,
 resource limits and controlled script roots. It exposes no raw filesystem/network/process APIs.
 It does not replace native first-party systems or the future WASM untrusted-mod runtime.
+
+## Target shared platform contracts (C2/BG1/VS1)
+
+Native and future WASM adapters reuse the composed definitions, tags, typed properties, supported
+capabilities, handlers and compact state schemas in [CONTENT_SYSTEM](CONTENT_SYSTEM.md), semantic
+model/shape contracts and [VOXEL_SPACES](VOXEL_SPACES.md). WASM does not get a second block/model/space
+language. Runtime representations may differ; no stable ABI or completed WASM API is promised today.
+Event/query context produces bounded commands for authoritative mutation, never raw mutable World.
+
+Downloaded executable code remains sandboxed, capability-limited and quota-limited, without arbitrary
+native-library autoexec or ambient host access. A content interface capability does not itself grant
+host security authority. Trusted local Rhai remains an explicitly authorized tooling adapter, not the
+untrusted mod runtime. Server roles and gameplay modes cannot bypass these boundaries.

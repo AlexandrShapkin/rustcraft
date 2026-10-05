@@ -75,8 +75,8 @@ randomly change accepted dependencies to suppress warnings.
 [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) records PM5-001–013 with a separate M5-entry risk model
 (1 BLOCKER, 5 HIGH, 5 MEDIUM, 2 LOW). These are not reopened M4/DX1 defects or replacements for
 the P0–P3 functional queue. ARCH-001–004 remain current; R1.0 single-page/path findings are resolved.
-Camera fixed-tick stepping and retained mesh-generation metadata have source evidence; the owner
-VRAM observation is not yet a proven GPU leak. RSM1/P1/S1 investigate before measured fixes.
+The original audit identified camera stepping and retained mesh-generation metadata; RSM1/P1
+subsequently repaired demonstrated causes. Owner hardware VRAM causation remains a field question.
 
 ## DUX1 execution
 
@@ -87,17 +87,17 @@ shared cached providers and targeted stable inspection; final acceptance/public 
 claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
 Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
 mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
-not represented as zero. C1 is CLOSED; later stages remain inactive.
+not represented as zero. C1 is CLOSED; current stage statuses are recorded below.
 
 ## C1 execution
 
-PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed and all later stages inactive.
+PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed; see current post-R2 status below.
 
 
 UX1 acceptance addresses developer F3/digit hotbar leakage and the diagnostic ASCII glyph
 limitation. Unicode glyph coverage is explicitly bounded by bundled fonts; unknown codepoints
 use deterministic tofu. Real-platform IME automation, visual bidi editing, clipboard and hot font
-replacement are deferred breadth, not reopened DUX1/C1 stages. RSM1 and later stages remain inactive.
+replacement are deferred breadth, not reopened DUX1/C1 stages. See current post-R2 status below.
 
 ## RSM1 execution
 
@@ -105,7 +105,7 @@ PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime
 [RSM1_REPORT.md](RSM1_REPORT.md). PM5-002 is resolved: narrow fixes passed local acceptance and Ubuntu/Windows implementation
 CI 37228702009. RSM1 is CLOSED. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
 This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
-remain mandatory. DUX1/C1/UX1 stay CLOSED; P1 and subsequent stages remain inactive.
+remain mandatory. DUX1/C1/UX1 stay CLOSED; subsequent closures are recorded below.
 
 ## P1 execution
 
@@ -113,6 +113,21 @@ PM5-003 local repair measures and removes fixed-tick camera/position duplication
 authoritative 20 TPS. Shared timing and discontinuity/input-once tests are documented in
 [P1_REPORT.md](P1_REPORT.md). Ubuntu and Windows implementation CI 37256205733 passed. P1 is CLOSED and PM5-003 is resolved.
 Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
-S1 is CLOSED; R2 and subsequent stages are inactive.
+S1 and R2 are CLOSED; F1 and subsequent implementation remain planned.
 
-S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required; R2 and subsequent stages remain inactive. Final closeout CI must pass before publication acceptance is reported.
+S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required. R2 is CLOSED with Ubuntu/Windows implementation and closeout CI recorded in [R2_REPORT.md](R2_REPORT.md); F1 and subsequent implementation remain planned.
+
+## Current post-R2 status and concrete F1 gap
+
+Current status supersedes earlier stage-inactive sentences above: DUX1/C1/UX1/RSM1/P1/S1/R2 are closed.
+D-052 fixes reviewed full/partial pickup, migration ordering and failed-save snapshot lifetime; see
+[ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md). No unresolved defect is claimed for those findings.
+
+| ID | Severity | Area | Description / source evidence | Status |
+| --- | --- | --- | --- | --- |
+| F1-001 | P2 | normal client input | `window_event` enters UX1 `dev_key` only when devtools exists; ordinary startup falls through legacy debug/controller routing. Held F3+digit therefore lacks the normal-path routing guarantee. | Open; F1 owns real WindowEvent reproduction/correction and F3/F4 field acceptance. |
+
+A1 still owns external PlaceIntent BlockId and missing Bot EntityId references (PM5-001/ARCH-003),
+and affected runtime/mod-api policy (ARCH-001/004). R1.0-003 is owned by C2 with BG1 as consumer.
+Cube geometry and one-grid storage are planned BG1/VS1 limitations, not bugs solely because future
+capabilities are broader. Hardware smoothness/checkpoint causation stays unproven until F1 evidence.

@@ -156,3 +156,82 @@ collision and is not a normal break/place target. Minecraft supplies an underwat
 the client resolves it via compiled liquid material/surface metadata and generic world shaders apply
 distance attenuation. Flow levels, propagation and swimming remain future gameplay policy; generic
 storage and rendering do not identify Minecraft block IDs.
+
+## Target C2: common composed definitions and local state
+
+Current: Game API registers semantic `VoxelDefinition` with face resources, Empty/FullCube collision
+and a capability list; transitional mod-api has separate policy-rich BlockDefinition/ItemDefinition.
+There is no complete common definition, handler catalog or definition-local state schema yet.
+C2 is the owning planned migration; A1 first secures external identities and affected policy boundaries.
+
+Target common `ContentDefinition` layer composes identity, metadata, tags, properties, capabilities,
+handlers and resources. Voxel/block, item, entity, fluid and future categories add only meaningful
+domain contracts. This is Rust composition, not inheritance or a universal definition full of
+irrelevant fields. Keep these meanings distinct:
+
+| Concept | Meaning |
+| --- | --- |
+| Tag | Classification or group membership. |
+| Property | Typed authored data/parameter. |
+| Capability | Supported semantic interface/mechanism. |
+| Handler | Reaction to a registered event/lifecycle hook. |
+| State | Compact mutable state of an individual instance. |
+| Resource | Semantic presentation/data dependency. |
+
+Content capabilities are supported interfaces; security capabilities are grants authorizing use.
+They are related through validated composition, not interchangeable tags or permissions.
+
+Authored definitions are flexible, namespaced and validated. Profile compilation produces typed,
+validated, indexed, cache-friendly runtime definitions, dense local handles and fast capability
+lookup. Semantic strings stay at composition/serialization/debug boundaries. Do not introduce
+`HashMap<String, DynamicValue>` or per-voxel/entity string lookups in hot loops.
+
+C2 closes R1.0-003 with deterministic definition-local canonical state schemas: facing, axis, half,
+shape, powered and connection-mask properties are examples, not global reserved-bit assignments.
+Compile each schema into compact encoding, retaining compact BlockState where practical. Semantic
+serialization must validate the schema independently of Beta metadata; models, handlers and collision
+use the same canonical state meaning. Current key+u16 schema requires explicit compatibility/versioned
+migration if encoding changes; this documentation pass changes no format.
+
+Handlers bind explicitly registered events such as place, break, use, tick, neighbor change, entity
+contact, damage and craft. Event/query context → handler/system/rule → CommandBuffer → authoritative
+mutation remains the boundary. No raw mutable World mod contract or giant universal callback API.
+Native first-party Rust and future WASM adapters share semantics, not necessarily runtime representation.
+
+Packages may eventually contain typed voxel/item/entity/fluid definitions, models, shapes and permitted
+handler/system metadata as well as other resources. Existing texture discovery remains texture-only;
+this is not an implemented universal loader. Typed semantic wrappers remain useful; do not erase domain
+safety by forcing everything into one untyped ResourceId. Dense handles remain local compilation data.
+
+## Target BG1: semantic models and separate shape contracts
+
+BlockState → semantic ModelKey/model provider → compiled model → local ModelHandle → renderer.
+Games map many states to variants (e.g. stair facing/half/straight/inner/outer) without engine classes.
+Physical source geometry/layout belongs to packages/importers; generic rendering knows no Minecraft
+model names. Full cube is the optimized common case, not the definition of a block.
+
+BG1 supports partial boxes, slabs, stairs, quarter/compound shapes, posts/beams/panels, wedges,
+45-degree and inner/outer slopes, composite geometry and bounded arbitrary static authored meshes.
+A compact proof set suffices; no huge decorative catalog is required.
+
+Resolve independently: render geometry, collision shape, selection/raycast shape, occlusion/coverage,
+and light/coverage behavior. Detailed render triangles need not define physical or targetable shape.
+AABB composition remains a fast path; raycast must hit the configured selection shape. Coverage must
+express full/partial/no occlusion; light behavior must distinguish blocking, partial and transmitting/
+non-occluding states. Exact polygon clipping or physically exact global illumination is not required
+without measurement, but six full square faces cannot be the permanent API.
+
+Acceptance: a new decorative 45-degree wedge normally needs a semantic definition, optional local
+state schema, model/shape resources, properties/tags and optional placement handler. It must not need
+special switches in engine, renderer, serializer, inventory renderer, raycaster or collision loop.
+BG1 is a major C2 consumer. [VS1](VOXEL_SPACES.md) reuses these semantic shapes and physical properties
+for structure aggregation, with specialized compiled forms allowed by profiling.
+
+## Planned project-owned diagnostic content
+
+DX2 owns a first-party diagnostic/test package using the public Game API; READY1 verifies independence.
+Extend sandbox-style proofs with project-owned full cubes, transparent/cutout/translucent and emissive
+materials, generalized non-full models, items/entities, useful medium/liquid, UI/resource primitives
+and particles where supported. This tests engine mechanisms without Minecraft or proprietary assets;
+it is not engine-core hardcoded admin blocks or gameplay policy. Unsupported categories wait for their
+own contracts rather than being faked. No separate texture milestone or package implementation here.

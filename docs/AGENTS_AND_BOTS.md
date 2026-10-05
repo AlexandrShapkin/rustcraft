@@ -59,3 +59,16 @@ This also enables cheap load testing with large numbers of headless agents.
 An explicit temporary scenario lease overrides human/legacy diagnostic intent. Movement uses
 AgentIntent; terminal completion/cancellation releases intent. Teleport is a separate privileged
 action. The shared FixedControl gate aligns headless and graphical pause/step behavior.
+
+## Current gaps and target A1/VS1 contracts
+
+Current `PlaceIntent.block` is a runtime-local BlockId and BotAction embeds AgentIntent; nearby dropped
+item observations contain semantic stack data but lack EntityId. Current positions have no space context.
+A1 owns semantic external placement and durable-entity references, preserving distinct Game extension,
+Control administration, Agent intent and Bot observe/act responsibilities rather than one giant API.
+No new external contract may export dense handles without an explicit authoritative profile mapping.
+
+VS1 adds stable VoxelSpaceId and local/reference-space positions where required. Bots must reason about
+moving structures, entities and relative motion from semantic observations, not renderer-coordinate
+scraping. References identify durable entity identity and relevant frame; contacting a space does not
+imply permanent ownership. No Bot API version bump or new types are implemented in this docs pass.

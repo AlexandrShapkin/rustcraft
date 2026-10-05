@@ -75,3 +75,19 @@ rear views and native GUI scale; inspect the images, not only the command exit s
 ignored `target/render-tests/`; do not commit local proprietary-texture captures. CPU tests
 remain GPU/asset independent. Captures do not replace manual acceptance when a milestone requires
 interactive review; M3's required review is complete.
+
+## Current plan and future structural work
+
+Read the current [ROADMAP](ROADMAP.md), not the original PRE_M5 sequence as an active plan.
+R2 is closed; F1 → A1 → C2 → BG1 → DX2 → RF1 → VS1 → READY1 precedes separate M5 activation.
+Each pass starts only its authorized stage. Distinguish implemented facts, accepted invariants and
+planned migration; retain historical reports as evidence of their measured workloads.
+
+RF1 starts after foundational contracts settle and preserves behavior/performance unless fixing a
+separately tracked defect. Inventory dependencies, orchestration/change hotspots and transitional
+boundaries first; optimize change locality, not LOC. Its concise `docs/CODE_MAP.md` must explain
+where mechanisms/policy live, mutation/presentation/persistence/content/control paths and extension
+points, then be updated for VS1. No ECS/trait-object storage rewrite or format churn for aesthetics.
+READY1 re-audits the expanded architecture, including moving-space storage/lifetime evidence; repeating
+only the historical PRE_M5 checklist cannot pass. Docs-only edits need diff/link/consistency checks,
+not expensive compilation; bootstrap-check currently includes builds and is unsuitable for that scope.

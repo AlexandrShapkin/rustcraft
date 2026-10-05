@@ -41,7 +41,10 @@ performance, frame-time, memory, scalability or extensibility gains when gamepla
 recognizable and semantically clear.
 
 Not baseline goals: ray tracing, global illumination, volumetric effects, realistic fluids,
-rigid-body block physics, ecosystem simulation, seasons, GOAP-heavy or neural mob AI.
+global per-block rigid-body physics (every voxel an independent body), ecosystem simulation,
+seasons, GOAP-heavy or neural mob AI. Realism for realism’s sake remains outside the baseline.
+Optional composite physics for selected voxel spaces/structures is now an explicit planned platform
+capability, preserving the performance-first static path; see [VOXEL_SPACES](VOXEL_SPACES.md).
 
 ## Platform direction
 

@@ -3,8 +3,9 @@
 The table below is historical M0-M3 alignment evidence, not the current next-stage plan.
 The post-DX1 [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) rechecks every ARCH finding against public main
 16c6823a and supersedes this document's stale R1.0 one-page/temporary-atlas actions. R1.1/R1.2
-already resolve those foundations. Runtime policy, controller/definition compatibility and active
-HUD/skin layout debt remain current; A1/R2 bound their pre-M5 closure.
+already resolve those foundations. R2 has now removed historical HUD/skin source-layout coupling;
+runtime policy, controller/definition compatibility and destination-layout policy remain migration debt.
+The current post-R2 source-to-plan table below and ROADMAP supersede historical next-step actions.
 
 This audit covers the implemented M0-M3 tree at the architecture-alignment pass. It distinguishes
 actual dependency/policy leaks from directory naming. The alignment is incremental so accepted
@@ -72,3 +73,51 @@ Repository-wide searches classify the remaining zero/historical IDs as follows:
 
 No generic production renderer/world path treats numeric zero as Minecraft air, and no authored
 Game API definition selects a runtime `BlockId`.
+
+## Current source-to-plan gaps (post-R2 `5eb1770`)
+
+Read-only source inspection; planned limitations are not automatically functional defects.
+R2 semantic source-region/page resolution is implemented. D-052 pickup/partial/migration ordering and
+failed-snapshot retirement are implemented, independently of R2. Historical acceptance reports remain
+unchanged; the original PRE_M5 table describes its older baseline.
+
+| Current assumption / source anchor | Gap against accepted target | Owner | Required invariant after migration |
+| --- | --- | --- | --- |
+| client `window_event`: dev_key gated by devtools; just client-survival/dev-client | Normal F3 chords and tooling admission use different routing | F1 / DX2 | One normal path; semantic action then capability check; aliases retire only with equivalent coverage |
+| runtime GameMode Development/Survival; Control Context source/capability strings | Gameplay state/local grant composition is not authenticated session roles | F1 / A1 / M5 | Independent gameplay mode/principal/roles/grants; host authenticates and authorizes |
+| agent-api PlaceIntent.block: BlockId; BotAction wraps AgentIntent | Profile-local ID cannot be unchanged external identity | A1 | Semantic stable identity or explicit authoritative profile mapping |
+| bot-api ItemEntityObservation lacks EntityId | Collection positions cannot identify durable entities | A1 | Stable EntityId in observations needing durable references |
+| mod-api BlockDefinition/ItemDefinition; runtime inventory/mining/crafting | Separate policy-rich legacy families and mixed ownership | A1 / C2 | Public composed definitions; game policy outside generic mechanisms |
+| game-api VoxelDefinition/CompiledVoxelDefinition | Semantic voxel foundation lacks full category/state/handler model | C2 | Typed composition and indexed runtime capabilities, no untyped hot-path maps |
+| engine-core BlockState.variant and orientation bit accessors | Global fixed bit conventions do not scale per definition | C2 | Deterministic block-local canonical schemas with compact encoding and semantic compatibility |
+| game-api CollisionDescriptor Empty/FullCube; core World::collides and runtime solid/AABB checks | No generalized collision/selection shape contract | BG1 | Independent configured shapes, composed-AABB fast path and coherent selection |
+| render geometry::FACES, cube inspection/meshing; six face resources | Full-square neighbor culling cannot describe partial/general models | BG1 | Semantic models and full/partial/no coverage; cube optimized common case |
+| engine-core orientation::ModelRotation signed orthogonal matrices | Cube-orientation foundation is not arbitrary authored geometry | BG1 | Deterministic model/state transforms without named stair/wedge engine classes |
+| core raycast::cast tests targetable voxel cells | Ray hits cell entry, not configurable non-full selection shape | BG1 | Traversal plus actual selection-shape intersection |
+| World.sections/lights keyed by root SectionPos | One grid is not multiple independently movable local grids | VS1 | Stable space identity, local storage/relationships and cheap static path |
+| BlockPos/WorldCommand SetBlock lack space context | Coordinates ambiguous across grids | VS1 | Explicit space-local addressing and intentional root adapters |
+| render section snapshots/jobs/GPU keys use root SectionPos | Motion cannot be independent from local mesh identity | VS1 | Space+local-section identity; transformed bounds; no motion-only remesh |
+| world WorldStorage chunks/x.z.rcc; column owner/tombstones | Root namespace cannot universally own many structures | VS1 | Versioned space/parent/motion/local-content durability; ordered transfer |
+| runtime ItemEntity/root Vec3 and entity column ownership | No entity reference-frame contract | VS1 | Relative/linear/angular motion; frame distinct from contact/durable ownership |
+| sandbox-test registers generated voxels through public APIs | Independent proof exists, but not all future shape/space categories | DX2 / READY1 | Project-owned diagnostic content proves generic contracts without Minecraft |
+| client/server specialist CLI paths; numerous just recipes | Coverage equivalence not proven | DX2 | Same product composition via Control/scenarios; preserve unique assertions |
+| Large composition/service modules across client/world/render/runtime/control/Rhai | LOC alone does not establish ownership/change locality | RF1 | Measured graph/hotspots, clearer ownership and concise CODE_MAP |
+
+Current normal crate edges remain inward; no generic engine-to-Minecraft edge appears in manifests.
+Game API uses content/core; render-profile bridges content/game/core to rendering; server excludes
+rendering. Control administers semantic commands, Agent feeds intent, Bot observes/acts, and native
+Game commands mutate through CommandBuffer. Do not merge these responsibilities merely to shorten
+paths. minecraft-b173 still wraps the transitional runtime; sandbox-test avoids it deliberately.
+
+Source size inventory (lines, including tests; not a refactor verdict): client main 7,398; world lib
+4,452; render lib 3,836; scripting-rhai lib 2,514; runtime lib 2,023; server main 1,952; control lib
+1,524. ClientApp composes input/fixed/presentation/residency/persistence/diagnostics; Simulation mixes
+mechanisms/game policy; world/render libraries combine codecs/schedulers/backend or GPU/geometry.
+RF1 must measure module/type/function connectivity, repeated Git change hotspots, cycles and adapters
+before choosing decompositions; no call-graph measurement or benchmark result is claimed here.
+
+Source navigation: engine-core lib/orientation/raycast; game-api and mod-api lib; runtime lib;
+render geometry/inspection/lib/hud; render-profile lib; content resources; Minecraft lib and durable
+codecs; agent/bot/control lib; scripting-rhai lib/worker; client main/devtools/developer_input; server
+main; world lib; sandbox-test main; justfile. Current deferred cube/global-space limits belong to
+BG1/VS1, not new defect IDs. [VOXEL_SPACES](VOXEL_SPACES.md) owns complete spatial direction.

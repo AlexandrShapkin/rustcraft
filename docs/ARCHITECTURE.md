@@ -270,7 +270,8 @@ persistence-dirty queue. Save jobs are bounded and shutdown waits for active wri
 remaining dirty columns. Player records use an outer v2 envelope (`player_id`, monotonic revision,
 component count, checksum) and sorted independently versioned semantic components. The generic
 storage layer bounds and preserves opaque component payloads; games own component IDs and codecs.
-Minecraft currently registers transform, inventory, game-mode and pickup-receipt v1 components. Inventory
+Minecraft currently registers transform, inventory and game-mode v1 components, and pickup-receipt
+v2 (with legacy v1 receipt decoding). Inventory
 contains semantic ItemKey/count/durability stacks in all slots, cursor stack and crafting grid;
 new components need only a game codec/registration, not a generic format or path change. Unknown
 components are retained opaquely on load/save; missing required components or unsupported known
@@ -311,10 +312,11 @@ deduplication makes either load order deterministic. Only after destination succ
 rewritten, and only after source success is the tombstone pruned. Merge remains column-local so
 survivor and consumed participant share one atomic snapshot.
 
-Pickup crosses player and column files. Inventory plus a bounded `(EntityId, source-column)`
-receipt is one player checkpoint; only its successful revision permits source-column deletion.
-The receipt suppresses a stale source entity after recovery and is pruned after source absence is
-durable. This is ordered idempotent recovery, not multi-file atomicity: failure may roll back to
+Pickup crosses player and column files. Inventory plus bounded quantity/revision receipts
+(EntityId, source column, before/after revision and before/accepted/remaining count) is one player
+checkpoint; only the exact successful receipt revision permits source post-state publication. Full
+pickup suppresses the stale source; partial recovery assigns the recorded remainder once. Receipt
+pruning follows durable source deletion/reduction acknowledgement (D-052). This is ordered idempotent recovery, not multi-file atomicity: failure may roll back to
 the latest complete checkpoint, but repeated reopen/pickup cannot manufacture items and an
 acknowledged item is not silently discarded.
 
@@ -481,3 +483,60 @@ The benchmark-only split model lives in world examples/dev dependencies, not ser
 Future backend capabilities must make durable acknowledgement, transient generations, revision
 idempotency and ordered recovery explicit; component schemas remain separate from physical layout.
 See [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md).
+
+## Accepted pre-M5 target and migration boundary
+
+Current implementation at R2 closeout `5eb1770` is a single-grid local product with a headless
+bootstrap/scenario server, not M5 multiplayer. R2 semantic source regions and D-052 durable transfer
+ordering are implemented; F1/A1/C2/BG1/DX2/RF1/VS1/READY1 remain planned. The authoritative sequence
+and gates are in [ROADMAP](ROADMAP.md); source gaps are in [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md).
+The original [PRE_M5_AUDIT](PRE_M5_AUDIT.md) remains historical evidence with a post-audit expansion.
+
+### Target F1: one client path, distinct authority and gameplay
+
+One normal graphical executable/runtime path is `rustcraft-client`. Process responsibility
+(graphical client vs headless host), session authority (who owns simulation), game-owned player
+state, principal/identity, roles and capabilities are separate axes. Conceptual security path:
+client → session → principal → role(s) → capabilities. Roles grant capabilities; mechanisms check
+capabilities, never role names. Example families are play, debug.read/configure/control,
+command.execute, server.admin, script.local and capture; final namespace is not frozen and these
+examples do not silently replace today's Control keys.
+
+Survival/creative/spectator are game-owned player state (conceptually
+`minecraft-b173:gamemode/survival`, `/creative`, `/spectator`), not executable types or developer
+privileges. Current Development/Survival implementation and CLI aliases remain transition facts.
+Trusted local Rhai still requires explicit authorization and bounded roots/quotas. Same executable
+never implies same authority or untrusted script autoexec.
+
+Target input: input → semantic diagnostic action → capability check → effect. The normal path must
+route F3/F4 consistently; `--devtools` must not select a different correct input implementation.
+Current devtools-gated chord routing and F1 field contract are in [DEBUGGING](DEBUGGING.md).
+Specialist acceptance drivers are test harnesses over the product composition, not client variants.
+DX2 retires them only after equivalent Control/semantic/scenario coverage is proven.
+
+### Target content, geometry and spatial foundation
+
+C2 composes shared identity/metadata/tags/typed properties/capabilities/handlers/resources with
+category-specific contracts and separate compact instance state. It compiles flexible semantic
+authoring into indexed runtime data; no string-map hot path. BG1 consumes definition-local state
+schemas and semantic models/shapes, keeping render, collision, selection, occlusion and light
+coverage distinct. Cube/AABB paths remain optimized common cases. See [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
+
+RF1 measures ownership/dependencies/change hotspots after C2/BG1/DX2 stabilize, preserves behavior
+and efficient storage, and produces `docs/CODE_MAP.md` as a concise navigation artifact. It is not
+an ECS rewrite, line-count campaign or gameplay redesign. VS1 then introduces stable voxel-space
+identity, local grids and transforms, static/kinematic/dynamic motion and optional aggregate physics.
+[VOXEL_SPACES](VOXEL_SPACES.md) is the complete canonical spatial concept. M5 follows RF1, VS1 and
+READY1, with space-aware identity/interest/prediction from its first real protocol design.
+
+### Accepted durable cross-domain invariant
+
+Source durable state may not be retired before destination durable state needed to recover the
+transfer has been acknowledged. Current full pickup retains source pre-state until the exact player
+inventory+receipt checkpoint succeeds; partial pickup uses pre/post revisions and quantities and
+assigns the recorded remainder idempotently. Destination entity persistence precedes old-owner
+retirement; revisions/tombstones resolve temporary duplicate disk records. Every terminal save retires
+its transient snapshot; failed saves do not advance ownership and remain dirty/retryable.
+See D-052 and [ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md). This is ordered recovery, not
+multi-file atomicity. Future cross-space transfer must preserve the same invariant, with explicit
+versioned compatibility rather than assuming today's column identity suffices.
