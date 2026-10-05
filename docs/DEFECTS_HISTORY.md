@@ -1,0 +1,115 @@
+# Historical pre-Issue defect evidence
+
+Immutable migration snapshot of completed legacy rows and closure notes at public
+`4452e43a6708a93169bf989751eaebb79b400e9c`. This is historical evidence, not a live queue.
+GitHub Issues alone owns current actionable state; see [tracking policy/index](DEFECTS.md).
+Historical severity/status wording, measurements and links are preserved. Reports were not rewritten.
+
+## Completed legacy ledger
+
+| ID | Severity | Area | Description | Reproduction / evidence | Historical closure |
+| --- | --- | --- | --- | --- | --- |
+| M1.1-AUDIT-001 | P1 | client input | Losing window focus could leave mouse capture/look delta state active for the next frame. | Static event-path audit; `Focused(false)` had no handling. | Fixed: release capture and clear look delta on focus loss. |
+| M1.1-AUDIT-002 | P2 | client input | Pressing opposite movement keys could clear the still-held direction when either key was released. | Static controller audit; scalar direction fields could not represent simultaneous keys. | Fixed: track each key and derive axes; regression test added. |
+| M2-002 | P3 | outline | Previously projected screen-space box showed hidden rear edges through opaque blocks. | World-space line list uses a dedicated alpha pipeline with normal depth test and disabled depth writes; camera projection performs near-plane clipping. | Fixed in M4 cleanup; unit tests cover expanded world topology and pipeline depth state; manual view confirmation remains pending. |
+| M2-006 | P3 | acceptance | Manual M2 key/mouse/wheel/F3 interaction acceptance was pending during implementation. | Owner manually accepted M2 after interactive inspection. | Closed |
+| M3-002 | P3 | item physics | None currently known after centering the item AABB on its resolved resting position. | Regression test requires a dropped item to settle at the block top without sinking. | Fixed in M3.1 |
+| M3.2-001 | P3 | Beta presentation | Earlier inventory-preview/drop presentation differences were repaired or accepted during M3.3-M3.8. | M3 reference notes and owner acceptance. | Closed |
+| M3.3-001 | P3 | fidelity review | Automated surface capture limitation required owner comparison of the inventory preview and item presentation. | Owner completed manual M3 acceptance. | Closed; accepted presentation |
+| M3.8-001 | P1 | block presentation | Dropped `-Z` block face used a bow-tied UV-to-vertex mapping; GUI block items independently omitted faces/depth and derived UVs from projected pixels. | Pre-repair corner/UV diagnostics isolated valid position topology and opposing UV triangle signs. | Fixed in M3.8; canonical geometry, exact GUI transform/depth pass and offscreen regression scenes added. |
+| M3.8-002 | P3 | acceptance | Automated offscreen, client startup and headless checks passed; the owner then completed interactive M3 acceptance. | `docs/M3_8_VALIDATION.md`. | Closed |
+| R1.0-002 | P3 | textures | The renderer API supports arbitrary normalized regions and page handles, but R1.0 uploaded only one physical page. | R1.1 compiled pages and synthetic multi-page chunk/item/GUI contract. | Closed in R1.1. |
+| R1.0-004 | P3 | renderer resources | `RendererResources` had first-party path slots for terrain/inventory/hotbar/player. | It now carries generic compiled pages and resolved regions; Beta UI role ownership remains ARCH-002. | Closed in R1.1. |
+| R1.0-005 | P3 | composition | Duplicate block definitions are rejected; block/resource override layering was not implemented. | Resource precedence is deterministic later-package-wins and inspected; block definitions still reject duplicates. | Closed for R1.1 resources; block policy remains intentionally unchanged. |
+| M4-001 | P1 | world startup scheduling | Initial saved/generated neighborhood assembly previously blocked startup before the window/event loop existed. | `ClientApp::resumed` creates the window/loading title first and a cancellable bootstrap worker performs metadata/player/chunk work. No synchronous startup wait was found in the event loop. Later interactive checks reproduced starvation from event-loop streaming work; that separate responsiveness defect is M4-010. | Closed for the synchronous-startup-barrier defect. The separately tracked M4-010 responsiveness defect is also closed by autonomous acceptance. |
+| M4-002 | P1 | local chunk availability | The old Euclidean Desired disk and independent lifecycle completion made a short, uneven visible edge. Authoritative publication also made collision/targeting available before presentation. | Desired/Retained are complete Chebyshev squares; load/retain defaults are 4/5. A complete centered 3x3 SAFE+VISIBLE core gates control, Safe grows as connected overlapping complete 3x3 neighborhoods, and `SAFE => VISIBLE`. The semantic-controller autopilot covers straight/turn/diagonal/reverse/negative/revisit motion at 4 blocks/s; unavailable terrain remains non-air to collision and raycasts. | Closed by autonomous acceptance. Fresh actual-client route crossed 33 columns with minimum forward Safe/Visible margins 0.5/1.5 columns and returned through the origin corridor. Permanent `just world-travel-test` also passes edit/save/evict/reload, distant-player reopen and continued travel. Reused-world actual-client evidence is recorded in `docs/PERFORMANCE.md`. |
+| M4-003 | P2 | world persistence scope | Dropped items and world time were lost on close; item-containing columns were permanently pinned, and the old 300-second item path froze rather than removing expired entities. | Chunk payload v3 atomically stores voxels plus bounded semantic spatial records/tombstones; v2 loads as zero entities. Stable 128-bit IDs, revisioned destination-before-source recovery, bounded pickup receipts, frozen save-before-evict, game-owned item/clock codecs and two-slot global checkpoints are covered by corruption, stale-order, merge, delay, velocity, despawn, block-break/pickup and long-travel tests. `world-state-roundtrip` reports stable IDs, merge, cross-column, eviction/reload, block drop, delay, velocity, despawn, receipt and unknown-global success. Lighting/render/stream state remains deliberately derived/transient. | Closed by autonomous M4-003 acceptance after full Linux/Windows CI; retained by v1/v2 regression acceptance. World time pauses offline; unexpected failure can roll back to the latest successful checkpoint (normally about two seconds), while graceful shutdown flushes latest state. M4 is functionally complete; M4-009 hardware evidence remains conditional. |
+| M4-004 | P2 | world generation fidelity | Minecraft generator v1 had no climate/biome policy or lakes and simplified macro terrain/features. | Exact version routing preserves frozen v1; v2 adds climate, ocean/beach/plains/forest/desert/hills, continental terrain, contextual surfaces, curved caves, bounded ores, biome-aware trees and static water lakes. Wider-halo tests caught truncated cave-origin coverage; relocated-v1 startup tests caught an unsafe partial origin sandbox. Semantic hash, multi-seed spawn/statistics, borders, negative coordinates, order/workers, partial-world edits and v1/player/entity/clock continuation pass. Lava/springs and dungeons are explicitly deferred, not faked. | Closed by autonomous acceptance: four v2 seed routes, explicit v1 fresh/reused route, canonical/ocean actual-client runs, full local validation and [Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37135831666). No Java seed parity or v1-to-v2 auto-upgrade. |
+| M4-005 | P1 | generated liquid presentation | Static generated water was rendered as an opaque full cube, was normally targetable, and near-plane outline endpoints were not clipped; initial repair lacked readable underwater attenuation. | Generated state key is `minecraft_b173:water`, legacy runtime `BlockId(16)`, variant 0; profile compiles it as `Liquid`, empty collision, non-targetable, and semantic texture `minecraft_b173:textures/block/water` from terrain crop `(224,0,16,16)`. | Functional repair covered by automated geometry/shore/floor/internal-face culling, compiled-medium boundary and distance-fog tests; these pass in the full validation/CI sweep. No new renderer mechanism or authoritative-state change in M4-004. The full manual shore/shallow/submerged walkthrough was not performed and remains optional qualitative evidence, not a functional implementation blocker. |
+| M4-006 | P1 | persistence compatibility too broad | Client rejected a pre-liquid-repair generated world because the full compiled-profile fingerprint included collision, material and targetability descriptors, although saved voxel palettes contain semantic block keys and variants. | Exact metadata drift: `8e898b…` to `bac995…`; WATER's collision/material/targetability presentation descriptors changed (and AIR targetability is included), while water key/variant, generator identity/version and canonical generation hash did not. | Fixed: profile fingerprint is informational; metadata v2 has a separate persisted-state schema version; palette resolution reports missing keys; generator mismatch only blocks generation of absent chunks. Legacy metadata v1 migrates after successful load. Interactive water acceptance can now proceed. |
+| M4-007 | P1 | durable local-player state | World block edits survived reopen, but startup initialized origin/default mode/inventory. First player save format was monolithic and synchronous on the periodic tick. | Player construction followed world loading and always installed spawn/loadout; durable state had no component schema/revision and did blocking writes. | Componentized outer-v2 record, semantic item identity, two-slot BLAKE3 checkpoints, background coalescing worker, revision tracking, 1–2s cadence and graceful flush are implemented. Crash-recovery, legacy migration, opaque unknown-component, coalescing and revision tests pass. A debug scratch-world client ended without a graceful-save completion and reopened checkpoint revision 203 with all 3 components. |
+| M4-008 | P1 | hidden selection-box edges | Screen-space HUD projection ignored scene depth, so rear AABB edges rendered through selected opaque blocks. | Selection was expanded/projected to screen coordinates and submitted in a HUD pass without depth. | Fixed with expanded world-space line list, depth-tested `LessEqual`, depth writes disabled and GPU near-plane clipping. Structural tests and owner’s interactive occlusion/near-plane review pass; opacity was raised slightly to 0.55 after feedback and accepted in the rebuilt client. |
+| M4-009 | P1 | streaming CPU/frame-time and terrain arrival | Serialized boundary reconciliation filled its 32-column queue and gated application of already locally-lit results. This produced 15–88 second starvation tails even though those columns had sufficient authoritative voxel/light state for use. | Local initial-light readiness now gates publication; boundary convergence is eventual. Its bounded queue is 256, urgency propagates through every presentation stage, and obsolete queued lighting is cancelled on eviction. Fresh actual-client request→visible p50/p95/max was 0.511/0.859/1.082 s, with no zero forward margin or dropped ticks. Streaming stage p95s remained below 1.5 ms on llvmpipe. | Scheduler/correctness portion closed. Hardware-performance acceptance remains conditional because this pass had only llvmpipe/GL; no AMD/Vulkan result is fabricated. The last established AMD trace remains the prior responsiveness baseline. |
+| M4-010 | P1 | client responsiveness | Startup and active streaming previously starved event/input/render turns despite asynchronous loading and generation. | Input/fixed-step processing precedes bounded per-stage streaming service. `client-stream-auto` continuously changes semantic movement and view intent across streaming boundaries and fails on severe latency/dropped ticks. Fresh llvmpipe run: startup core 0.876 s, TPS 19.86, dropped time 0, event-loop p95/p99/max 62.95/69.79/74.56 ms, input→simulation p95/max 70.17/79.12 ms and input→render 71.65/80.95 ms. Render/present dominated software-GPU frame time; streaming phase p95s were fixed 0.033, residency 0.598, snapshot 0.015, mesh schedule 0.011 and mesh poll 0.026 ms. | Closed by autonomous actual-client acceptance. It crosses 33 columns while applying movement/camera changes. Hardware frame-performance remains conditional on a non-software adapter under M4-009, but no streaming event/input starvation or dropped simulation time remains. |
+| M4-011 | P1 | render-ready starvation under streaming budget | The responsiveness repair reduced event-loop stalls, but terrain did not become render-visible in time; a persisted-world run recorded request→visible p95 around 88 seconds. Owner then observed terrain appearing behind, with a forward chunk invisible until block break made it appear immediately. | Reserved stage service, urgency-aware mesh ordering, local-light publication and the removal of boundary-capacity gating make ready chunks appear without interaction. The autonomous route reports no blocked adjacent frontier and p95 request→visible below one second after warm startup. | Closed. Regression coverage retains the original interaction-independent publication test and the actual-client travel driver; M4-002 is independently closed and M4-009's hardware performance condition does not reopen this symptom. |
+| REL-001 | P1 | public distribution license | Project license was previously unspecified. | Owner selected MIT OR Apache-2.0; root license texts and inherited Cargo SPDX metadata are present. | Closed for local preparation; release packaging verifies both licenses. |
+| REL-002 | P1 | original assets in Git history | Original/reference Minecraft asset files were present in the initial repository commits. | Pre-rewrite bundle is retained externally; filter-repo removed `reference/assets` from reachable history. The cleaned public `rustcraft` repository is now published. | Closed; public repository and alpha.2 release are published without proprietary assets. |
+| CI-001 | P1 | public test assets | Client resource/render tests compiled the production Minecraft package against ignored `reference/assets/terrain.png`; clean public runners intentionally do not have those files. | Full workspace tests now compile against deterministic project-owned synthetic terrain/GUI/skin PNGs in `cfg(test)` and pass with `reference/assets` absent. | Fixed; exact artwork/fidelity commands remain owner-asset-dependent and opt-in. |
+| CI-002 | P1 | Windows world persistence | Directory `File::open().sync_all()` failed on Windows; `std::fs::rename` did not provide overwrite-existing behavior expected by the storage contract. | Central platform helper syncs directories on Unix and explicitly no-ops on Windows; `atomicwrites` uses write-through `MoveFileExW` replace-existing semantics there. | Closed; required public Windows GitHub Actions check/test/clippy run is green on the accepted alpha.2 baseline. |
+
+## DX1 acceptance (closed)
+
+Background compile/reload, stale publication, real job lifecycle/waits, asynchronous DX capture,
+bounded queries/pages, console automation, cancellation and lifecycle soak are implemented.
+Final local/graphical/overhead validation and public Ubuntu/Windows CI pass; see DX1_REPORT.md.
+No owner save-deletion observation is recorded as a persistence defect. Optional subsequent breadth:
+new command-file discovery, more game commands, richer editor and remote/WASM adapters.
+
+Dependency hygiene (2026-10-04): cargo audit reports no vulnerabilities and unmaintained warnings
+RUSTSEC-2024-0436 (paste), RUSTSEC-2026-0249 (smartstring, Rhai transitive), and RUSTSEC-2026-0192
+(ttf-parser). Track upstream replacements/evaluation in dependency maintenance; DX1 does not
+randomly change accepted dependencies to suppress warnings.
+
+## Pre-M5 risk inventory
+
+[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) records PM5-001–013 with a separate M5-entry risk model
+(1 BLOCKER, 5 HIGH, 5 MEDIUM, 2 LOW). These are not reopened M4/DX1 defects or replacements for
+the P0–P3 functional queue. ARCH-001–004 remain current; R1.0 single-page/path findings are resolved.
+The original audit identified camera stepping and retained mesh-generation metadata; RSM1/P1
+subsequently repaired demonstrated causes. Owner hardware VRAM causation remains a field question.
+
+## DUX1 execution
+
+PM5-007 is resolved and DUX1 CLOSED after local and Ubuntu/Windows CI acceptance.
+The discovery/demand gap is closed through generic native view metadata, the F4 selector,
+shared cached providers and targeted stable inspection; final acceptance/public CI is recorded in
+[DUX1_REPORT.md](DUX1_REPORT.md). No new functional residency/persistence/presentation defect is
+claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
+Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
+mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
+not represented as zero. C1 is CLOSED; current stage statuses are recorded below.
+
+## C1 execution
+
+PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed; see current post-R2 status below.
+
+
+UX1 acceptance addresses developer F3/digit hotbar leakage and the diagnostic ASCII glyph
+limitation. Unicode glyph coverage is explicitly bounded by bundled fonts; unknown codepoints
+use deterministic tofu. Real-platform IME automation, visual bidi editing, clipboard and hot font
+replacement are deferred breadth, not reopened DUX1/C1 stages. See current post-R2 status below.
+
+## RSM1 execution
+
+PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime causes recorded in
+[RSM1_REPORT.md](RSM1_REPORT.md). PM5-002 is resolved: narrow fixes passed local acceptance and Ubuntu/Windows implementation
+CI 37228702009. RSM1 is CLOSED. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
+This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
+remain mandatory. DUX1/C1/UX1 stay CLOSED; subsequent closures are recorded below.
+
+## P1 execution
+
+PM5-003 local repair measures and removes fixed-tick camera/position duplication without changing
+authoritative 20 TPS. Shared timing and discontinuity/input-once tests are documented in
+[P1_REPORT.md](P1_REPORT.md). Ubuntu and Windows implementation CI 37256205733 passed. P1 is CLOSED and PM5-003 is resolved.
+Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
+S1 and R2 are CLOSED; F1 and subsequent implementation remain planned.
+
+S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required. R2 is CLOSED with Ubuntu/Windows implementation and closeout CI recorded in [R2_REPORT.md](R2_REPORT.md); F1 and subsequent implementation remain planned.
+
+## Post-R2 closure notes at cutover
+
+Current status supersedes earlier stage-inactive sentences above: DUX1/C1/UX1/RSM1/P1/S1/R2 are closed.
+D-052 fixes reviewed full/partial pickup, migration ordering and failed-save snapshot lifetime; see
+[ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md). No unresolved defect is claimed for those findings.
+
+## Trigger-only limitation retained as historical evidence
+
+R1.1-002 was inspected during ISSUE1 and not activated as a ticket: adapter-aware reordering has no
+current demonstrated failing workload; configured maxima and runtime validation fail gracefully.
+The original row below preserves its evidence/trigger, not a live task status. Reconsider when an
+actual startup redesign/unsupported workload makes it actionable, then search/create an Issue.
+
+| ID | Severity | Area | Description | Evidence | Historical disposition |
+| --- | --- | --- | --- | --- | --- |
+| R1.1-002 | P3 | device integration | The compiler supports a configured device-safe maximum, but actual adapter discovery follows first-party compilation during client startup. | `RUSTCRAFT_MAX_ATLAS_DIMENSION` clamps policy; renderer validates actual limits and fails gracefully. | Defer startup reordering until renderer initialization is next redesigned. |

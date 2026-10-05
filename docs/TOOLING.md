@@ -216,3 +216,28 @@ change hotspots, adapters, cycles (if any) and duplicate policy/mechanism paths.
 content compilation, control and the later space path. No stale symbol dump or hundreds of tiny files.
 See [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) for today's source anchors and [ROADMAP](ROADMAP.md)
 for execution gates. This docs-only pass does not perform RF1 or create its post-refactor code map.
+
+## Canonical GitHub tracker queries
+
+GitHub Issues is live defect/debt state; [DEFECTS](DEFECTS.md) is policy/history/navigation only.
+These tracking commands do not affect offline build/test workflows:
+
+```sh
+gh issue list --repo AlexandrShapkin/rustcraft --state open --limit 200
+gh issue list --repo AlexandrShapkin/rustcraft --state closed --limit 200
+gh issue list --repo AlexandrShapkin/rustcraft --state open --label severity:P1
+gh issue list --repo AlexandrShapkin/rustcraft --state open --label stage:F1
+gh issue view 18 --repo AlexandrShapkin/rustcraft
+```
+
+Search both states before creation. On work/closeout follow [WORKFLOW](WORKFLOW.md), using a file for
+multiline bodies/comments. After required acceptance and CI, post the evidence comment before closure:
+
+```sh
+gh issue comment 18 --repo AlexandrShapkin/rustcraft --body-file /tmp/issue-resolution.md
+gh issue close 18 --repo AlexandrShapkin/rustcraft --reason completed
+```
+
+Examples are not authorization to close F1 during another pass. For deliberate no-work conclusions use
+`--reason "not planned"` (API state reason not_planned); for duplicates use `--duplicate-of NUMBER`
+with a canonical ticket. Do not fabricate completion evidence or close on migration alone.

@@ -45,8 +45,9 @@ network access or on reference repositories being present.
 Fix immediately: build blockers, crashes in the required scenario, security/memory-safety issues,
 data corruption, broken contracts and architecture mistakes that become expensive if left.
 
-Record lower-priority functional/polish/cleanup issues in `docs/DEFECTS.md` and repair related
-issues together later.
+Search open and closed GitHub Issues before recording confirmed actionable concerns; update the
+canonical ticket or create a labelled issue with evidence and acceptance. Batch lower-priority work
+within authorized stages. `docs/DEFECTS.md` owns tracking policy/history/index, never live status.
 
 ## Documentation discipline
 
@@ -91,3 +92,20 @@ points, then be updated for VS1. No ECS/trait-object storage rewrite or format c
 READY1 re-audits the expanded architecture, including moving-space storage/lifetime evidence; repeating
 only the historical PRE_M5 checklist cannot pass. Docs-only edits need diff/link/consistency checks,
 not expensive compilation; bootstrap-check currently includes builds and is unsuitable for that scope.
+
+## GitHub issue implementation and stage closure
+
+GitHub Issues owns live defect/debt state; [DEFECTS](DEFECTS.md) defines labels, severity and migration
+identity. Before work, inspect/revalidate the issue and use `Refs #N` or `Issue #N` in implementation
+notes/commits. Do not use auto-close keywords while required acceptance or CI is still pending.
+
+After committed implementation, focused tests, required wider acceptance and Ubuntu/Windows CI pass,
+post the final SHA/tests/acceptance/CI/invariant comment, then close completed. Not-planned and duplicate
+closures need an explicit rationale/canonical link; use the correct reason, not completed. Migration
+does not resolve the underlying concern. See [TOOLING](TOOLING.md) for portable query/close examples.
+
+Before F1/A1/C2/BG1/DX2/RF1/VS1/READY1 closeout, query open issues for that stage. Account for each
+closure, owner transfer with rationale or explicit bounded waiver. No unresolved owned P0/P1 may be
+silently carried past closure. ROADMAP still owns sequencing; do not ticket every future capability.
+Offline builds/tests remain independent of GitHub; unavailable tracking access means reconciliation
+and issue closure cannot be claimed complete.

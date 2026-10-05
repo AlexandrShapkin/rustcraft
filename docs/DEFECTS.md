@@ -1,133 +1,117 @@
-# Defect queue
+# Defect and debt tracking policy
 
-Use this for known non-blocking issues. Do not hide P0/P1 problems here instead of fixing them.
+[GitHub Issues](https://github.com/AlexandrShapkin/rustcraft/issues) is the **single authoritative live
+tracker** for confirmed defects, concrete architecture debt, bounded performance/investigation work
+and actionable implementation feature gaps. Issue open/closed state and labels belong to GitHub.
+This file contains policy and a fixed migration index, not another manually maintained queue.
+If repository prose and an Issue disagree about current state, **GitHub Issues wins**.
+[ROADMAP](ROADMAP.md) remains authoritative for stage sequencing/contracts, not issue lifecycle.
 
-| ID | Severity | Area | Description | Reproduction / evidence | Status |
-|---|---|---|---|---|---|
-| M1.1-AUDIT-001 | P1 | client input | Losing window focus could leave mouse capture/look delta state active for the next frame. | Static event-path audit; `Focused(false)` had no handling. | Fixed: release capture and clear look delta on focus loss. |
-| M1.1-AUDIT-002 | P2 | client input | Pressing opposite movement keys could clear the still-held direction when either key was released. | Static controller audit; scalar direction fields could not represent simultaneous keys. | Fixed: track each key and derive axes; regression test added. |
+## Classification and labels
 
-| M2-001 | P3 | materials | Fractional-alpha ordering is section-coarse for translucent materials. Identical leaf blocks suppress internal faces. | M4 static-liquid repair adds blended pages and far-to-near section ordering; no per-face sorting/OIT. | Open; profile before any broader transparency work. |
-| M2-002 | P3 | outline | Previously projected screen-space box showed hidden rear edges through opaque blocks. | World-space line list uses a dedicated alpha pipeline with normal depth test and disabled depth writes; camera projection performs near-plane clipping. | Fixed in M4 cleanup; unit tests cover expanded world topology and pipeline depth state; manual view confirmation remains pending. |
-| M2-003 | P2 | lighting latency | Debug-build emissive removal takes about 131 ms in the documented flat scene, plus affected mesh extraction. | `just bench-m2`, M2_VALIDATION.md. | Open; profile a release workload before optimizing. |
-| M2-004 | P3 | platform metrics | Non-Linux process providers and GPU providers without matching readable DRM sysfs counters return N/A. | Unsupported-provider tests; AMD counters work on validation hardware. | Open; optional independent providers later. |
-| M2-005 | P3 | references | refs-status reports the named vanilla pack paths missing even when the supported loose reference/assets/terrain.png exists. | Local atlas loads successfully in all textured diagnostics. | Open |
-| M2-006 | P3 | acceptance | Manual M2 key/mouse/wheel/F3 interaction acceptance was pending during implementation. | Owner manually accepted M2 after interactive inspection. | Closed |
-| M3-001 | P3 | inventory UI | Shift-click transfer remains deferred; right-click splitting/merging is implemented and manually accepted. | M3 inventory transaction matrix and owner acceptance. | Open; optional later convenience |
-| M3-002 | P3 | item physics | None currently known after centering the item AABB on its resolved resting position. | Regression test requires a dropped item to settle at the block top without sinking. | Fixed in M3.1 |
-| M3.1-001 | P3 | item performance | Item merge and pickup still use bounded pairwise scans; 1,000 dropped stacks remain a debug-build warning. | M3 benchmark: approximately 36.84 ms/tick for 1,000 stacks. | Open; dedicated performance pass |
-| M3.2-001 | P3 | Beta presentation | Earlier inventory-preview/drop presentation differences were repaired or accepted during M3.3-M3.8. | M3 reference notes and owner acceptance. | Closed |
-| M3.2-002 | P3 | inventory input | Right-click semantics are implemented for player inventory slots; right-click crafting-slot distribution and shift-click remain deferred. | Focused M3.2 interaction scope. | Open |
-| M3.3-001 | P3 | fidelity review | Automated surface capture limitation required owner comparison of the inventory preview and item presentation. | Owner completed manual M3 acceptance. | Closed; accepted presentation |
-| M3.8-001 | P1 | block presentation | Dropped `-Z` block face used a bow-tied UV-to-vertex mapping; GUI block items independently omitted faces/depth and derived UVs from projected pixels. | Pre-repair corner/UV diagnostics isolated valid position topology and opposing UV triangle signs. | Fixed in M3.8; canonical geometry, exact GUI transform/depth pass and offscreen regression scenes added. |
-| M3.8-002 | P3 | acceptance | Automated offscreen, client startup and headless checks passed; the owner then completed interactive M3 acceptance. | `docs/M3_8_VALIDATION.md`. | Closed |
-| ARCH-001 | P2 | runtime ownership | `runtime` still combines reusable movement/lighting orchestration with Minecraft inventory, mining, drops, pickup and crafting policy. | `docs/ARCHITECTURE_AUDIT.md`; Cargo/source ownership audit. | Open; migrate the affected slice before extending it. |
-| ARCH-002 | P3 | UI ownership | Beta hotbar/inventory construction currently lives beside generic HUD rendering in `render`/client. | `render::hud` and client inventory paths. | Narrowed by R2: historical sheet coupling removed; purpose-built destination layout/slot policy remains explicit game-policy debt. |
-| ARCH-003 | P3 | Agent/Bot API | Generic primary/secondary actions coexist with legacy mining, placement, inventory and crafting convenience fields. | `AgentIntent` and Bot observations. | Open; retain compatibility, move game conveniences to a Minecraft layer incrementally. |
-| ARCH-004 | P3 | legacy content API | `mod-api::BlockDefinition` still carries Minecraft hardness/tool/drop policy alongside reusable rendering/collision data. | Generic replacement foundation exists in `game-api::VoxelDefinition`. | Open; migrate definitions without an M3 behavior rewrite. |
-| R1.0-001 | P3 | legacy registry | Accepted M0-M3 simulation still consumes historical `mod-api` block/item IDs. `minecraft-b173` validates semantic compiled definitions and explicitly translates them for that runtime; gameplay registry consumers have not all migrated to `CompiledGameProfile`. | `minecraft-b173::canonical_handles_resolve_through_the_legacy_runtime_adapter`; architecture audit. | Open; migrate each policy slice before extending it. |
-| R1.0-002 | P3 | textures | The renderer API supports arbitrary normalized regions and page handles, but R1.0 uploaded only one physical page. | R1.1 compiled pages and synthetic multi-page chunk/item/GUI contract. | Closed in R1.1. |
-| R1.0-003 | P3 | block states | Global `variant` bits only cover the M3 orientation foundation. Adding unrelated global flags would not scale to many game packages/states. | D-023 and R1.0 storage tests. | Open; design block-local canonical state schemas when a real feature requires them. |
-| R1.0-004 | P3 | renderer resources | `RendererResources` had first-party path slots for terrain/inventory/hotbar/player. | It now carries generic compiled pages and resolved regions; Beta UI role ownership remains ARCH-002. | Closed in R1.1. |
-| R1.0-005 | P3 | composition | Duplicate block definitions are rejected; block/resource override layering was not implemented. | Resource precedence is deterministic later-package-wins and inspected; block definitions still reject duplicates. | Closed for R1.1 resources; block policy remains intentionally unchanged. |
-| R1.1-001 | P3 | texture quality | Atlas-safe mip chains, anisotropy above one and compression are not implemented. | Compiler rejects mip/AF requests; pages preserve nearest or uniform-linear sampling. | Deferred until padding/mip policy and visual/performance measurements justify it. |
-| R1.1-002 | P3 | device integration | The compiler supports a configured device-safe maximum, but actual adapter discovery follows first-party compilation during client startup. | `RUSTCRAFT_MAX_ATLAS_DIMENSION` clamps policy; renderer validates actual limits and fails gracefully. | Defer startup reordering until renderer initialization is next redesigned. |
-| R1.2-001 | P3 | transparency | Fractional-alpha translucent section ordering remains simplistic; R1.2 preserves it rather than reordering transparent geometry for batching. | Page-order diagnostics cover opaque/cutout submission; translucent ordering intentionally unchanged. | Open; profile and define visual semantics before sorting/OIT work. |
-| R1.2-002 | P3 | renderer profiling | Available integration environment uses llvmpipe GL, with no reliable GPU timing or representative hardware profile. | Two 30-second release runs and camera/frustum diagnostics recorded in `PERFORMANCE.md`; telemetry reports no GPU usage. | Open; obtain representative hardware profiles before GPU-driven, greedy-mesh or draw-submission choices. |
-| M4-001 | P1 | world startup scheduling | Initial saved/generated neighborhood assembly previously blocked startup before the window/event loop existed. | `ClientApp::resumed` creates the window/loading title first and a cancellable bootstrap worker performs metadata/player/chunk work. No synchronous startup wait was found in the event loop. Later interactive checks reproduced starvation from event-loop streaming work; that separate responsiveness defect is M4-010. | Closed for the synchronous-startup-barrier defect. The separately tracked M4-010 responsiveness defect is also closed by autonomous acceptance. |
-| M4-002 | P1 | local chunk availability | The old Euclidean Desired disk and independent lifecycle completion made a short, uneven visible edge. Authoritative publication also made collision/targeting available before presentation. | Desired/Retained are complete Chebyshev squares; load/retain defaults are 4/5. A complete centered 3x3 SAFE+VISIBLE core gates control, Safe grows as connected overlapping complete 3x3 neighborhoods, and `SAFE => VISIBLE`. The semantic-controller autopilot covers straight/turn/diagonal/reverse/negative/revisit motion at 4 blocks/s; unavailable terrain remains non-air to collision and raycasts. | Closed by autonomous acceptance. Fresh actual-client route crossed 33 columns with minimum forward Safe/Visible margins 0.5/1.5 columns and returned through the origin corridor. Permanent `just world-travel-test` also passes edit/save/evict/reload, distant-player reopen and continued travel. Reused-world actual-client evidence is recorded in `docs/PERFORMANCE.md`. |
-| M4-003 | P2 | world persistence scope | Dropped items and world time were lost on close; item-containing columns were permanently pinned, and the old 300-second item path froze rather than removing expired entities. | Chunk payload v3 atomically stores voxels plus bounded semantic spatial records/tombstones; v2 loads as zero entities. Stable 128-bit IDs, revisioned destination-before-source recovery, bounded pickup receipts, frozen save-before-evict, game-owned item/clock codecs and two-slot global checkpoints are covered by corruption, stale-order, merge, delay, velocity, despawn, block-break/pickup and long-travel tests. `world-state-roundtrip` reports stable IDs, merge, cross-column, eviction/reload, block drop, delay, velocity, despawn, receipt and unknown-global success. Lighting/render/stream state remains deliberately derived/transient. | Closed by autonomous M4-003 acceptance after full Linux/Windows CI; retained by v1/v2 regression acceptance. World time pauses offline; unexpected failure can roll back to the latest successful checkpoint (normally about two seconds), while graceful shutdown flushes latest state. M4 is functionally complete; M4-009 hardware evidence remains conditional. |
-| M4-004 | P2 | world generation fidelity | Minecraft generator v1 had no climate/biome policy or lakes and simplified macro terrain/features. | Exact version routing preserves frozen v1; v2 adds climate, ocean/beach/plains/forest/desert/hills, continental terrain, contextual surfaces, curved caves, bounded ores, biome-aware trees and static water lakes. Wider-halo tests caught truncated cave-origin coverage; relocated-v1 startup tests caught an unsafe partial origin sandbox. Semantic hash, multi-seed spawn/statistics, borders, negative coordinates, order/workers, partial-world edits and v1/player/entity/clock continuation pass. Lava/springs and dungeons are explicitly deferred, not faked. | Closed by autonomous acceptance: four v2 seed routes, explicit v1 fresh/reused route, canonical/ocean actual-client runs, full local validation and [Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37135831666). No Java seed parity or v1-to-v2 auto-upgrade. |
-| M4-005 | P1 | generated liquid presentation | Static generated water was rendered as an opaque full cube, was normally targetable, and near-plane outline endpoints were not clipped; initial repair lacked readable underwater attenuation. | Generated state key is `minecraft_b173:water`, legacy runtime `BlockId(16)`, variant 0; profile compiles it as `Liquid`, empty collision, non-targetable, and semantic texture `minecraft_b173:textures/block/water` from terrain crop `(224,0,16,16)`. | Functional repair covered by automated geometry/shore/floor/internal-face culling, compiled-medium boundary and distance-fog tests; these pass in the full validation/CI sweep. No new renderer mechanism or authoritative-state change in M4-004. The full manual shore/shallow/submerged walkthrough was not performed and remains optional qualitative evidence, not a functional implementation blocker. |
-| M4-006 | P1 | persistence compatibility too broad | Client rejected a pre-liquid-repair generated world because the full compiled-profile fingerprint included collision, material and targetability descriptors, although saved voxel palettes contain semantic block keys and variants. | Exact metadata drift: `8e898b…` to `bac995…`; WATER's collision/material/targetability presentation descriptors changed (and AIR targetability is included), while water key/variant, generator identity/version and canonical generation hash did not. | Fixed: profile fingerprint is informational; metadata v2 has a separate persisted-state schema version; palette resolution reports missing keys; generator mismatch only blocks generation of absent chunks. Legacy metadata v1 migrates after successful load. Interactive water acceptance can now proceed. |
-| M4-007 | P1 | durable local-player state | World block edits survived reopen, but startup initialized origin/default mode/inventory. First player save format was monolithic and synchronous on the periodic tick. | Player construction followed world loading and always installed spawn/loadout; durable state had no component schema/revision and did blocking writes. | Componentized outer-v2 record, semantic item identity, two-slot BLAKE3 checkpoints, background coalescing worker, revision tracking, 1–2s cadence and graceful flush are implemented. Crash-recovery, legacy migration, opaque unknown-component, coalescing and revision tests pass. A debug scratch-world client ended without a graceful-save completion and reopened checkpoint revision 203 with all 3 components. |
-| M4-008 | P1 | hidden selection-box edges | Screen-space HUD projection ignored scene depth, so rear AABB edges rendered through selected opaque blocks. | Selection was expanded/projected to screen coordinates and submitted in a HUD pass without depth. | Fixed with expanded world-space line list, depth-tested `LessEqual`, depth writes disabled and GPU near-plane clipping. Structural tests and owner’s interactive occlusion/near-plane review pass; opacity was raised slightly to 0.55 after feedback and accepted in the rebuilt client. |
-| M4-009 | P1 | streaming CPU/frame-time and terrain arrival | Serialized boundary reconciliation filled its 32-column queue and gated application of already locally-lit results. This produced 15–88 second starvation tails even though those columns had sufficient authoritative voxel/light state for use. | Local initial-light readiness now gates publication; boundary convergence is eventual. Its bounded queue is 256, urgency propagates through every presentation stage, and obsolete queued lighting is cancelled on eviction. Fresh actual-client request→visible p50/p95/max was 0.511/0.859/1.082 s, with no zero forward margin or dropped ticks. Streaming stage p95s remained below 1.5 ms on llvmpipe. | Scheduler/correctness portion closed. Hardware-performance acceptance remains conditional because this pass had only llvmpipe/GL; no AMD/Vulkan result is fabricated. The last established AMD trace remains the prior responsiveness baseline. |
-| M4-010 | P1 | client responsiveness | Startup and active streaming previously starved event/input/render turns despite asynchronous loading and generation. | Input/fixed-step processing precedes bounded per-stage streaming service. `client-stream-auto` continuously changes semantic movement and view intent across streaming boundaries and fails on severe latency/dropped ticks. Fresh llvmpipe run: startup core 0.876 s, TPS 19.86, dropped time 0, event-loop p95/p99/max 62.95/69.79/74.56 ms, input→simulation p95/max 70.17/79.12 ms and input→render 71.65/80.95 ms. Render/present dominated software-GPU frame time; streaming phase p95s were fixed 0.033, residency 0.598, snapshot 0.015, mesh schedule 0.011 and mesh poll 0.026 ms. | Closed by autonomous actual-client acceptance. It crosses 33 columns while applying movement/camera changes. Hardware frame-performance remains conditional on a non-software adapter under M4-009, but no streaming event/input starvation or dropped simulation time remains. |
-| M4-011 | P1 | render-ready starvation under streaming budget | The responsiveness repair reduced event-loop stalls, but terrain did not become render-visible in time; a persisted-world run recorded request→visible p95 around 88 seconds. Owner then observed terrain appearing behind, with a forward chunk invisible until block break made it appear immediately. | Reserved stage service, urgency-aware mesh ordering, local-light publication and the removal of boundary-capacity gating make ready chunks appear without interaction. The autonomous route reports no blocked adjacent frontier and p95 request→visible below one second after warm startup. | Closed. Regression coverage retains the original interaction-independent publication test and the actual-client travel driver; M4-002 is independently closed and M4-009's hardware performance condition does not reopen this symptom. |
-| REL-001 | P1 | public distribution license | Project license was previously unspecified. | Owner selected MIT OR Apache-2.0; root license texts and inherited Cargo SPDX metadata are present. | Closed for local preparation; release packaging verifies both licenses. |
-| REL-002 | P1 | original assets in Git history | Original/reference Minecraft asset files were present in the initial repository commits. | Pre-rewrite bundle is retained externally; filter-repo removed `reference/assets` from reachable history. The cleaned public `rustcraft` repository is now published. | Closed; public repository and alpha.2 release are published without proprietary assets. |
-| CI-001 | P1 | public test assets | Client resource/render tests compiled the production Minecraft package against ignored `reference/assets/terrain.png`; clean public runners intentionally do not have those files. | Full workspace tests now compile against deterministic project-owned synthetic terrain/GUI/skin PNGs in `cfg(test)` and pass with `reference/assets` absent. | Fixed; exact artwork/fidelity commands remain owner-asset-dependent and opt-in. |
-| CI-002 | P1 | Windows world persistence | Directory `File::open().sync_all()` failed on Windows; `std::fs::rename` did not provide overwrite-existing behavior expected by the storage contract. | Central platform helper syncs directories on Unix and explicitly no-ops on Windows; `atomicwrites` uses write-through `MoveFileExW` replace-existing semantics there. | Closed; required public Windows GitHub Actions check/test/clippy run is green on the accepted alpha.2 baseline. |
+Reuse existing labels: `bug` means defect; `enhancement` means optional feature gap. Do not add
+synonymous type:defect/type:feature-gap labels. Other types are `type:architecture-debt`,
+`type:performance`, `type:investigation`. Use one primary type, severity and `area:*` label;
+add `stage:*` only when current documentation assigns an owner. Historical discovery IDs do not
+assign current stages. No speculative area/stage labels are needed before consumers exist.
 
-Severity:
+| Severity | Contract |
+| --- | --- |
+| P0 | Security, corruption or data-loss class; immediate blocker. |
+| P1 | Current-stage blocker or core-contract violation; fix immediately. |
+| P2 | Visible/functional issue; bounded deferral permitted. |
+| P3 | Polish, cleanup, optional behavior or performance suspicion/backlog. |
 
-- P0: security, corruption, data loss — fix immediately.
-- P1: blocks build/current slice or violates a core contract — fix immediately.
-- P2: visible functional issue — may wait for the next defect batch.
-- P3: polish/cleanup/performance suspicion — backlog until relevant.
+P0/P1 cannot be hidden in backlog or waived by simply migrating tracking. Create/update the Issue,
+report it prominently and establish explicit disposition before unrelated implementation proceeds.
+If a tracking-only pass discovers a blocker, do not silently expand into implementation without
+authorization. Architecture entry risks (e.g. before-M5 identity debt) are distinct from claims of
+current save corruption or an already active stage violation; preserve documented severity meaning.
 
-## DX1 acceptance (closed)
+A ticket needs concrete current evidence or an accepted debt contract, plus bounded acceptance.
+Missing future arbitrary meshes, spaces, physics, WASM or multiplayer alone are not defects.
+Optional gameplay gaps remain optional. Performance/investigation tickets reproduce representative
+release workloads, collect relevant distributions/costs, identify dominant causes and make an explicit
+change/no-change decision; "make faster" is not acceptance.
 
-Background compile/reload, stale publication, real job lifecycle/waits, asynchronous DX capture,
-bounded queries/pages, console automation, cancellation and lifecycle soak are implemented.
-Final local/graphical/overhead validation and public Ubuntu/Windows CI pass; see DX1_REPORT.md.
-No owner save-deletion observation is recorded as a persistence defect. Optional subsequent breadth:
-new command-file discovery, more game commands, richer editor and remote/WASM adapters.
+## Discovery and lifecycle
 
-Dependency hygiene (2026-10-04): cargo audit reports no vulnerabilities and unmaintained warnings
-RUSTSEC-2024-0436 (paste), RUSTSEC-2026-0249 (smartstring, Rhai transitive), and RUSTSEC-2026-0192
-(ttf-parser). Track upstream replacements/evaluation in dependency maintenance; DX1 does not
-randomly change accepted dependencies to suppress warnings.
+1. Search open **and closed** Issues for the same root cause before creating one.
+2. Update an existing canonical ticket with new evidence; otherwise create one with summary,
+   reproduction/source evidence, type/severity/area/stage where known, expected invariant and acceptance.
+3. Use the [issue template](../.github/ISSUE_TEMPLATE/defect.md); do not create a parallel Markdown entry.
+4. Before implementation, inspect the ticket, revalidate it and reference it in notes/commits.
+5. Prefer `Refs #N` or `Issue #N` until acceptance is complete. Avoid automatic issue-closing commit/PR
+   keywords (`Fixes`/`Closes`) when validation/CI follows the push.
+6. Close **completed** only after committed implementation, focused regression tests, required wider
+   validation, acceptance and required Ubuntu/Windows CI have passed. Post a final evidence comment first.
+7. Use **not_planned** for intentionally declined, abandoned, superseded or unreproducible concerns with
+   rationale. Use **duplicate** only with a canonical ticket link. Deferral alone leaves a ticket open.
+   A bounded investigation can complete when its promised evidence/decision is delivered, even if no
+   optimization is justified; distinguish that from abandoning the investigation.
 
-## Pre-M5 risk inventory
+Closure comment:
 
-[PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) records PM5-001–013 with a separate M5-entry risk model
-(1 BLOCKER, 5 HIGH, 5 MEDIUM, 2 LOW). These are not reopened M4/DX1 defects or replacements for
-the P0–P3 functional queue. ARCH-001–004 remain current; R1.0 single-page/path findings are resolved.
-The original audit identified camera stepping and retained mesh-generation metadata; RSM1/P1
-subsequently repaired demonstrated causes. Owner hardware VRAM causation remains a field question.
+```text
+Resolved by <SHA>.
+Evidence:
+- focused tests and required wider validation
+- acceptance artifacts/results
+- Ubuntu CI link/result
+- Windows CI link/result
+Resulting invariant: <what is now guaranteed>
+```
 
-## DUX1 execution
+Do not close issues merely because code was written or a tracking migration finished.
+Before any stage closeout, query its open stage-labelled issues and account for each: resolved with
+acceptance, moved with rationale or explicitly waived/deferred. An unresolved owned P0/P1 prevents
+silent stage closure. See [WORKFLOW](WORKFLOW.md) and [CODEX](CODEX.md).
+GitHub access is a tracking/publishing requirement, not an offline build/test dependency. If unavailable,
+retain temporary local discovery notes until access returns, then search/update/create; never establish
+another permanent Markdown live queue or claim tracker reconciliation was completed offline.
 
-PM5-007 is resolved and DUX1 CLOSED after local and Ubuntu/Windows CI acceptance.
-The discovery/demand gap is closed through generic native view metadata, the F4 selector,
-shared cached providers and targeted stable inspection; final acceptance/public CI is recorded in
-[DUX1_REPORT.md](DUX1_REPORT.md). No new functional residency/persistence/presentation defect is
-claimed. Renderer byte counts and retained mesh-generation entries remain diagnostics for RSM1.
-Optional breadth: precise per-column light convergence/reconciliation reasons, richer entity types,
-mouse selector navigation, new game-owned pages and profiler/mod UI. Missing detail is labelled,
-not represented as zero. C1 is CLOSED; current stage statuses are recorded below.
+## ISSUE1 legacy migration index
 
-## C1 execution
+Revalidated at `4452e43`: 18 active/deferred/narrowed rows, 17 actionable, no stale/fixed active rows,
+one trigger-only limitation. Eighteen Issues cover the independently accepted concerns. This mapping
+is identity/navigation only: **no current open/closed status is copied here**.
 
-PM5-008 is resolved for C1’s bounded contract; migration is implemented with typed shared sources and explicit deferred inventory; acceptance is tracked in [C1_REPORT.md](C1_REPORT.md). Startup-only/resource/security/specialist policies have owners/reasons in [CONFIGURATION.md](CONFIGURATION.md). No RSM1/P1/S1 defect is claimed fixed. DUX1 remains closed; see current post-R2 status below.
+| Legacy ID(s) | Canonical GitHub Issue |
+| --- | --- |
+| M2-001, R1.2-001 | [#1](https://github.com/AlexandrShapkin/rustcraft/issues/1) — Evaluate translucent ordering across sections and atlas pages |
+| M2-003 | [#2](https://github.com/AlexandrShapkin/rustcraft/issues/2) — Measure emissive-edit lighting latency in release workloads |
+| M2-004 | [#3](https://github.com/AlexandrShapkin/rustcraft/issues/3) — Extend optional telemetry beyond Linux DRM providers |
+| M2-005 | [#4](https://github.com/AlexandrShapkin/rustcraft/issues/4) — Report supported loose assets accurately in refs-status |
+| M3-001 | [#5](https://github.com/AlexandrShapkin/rustcraft/issues/5) — Add optional shift-click inventory transfers |
+| M3.2-002 | [#6](https://github.com/AlexandrShapkin/rustcraft/issues/6) — Add optional right-click crafting-slot transactions |
+| M3.1-001 | [#7](https://github.com/AlexandrShapkin/rustcraft/issues/7) — Profile dropped-item merge and pickup scaling |
+| ARCH-001 | [#8](https://github.com/AlexandrShapkin/rustcraft/issues/8) — Move replication-touched Minecraft rules out of generic runtime |
+| ARCH-002 | [#9](https://github.com/AlexandrShapkin/rustcraft/issues/9) — Separate game-owned inventory layout from generic HUD rendering |
+| ARCH-003 | [#10](https://github.com/AlexandrShapkin/rustcraft/issues/10) — Isolate legacy game conveniences from universal agent intent |
+| ARCH-003 | [#11](https://github.com/AlexandrShapkin/rustcraft/issues/11) — Replace process-local block identity at external intent boundaries |
+| ARCH-003 | [#12](https://github.com/AlexandrShapkin/rustcraft/issues/12) — Expose durable EntityId in bot item observations |
+| ARCH-004 | [#13](https://github.com/AlexandrShapkin/rustcraft/issues/13) — Separate Minecraft policy from legacy content definition contracts |
+| R1.0-001 | [#14](https://github.com/AlexandrShapkin/rustcraft/issues/14) — Retire active legacy numeric registry dependencies |
+| R1.0-003 | [#15](https://github.com/AlexandrShapkin/rustcraft/issues/15) — Define scalable block-local canonical state schemas |
+| R1.1-001 | [#16](https://github.com/AlexandrShapkin/rustcraft/issues/16) — Evaluate atlas-safe texture quality policies |
+| R1.2-002 | [#17](https://github.com/AlexandrShapkin/rustcraft/issues/17) — Collect representative renderer profiles before GPU design changes |
+| F1-001 | [#18](https://github.com/AlexandrShapkin/rustcraft/issues/18) — Fix F3 chord routing in the normal client path |
 
+Deduplication/migration boundaries:
 
-UX1 acceptance addresses developer F3/digit hotbar leakage and the diagnostic ASCII glyph
-limitation. Unicode glyph coverage is explicitly bounded by bundled fonts; unknown codepoints
-use deterministic tofu. Real-platform IME automation, visual bidi editing, clipboard and hot font
-replacement are deferred breadth, not reopened DUX1/C1 stages. See current post-R2 status below.
+- M2-001 and R1.2-001 are one section/page-coarse translucent ordering concern.
+- M3-001 owns shift-click. M3.2-002's repeated shift-click clause points to that concern; its independent
+  crafting right-click gap has separate acceptance. Do not create another shift-click ticket.
+- ARCH-003 splits into legacy game conveniences, external placement identity and durable Bot references;
+  PM5-001 is supporting audit evidence for the latter two, not three interchangeable acceptance gates.
+- ARCH-001 runtime rules, ARCH-004 definitions and R1.0-001 registry migration remain related separate
+  A1 boundaries. R1.0-003 belongs to C2; BG1 is its consumer, not a reason to postpone C2 ownership.
+- R1.2-002's renderer attribution is independent of F1 human routing/cadence. F1 field results are input
+  to broader profiling, not proof that GPU design decisions have already been evaluated.
+- ARCH-002 remains unassigned after R2 narrowing; no stage ownership was invented.
+- R1.1-002 did not migrate: graceful configured-limit/runtime validation remains; reorder only after a
+  demonstrated startup consumer/failure. Its historical trigger is retained, not an open task queue.
 
-## RSM1 execution
-
-PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime causes recorded in
-[RSM1_REPORT.md](RSM1_REPORT.md). PM5-002 is resolved: narrow fixes passed local acceptance and Ubuntu/Windows implementation
-CI 37228702009. RSM1 is CLOSED. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
-This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
-remain mandatory. DUX1/C1/UX1 stay CLOSED; subsequent closures are recorded below.
-
-## P1 execution
-
-PM5-003 local repair measures and removes fixed-tick camera/position duplication without changing
-authoritative 20 TPS. Shared timing and discontinuity/input-once tests are documented in
-[P1_REPORT.md](P1_REPORT.md). Ubuntu and Windows implementation CI 37256205733 passed. P1 is CLOSED and PM5-003 is resolved.
-Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
-S1 and R2 are CLOSED; F1 and subsequent implementation remain planned.
-
-S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required. R2 is CLOSED with Ubuntu/Windows implementation and closeout CI recorded in [R2_REPORT.md](R2_REPORT.md); F1 and subsequent implementation remain planned.
-
-## Current post-R2 status and concrete F1 gap
-
-Current status supersedes earlier stage-inactive sentences above: DUX1/C1/UX1/RSM1/P1/S1/R2 are closed.
-D-052 fixes reviewed full/partial pickup, migration ordering and failed-save snapshot lifetime; see
-[ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md). No unresolved defect is claimed for those findings.
-
-| ID | Severity | Area | Description / source evidence | Status |
-| --- | --- | --- | --- | --- |
-| F1-001 | P2 | normal client input | `window_event` enters UX1 `dev_key` only when devtools exists; ordinary startup falls through legacy debug/controller routing. Held F3+digit therefore lacks the normal-path routing guarantee. | Open; F1 owns real WindowEvent reproduction/correction and F3/F4 field acceptance. |
-
-A1 still owns external PlaceIntent BlockId and missing Bot EntityId references (PM5-001/ARCH-003),
-and affected runtime/mod-api policy (ARCH-001/004). R1.0-003 is owned by C2 with BG1 as consumer.
-Cube geometry and one-grid storage are planned BG1/VS1 limitations, not bugs solely because future
-capabilities are broader. Hardware smoothness/checkpoint causation stays unproven until F1 evidence.
+Closed/fixed legacy rows were not recreated as issues. Their original evidence/closure descriptions,
+including M1.1, M3.8, M4, release/CI and R1 repairs, remain in
+[DEFECTS_HISTORY](DEFECTS_HISTORY.md), Git history and unchanged acceptance reports.

@@ -63,7 +63,8 @@ write the feature note before production edits. The study establishes semantic i
 recognizable baseline; it does not require exact reproduction. Internal plumbing does not require
 this gate.
 
-Fix blockers, corruption, security issues and architecture violations immediately. Record
-non-blocking defects in `docs/DEFECTS.md` and batch-fix them later.
+Fix blockers, corruption, security issues and architecture violations immediately. Search open and
+closed GitHub Issues, update/create evidenced actionable tickets, and batch-fix non-blocking work
+later. `docs/DEFECTS.md` is policy/history/index, not a live queue.
 
 Record durable architecture choices in `docs/DECISIONS.md`.
