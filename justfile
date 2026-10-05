@@ -370,3 +370,7 @@ f1-test:
     CARGO_BUILD_JOBS=2 cargo test -p rustcraft-client
     CARGO_BUILD_JOBS=2 cargo test -p rustcraft-scripting-rhai
     CARGO_BUILD_JOBS=2 cargo test -p rustcraft-world
+
+# Owner-controlled normal release client; disposable F1 state and bounded trace.
+f1-manual:
+    python3 scripts/f1_client.py release --manual

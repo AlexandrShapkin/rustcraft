@@ -156,7 +156,7 @@ client runtime, with disposable world/config/cache below `target/f1/run-NONCE/`.
 `dev` or `release` runs one profile. It requires AMD/RADV/Vulkan and rejects missing/other graphics;
 set `RUSTCRAFT_TERRAIN_TEXTURE` to a local licensed terrain PNG if the default local asset is absent.
 The normal owner build profiles are retained. Each run has 30-second stationary/pan/walk/walk+pan
-phases after readiness and a 420-second application timeout (wrapper 600 seconds).
+phases, followed by 30-second fast_pan/walk_fast_pan phases, after readiness and a 420-second application timeout (wrapper 600 seconds).
 
 Return `target/f1/run-NONCE/summary.json`; per-profile summaries and `timeline.json` preserve exact
 adapter/driver/backend, profile, present mode, window/surface, effective C1 settings, presentation
@@ -168,3 +168,23 @@ spans share the monotonic frame timeline; overlap is correlation, not proof of a
 `sync_ms` includes atomic publication/directory work, not isolated fsync. No scanout, input-to-photon
 or subjective smoothness is measured. Hardware acceptance and any necessary owner observation remain
 pending; see [F1_REPORT](F1_REPORT.md). P1 presentation policy is unchanged.
+
+### Normal-speed F1 follow-up
+
+The original four phases remain unchanged: pan supplies 325 mouse counts/s through normal
+mouse ingestion (0.002 radians/count, about 37.24 degrees/s). The added fast phases supply
+1500 counts/s, about 171.89 degrees/s: a representative roughly half-turn in one second,
+without changing sensitivity or animating a renderer transform. Phase JSON records the
+requested counts/s and normal sensitivity alongside the same timing/correlation metrics.
+Existing evidence directories are preserved; each invocation creates a new run directory.
+
+Run `just f1-client` on the owner's AMD/RADV/Vulkan machine for sequential dev/release six-phase
+measurements. Then run `just f1-manual` for a release-only, disposable normal-client recording.
+Click the window to capture the mouse, then walk and use ordinary fast mouse-look for 45 seconds.
+The recording starts after world readiness and mouse capture; the application exits automatically.
+Use normal W/A/S/D and mouse input. No synthetic movement or camera fixture is applied in manual mode.
+The same GPU gate, isolated config/state and timing trace apply. The overall startup deadline
+remains 420 seconds; wrapper deadline is 600 seconds. Report subjective feel separately:
+`measured` means recording complete, not subjective acceptance. Return the new root summary JSON
+and per-profile timeline JSON (manual has only release). Schema remains version 1, with root/application
+mode, six automated phases or one interactive phase; interactive requested counts/s is null.

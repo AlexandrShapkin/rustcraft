@@ -127,3 +127,13 @@ its final public run is discoverable from that commit. This is implementation CI
 ## Closeout SHA
 
 None. F1 stays active until owner hardware evidence and all acceptance requirements pass.
+
+## Normal-speed hardware follow-up
+
+The owner confirms existing AMD/RADV/Vulkan evidence is valid and automated motion looked smooth,
+but its low pan rate leaves normal-speed subjective acceptance inconclusive. Existing evidence
+must be preserved. A narrow harness extension retains the original phases and adds fast_pan and
+walk_fast_pan through production mouse ingestion, plus a 45-second owner-controlled release
+recording via `just f1-manual`. No P1 presentation, persistence or runtime authority design changes
+are made. Faster hardware measurements and the owner's observation remain pending; F1 stays active,
+Issue #18 stays open, and A1 stays planned.

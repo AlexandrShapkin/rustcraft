@@ -6234,7 +6234,8 @@ fn main() {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance"
-            | "--ux1-acceptance" | "--rsm1-acceptance" | "--p1-acceptance" | "--f1-acceptance" => {}
+            | "--ux1-acceptance" | "--rsm1-acceptance" | "--p1-acceptance" | "--f1-acceptance"
+            | "--f1-manual" => {}
             "--set-config" | "--config-file" => {
                 args.next().expect("configuration option requires value");
             }
@@ -6358,8 +6359,11 @@ fn main() {
     } else {
         world_name
     };
-    if args.iter().any(|a| a == "--f1-acceptance") {
-        app.f1_campaign = Some(f1::Campaign::new());
+    if args
+        .iter()
+        .any(|a| a == "--f1-acceptance" || a == "--f1-manual")
+    {
+        app.f1_campaign = Some(f1::Campaign::new(args.iter().any(|a| a == "--f1-manual")));
         app.f1_trace.enabled = true;
     }
     app.presentation_timing.enabled = app.session.context.require("debug.configure").is_ok();

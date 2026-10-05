@@ -6,7 +6,17 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-const PHASES: [&str; 4] = ["stationary", "pan", "walk", "walk_pan"];
+const PHASES: [&str; 6] = [
+    "stationary",
+    "pan",
+    "walk",
+    "walk_pan",
+    "fast_pan",
+    "walk_fast_pan",
+];
+// Normal runtime sensitivity is 0.002 radians/count (runtime::apply_intent).
+// 1500 counts/s represents a roughly 172-degree human turn in one second.
+const FAST_MOUSE_COUNTS_PER_SECOND: f64 = 1500.;
 const CAP: usize = 32768;
 
 fn output() -> PathBuf {
@@ -231,6 +241,7 @@ fn distribution(mut values: Vec<f64>) -> Value {
 }
 
 pub(super) struct Campaign {
+    interactive: bool,
     start: Instant,
     phase_start: Option<Instant>,
     last: Instant,
@@ -241,8 +252,9 @@ pub(super) struct Campaign {
     counters: (u64, u64, f64),
 }
 impl Campaign {
-    pub fn new() -> Self {
+    pub fn new(interactive: bool) -> Self {
         Self {
+            interactive,
             start: Instant::now(),
             phase_start: None,
             last: Instant::now(),
@@ -263,7 +275,7 @@ impl Campaign {
         if !app.player_control_enabled {
             return Ok(false);
         }
-        if !self.initialized {
+        if !self.initialized && !self.interactive {
             let p = app
                 .simulation
                 .as_ref()
@@ -305,6 +317,9 @@ impl Campaign {
             {
                 return Ok(false);
             }
+            if self.interactive && !app.controller.captured {
+                return Ok(false);
+            }
             let _ = app.presentation_observation();
             let old = std::mem::take(&mut app.presentation_timing);
             app.presentation_timing = Ledger::recording(old.monitor, old.target_ms);
@@ -319,26 +334,51 @@ impl Campaign {
         let now = Instant::now();
         let dt = now.duration_since(self.last).as_secs_f64();
         self.last = now;
-        app.controller.captured = true;
-        app.controller.forward = if matches!(self.phase, 2 | 3) { 1. } else { 0. };
-        if self.phase == 2 {
-            let sim = app.simulation.as_mut().unwrap();
-            if (sim.player.position.z - self.origin[2]).abs() > 12. {
-                sim.player.yaw = if sim.player.position.z > self.origin[2] {
-                    std::f32::consts::PI
-                } else {
-                    0.
-                };
+        if !self.interactive {
+            app.controller.captured = true;
+            app.controller.forward = if matches!(self.phase, 2 | 3 | 5) {
+                1.
+            } else {
+                0.
+            };
+            if self.phase == 2 {
+                let sim = app.simulation.as_mut().unwrap();
+                if (sim.player.position.z - self.origin[2]).abs() > 12. {
+                    sim.player.yaw = if sim.player.position.z > self.origin[2] {
+                        std::f32::consts::PI
+                    } else {
+                        0.
+                    };
+                }
+            }
+            if matches!(self.phase, 1 | 3) {
+                app.ingest_mouse((-dt * 0.65 / 0.002, 0.), now);
+            }
+            if matches!(self.phase, 4 | 5) {
+                app.ingest_mouse((-dt * FAST_MOUSE_COUNTS_PER_SECOND, 0.), now);
             }
         }
-        if matches!(self.phase, 1 | 3) {
-            app.ingest_mouse((-dt * 0.65 / 0.002, 0.), now);
-        }
-        if self.phase_start.unwrap().elapsed() < Duration::from_secs(30) {
+        if self.phase_start.unwrap().elapsed()
+            < Duration::from_secs(if self.interactive { 45 } else { 30 })
+        {
             return Ok(false);
         }
         let mut sample = app.presentation_observation();
-        sample["phase"] = json!(PHASES[self.phase]);
+        sample["phase"] = json!(if self.interactive {
+            "interactive"
+        } else {
+            PHASES[self.phase]
+        });
+        sample["mouse_counts_per_second"] = if self.interactive {
+            Value::Null
+        } else {
+            json!(match self.phase {
+                1 | 3 => 325.,
+                4 | 5 => FAST_MOUSE_COUNTS_PER_SECOND,
+                _ => 0.,
+            })
+        };
+        sample["mouse_sensitivity_radians_per_count"] = json!(0.002);
         sample["start_ms"] = json!(app.f1_trace.ms(self.phase_start.unwrap()));
         sample["end_ms"] = json!(app.f1_trace.ms(now));
         sample["configuration"] = app.control_state.config.snapshot();
@@ -354,7 +394,7 @@ impl Campaign {
         self.samples.push(sample);
         self.phase += 1;
         self.phase_start = None;
-        if self.phase < PHASES.len() {
+        if !self.interactive && self.phase < PHASES.len() {
             return Ok(false);
         }
         app.controller.forward = 0.;
@@ -376,10 +416,11 @@ impl Campaign {
         if app.f1_trace.dropped != 0 {
             return Err("F1 trace capacity exceeded".into());
         }
-        if trace["player_publication_ms"]["count"]
-            .as_u64()
-            .unwrap_or(0)
-            < 20
+        if !self.interactive
+            && trace["player_publication_ms"]["count"]
+                .as_u64()
+                .unwrap_or(0)
+                < 20
         {
             return Err(
                 "F1 requires at least 20 successful player checkpoints for tail analysis".into(),
@@ -388,9 +429,10 @@ impl Campaign {
         write(
             "summary.json",
             &json!({"schema_version":1,"status":"measured","acceptance":"pending review of hardware evidence; not physical-display acceptance",
+            "mode":if self.interactive {"interactive"} else {"automated"},
             "adapter":adapter(&r.adapter_info),"build_profile":if cfg!(debug_assertions){"dev"}else{"release"},
             "build_identity":rustcraft_build_info::identity(),"world_seed":app.world_seed,"generator_version":app.stream_generator.as_ref().map(|g|g.version()),"principal":app.session.principal,"role":app.session.role,
-            "input":"harness drives normal LocalHumanController and native mouse ingestion; production winit payload router tested separately without desktop injection",
+            "input":if self.interactive {"owner-controlled normal DeviceEvent mouse and WindowEvent keyboard; subjective acceptance requires owner observation"} else {"harness drives normal LocalHumanController and native mouse ingestion; production winit payload router tested separately without desktop injection"},
             "phases":self.samples,"timeline":"timeline.json","player_publication_ms":trace["player_publication_ms"],
             "long_frame_count":trace["long_frames"].as_array().unwrap().len(),
             "physical_scanout":"unavailable","input_to_photon":"unavailable"}),
@@ -421,6 +463,19 @@ impl ClientApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fast_mouse_delta_uses_normal_ingestion_and_controller() {
+        use super::super::Controller;
+        let mut app = ClientApp::new(None, None);
+        app.controller.captured = true;
+        app.ingest_mouse((-FAST_MOUSE_COUNTS_PER_SECOND / 20., 0.), Instant::now());
+        let intent = app.controller.next_intent();
+        assert_eq!(intent.look_delta.x, -75.);
+        assert_eq!(intent.movement.forward, 0.);
+        assert_eq!(app.controller.next_intent().look_delta.x, 0.);
+        assert!(Campaign::new(true).interactive);
+        assert_eq!(&PHASES[..4], &["stationary", "pan", "walk", "walk_pan"]);
+    }
     #[test]
     fn worker_overlap_is_separate_from_main_thread_work() {
         let mut t = Trace {

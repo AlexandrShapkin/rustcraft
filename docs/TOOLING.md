@@ -284,3 +284,7 @@ No measurement yet justifies a recommendation that one profile feels smoother.
 produces isolated AMD/RADV/Vulkan field evidence under ignored `target/f1/`; see
 [DEBUGGING](DEBUGGING.md#f1-routing-and-field-acceptance-pending-hardware). It preserves normal build
 profiles; local quota-constrained test symbol overrides are not owner field measurements.
+
+`just f1-manual` records 45 seconds of owner-controlled normal release gameplay in disposable
+F1 state, with the same AMD/RADV/Vulkan gate. `just f1-client` now also retains fast_pan and
+walk_fast_pan evidence; existing four-phase evidence remains valid. See DEBUGGING for capture steps.

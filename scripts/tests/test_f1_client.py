@@ -11,6 +11,10 @@ SPEC.loader.exec_module(f1)
 
 
 class F1WorkflowTests(unittest.TestCase):
+    def test_manual_rejects_dev_before_any_build(self):
+        with self.assertRaises(ValueError):
+            f1.run(["dev"], manual=True)
+
     def test_isolation_replaces_ordinary_saves_and_settings(self):
         path = Path("/tmp/disposable-f1/dev")
         env = f1.isolated_env({"RUSTCRAFT_SAVES_DIR": "/ordinary", "RUSTCRAFT_CONFIG_FILE": "/settings",
@@ -52,6 +56,31 @@ class F1WorkflowTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 f1.load_profile(path, "dev")
 
+    def test_manual_runs_only_release_and_validates_interactive_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls = []
+            def measured(command, env, log, timeout):
+                calls.append(command)
+                output = Path(env["RUSTCRAFT_F1_OUTPUT"])
+                self.assertIn("--release", command)
+                self.assertEqual(env["RUSTCRAFT_SAVES_DIR"], str(output / "saves"))
+                if "--f1-manual" not in command:
+                    return
+                f1.write(output / "summary.json", {
+                    "schema_version": 1, "status": "measured", "build_profile": "release",
+                    "adapter": {"vendor": 0x1002, "backend": "Vulkan", "driver": "radv"},
+                    "phases": [{"phase": "interactive", "frames": 300,
+                                "render_ms": [300, 16, 16, 16, 16, 16]}]})
+                f1.write(output / "timeline.json", {"schema_version": 1, "dropped_trace_events": 0})
+            with patch.object(f1, "ROOT", root), patch.object(f1, "execute", measured), \
+                    patch.object(f1.subprocess, "check_output", return_value="test-sha\n"):
+                self.assertEqual(f1.run(["release"], manual=True), 0)
+            self.assertEqual(len(calls), 2)
+            self.assertIn("--f1-probe", calls[0])
+            self.assertIn("--f1-manual", calls[1])
+            self.assertNotIn("--f1-acceptance", calls[1])
+
     def test_profiles_execute_sequentially_and_publish_one_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -65,7 +94,7 @@ class F1WorkflowTests(unittest.TestCase):
                 phases = [{"phase": name, "frames": 400, "render_ms": [400, 16, 16, 16, 16, 16],
                            "window_pixels": [1280, 720], "present_mode": "Fifo", "backend": "Vulkan",
                            "configuration": {"settings": {"key": {"effective": 1000}}}}
-                          for name in ["stationary", "pan", "walk", "walk_pan"]]
+                          for name in ["stationary", "pan", "walk", "walk_pan", "fast_pan", "walk_fast_pan"]]
                 f1.write(output / "summary.json", {"schema_version": 1, "status": "measured",
                          "build_profile": profile, "adapter": {"vendor": 0x1002, "backend": "Vulkan",
                          "driver": "radv"}, "phases": phases, "player_publication_ms": {"count": 30},
