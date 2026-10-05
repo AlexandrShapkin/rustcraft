@@ -137,3 +137,18 @@ walk_fast_pan through production mouse ingestion, plus a 45-second owner-control
 recording via `just f1-manual`. No P1 presentation, persistence or runtime authority design changes
 are made. Faster hardware measurements and the owner's observation remain pending; F1 stays active,
 Issue #18 stays open, and A1 stays planned.
+
+## Owner acceptance and window reproducibility correction
+
+Owner evidence at `1c30f15526ee304b49bd0706eed742d1b55e785f` is preserved and valid.
+Both automated profiles individually measured, including fast_pan and walk_fast_pan. The wrapper
+failed only its comparison: dev client area 1280x662 versus release 1920x1012. This is a workload
+reproducibility defect, not a camera defect. Automated reruns now request fixed 1280x720 physical
+client areas through a generic normal-window override; comparison checks remain intact.
+
+The owner accepts the interactive release run: AMD Radeon Vega 8 / RADV / Vulkan, clean worktree,
+1280x662, status measured, zero long frames in the 45-second interactive phase. The owner reports
+camera motion is substantially better and sufficiently smooth during ordinary walking and fast
+mouse-look. That subjective acceptance, previous timing/persistence evidence, and production
+WindowEvent/capability regressions remain valid. Manual mode is unchanged and requires no rerun.
+One final matched-size automated run remains pending. F1 active, focus F1, #18 open, A1 planned.

@@ -80,6 +80,8 @@ def run(profiles, manual=False):
             output = directory / profile
             output.mkdir()
             env = isolated_env(os.environ, output)
+            if not manual:
+                env["RUSTCRAFT_WINDOW_SIZE"] = "1280x720"
             cargo = ["cargo", "run", "-p", "rustcraft-client"]
             if profile == "release":
                 cargo.append("--release")

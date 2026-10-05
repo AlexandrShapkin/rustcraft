@@ -188,3 +188,9 @@ remains 420 seconds; wrapper deadline is 600 seconds. Report subjective feel sep
 `measured` means recording complete, not subjective acceptance. Return the new root summary JSON
 and per-profile timeline JSON (manual has only release). Schema remains version 1, with root/application
 mode, six automated phases or one interactive phase; interactive requested counts/s is null.
+
+Automated F1 launches now set generic `RUSTCRAFT_WINDOW_SIZE=1280x720`: a fixed physical-pixel
+client area, with matching minimum/maximum inner sizes, resizing disabled and maximization disabled.
+The normal client uses the same window/render/input path; this override is available to any launch.
+The wrapper still rejects unequal effective window dimensions or configuration. Manual F1 does not
+set this override and needs no rerun for this reproducibility correction.

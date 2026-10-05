@@ -769,6 +769,19 @@ fn stream_window_size(value: Option<&str>) -> Result<(u32, u32), String> {
     }
 }
 
+/// Optional fixed client area for reproducible normal-client launches, in physical pixels.
+fn fixed_window_attributes(value: &str) -> Result<winit::window::WindowAttributes, String> {
+    let (width, height) = stream_window_size(Some(value))
+        .map_err(|e| e.replace("RUSTCRAFT_STREAM_WINDOW_SIZE", "RUSTCRAFT_WINDOW_SIZE"))?;
+    let size = winit::dpi::PhysicalSize::new(width, height);
+    Ok(Window::default_attributes()
+        .with_inner_size(size)
+        .with_min_inner_size(size)
+        .with_max_inner_size(size)
+        .with_resizable(false)
+        .with_maximized(false))
+}
+
 /// Diagnostic-only bounded surface navigation. This reads real available voxels and returns
 /// waypoints; the controller still issues normal look/move/jump intents through collision.
 /// No player/residency mutation, terrain edit, speed override, or renderer movement is involved.
@@ -5235,8 +5248,8 @@ impl ApplicationHandler for ClientApp {
         if self.window.is_some() {
             return;
         }
-        // Only explicit streaming diagnostics may override the normal player's window size.
-        // This isolates software-GPU fill cost without changing simulation or acceptance rules.
+        // Preserve diagnostic defaults; an explicit generic fixed-size request below
+        // constrains the same normal window without changing simulation or input.
         let (width, height) = if self.p1_campaign.is_some() {
             (640, 360)
         } else if self.stream_perf {
@@ -5252,16 +5265,24 @@ impl ApplicationHandler for ClientApp {
         } else {
             (1280, 720)
         };
+        let attributes = match std::env::var("RUSTCRAFT_WINDOW_SIZE") {
+            Ok(value) => match fixed_window_attributes(&value) {
+                Ok(attributes) => attributes,
+                Err(error) => {
+                    eprintln!("{error}");
+                    event_loop.exit();
+                    return;
+                }
+            },
+            Err(_) => Window::default_attributes()
+                .with_inner_size(winit::dpi::PhysicalSize::new(width, height)),
+        };
         let window = Arc::new(
             event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title(self.diagnostic.map_or_else(
-                            || "RustCraft M2".to_owned(),
-                            |stage| format!("RustCraft diagnostic: {stage:?}"),
-                        ))
-                        .with_inner_size(winit::dpi::PhysicalSize::new(width, height)),
-                )
+                .create_window(attributes.with_title(self.diagnostic.map_or_else(
+                    || "RustCraft M2".to_owned(),
+                    |stage| format!("RustCraft diagnostic: {stage:?}"),
+                )))
                 .expect("create window"),
         );
         self.window = Some(window.clone());
@@ -6429,6 +6450,24 @@ mod tests {
     use rustcraft_engine_core::BlockPos;
     use rustcraft_minecraft_b173::blocks::GRASS;
     use rustcraft_minecraft_b173::blocks::STONE;
+
+    #[test]
+    fn fixed_normal_window_override_constrains_physical_client_area() {
+        let attributes = fixed_window_attributes("1280x720").unwrap();
+        let expected = Some(winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(
+            1280, 720,
+        )));
+        assert_eq!(attributes.inner_size, expected);
+        assert_eq!(attributes.min_inner_size, expected);
+        assert_eq!(attributes.max_inner_size, expected);
+        assert!(!attributes.resizable);
+        assert!(!attributes.maximized);
+        assert!(
+            fixed_window_attributes("0x0")
+                .unwrap_err()
+                .contains("RUSTCRAFT_WINDOW_SIZE")
+        );
+    }
 
     #[test]
     fn streaming_window_override_is_explicit_and_bounded() {
