@@ -13,11 +13,11 @@ Common recipes:
 - `just version` — print the authoritative product version;
 - `just release-build` / `just release-check` — stage and validate local client/server archives;
 
-The release helpers use Python 3's standard library for archive staging and inspection. Python is
-optional for the ordinary Rust bootstrap but required for release commands.
+Documentation and release helpers use Python standard library only. Python 3.11+ (tomllib) is
+required for normal documentation/CI validation; direct Cargo builds remain independent of Python.
 - `just doctor` — inspect the local toolchain;
 - `just bootstrap-check` — baseline repo validation;
-- `just ci` — formatting/check/tests/clippy;
+- `just ci` — offline docs tests/check, then formatting/check/tests/clippy;
 - `just smoke` — headless vertical-slice smoke scenario;
 - `just refs-status` — inspect local reference sources/revisions;
 - `just refs-fetch` — fetch declared public references;
@@ -32,6 +32,7 @@ one-off command sequence in prompts.
 Expected:
 
 - `git`;
+- Python 3.11+ (`python3`; Windows CI uses `python`);
 - Rust toolchain (`rustc`, `cargo`, `rustfmt`, `clippy`);
 - `just`;
 - `rg`;
@@ -158,7 +159,7 @@ Overhead writes ignored target/dx-overhead.json. `dx_responsive.rhai` plus the e
 callers/assertions/artifacts and proves scenario equivalence before retirement. No recipe is dead
 merely because DX1 exists; preserve frozen M4 hashes and specialist correctness gates. DUX1 adds
 discovery over existing diagnostics; C1 shares effective settings across Control/Rhai/in-game tools.
-DUX1/C1/UX1/RSM1/P1/S1/R2 are CLOSED; F1 and subsequent implementation stages remain planned. DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
+Current execution state is in the [registry](stages.toml). DUX1 adds `just dux-test` (shared and client focus/cache tests) and `just dux-client` (release real-surface acceptance with an isolated fixture world). See [DUX1_REPORT.md](DUX1_REPORT.md). No specialist recipe is retired.
 
 ## C1 workflows
 
@@ -241,3 +242,30 @@ gh issue close 18 --repo AlexandrShapkin/rustcraft --reason completed
 Examples are not authorization to close F1 during another pass. For deliberate no-work conclusions use
 `--reason "not planned"` (API state reason not_planned); for duplicates use `--duplicate-of NUMBER`
 with a canonical ticket. Do not fabricate completion evidence or close on migration alone.
+
+## Documentation navigation commands
+
+Python 3.11+ is a baseline tooling requirement, checked by `just doctor`. No pip packages are needed.
+Public Ubuntu/Windows CI installs Python and runs the same offline tests/check before Rust compilation.
+
+```sh
+just docs-check                      # offline, deterministic, mutation-free integrity
+just docs-test                       # Python stdlib unittest
+just docs-sync                       # only generated index and ROADMAP marker block
+just codex-context                   # registry focus; optional GH enrichment with timeout
+just codex-context F1 --offline       # compact local pointers, no network
+just stage-new C3 "Some new stage" BG1  # insert after BG1; edit scope/navigation afterward
+just project-tree                    # current tracked paths from Git, no snapshot file
+```
+
+`stage-new ID TITLE AFTER` creates a planned contract/registry entry and synchronizes navigation. It
+creates no commit, label or authorization. Manual TOML edits remain supported; run sync/check afterward.
+Focus/state helpers are intentionally omitted: edit those few registry fields explicitly, preserving
+at most one active stage and its focus. Closing a stage does not remove it from the sequence.
+
+Override the just Python command on systems without `python3`: `just --set python python docs-check`.
+Direct portable equivalents are `python scripts/docs.py check` and
+`python -m unittest discover -s scripts/tests -p 'test_docs.py'`. Local context remains usable when GH
+is absent, unauthenticated or offline; full issue reconciliation still requires current online state.
+Source anchors are navigation hints checked for existence/case, refreshed after structural changes.
+See [INDEX](INDEX.md) for document ownership and templates, not a full tree dump.

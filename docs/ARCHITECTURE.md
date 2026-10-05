@@ -488,8 +488,8 @@ See [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md).
 
 Current implementation at R2 closeout `5eb1770` is a single-grid local product with a headless
 bootstrap/scenario server, not M5 multiplayer. R2 semantic source regions and D-052 durable transfer
-ordering are implemented; F1/A1/C2/BG1/DX2/RF1/VS1/READY1 remain planned. The authoritative sequence
-and gates are in [ROADMAP](ROADMAP.md); source gaps are in [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md).
+ordering are implemented. Current sequence/state is in the [registry](stages.toml); bounded
+implementation gates are in [stage contracts](stages/INDEX.md); source gaps are in [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md).
 The original [PRE_M5_AUDIT](PRE_M5_AUDIT.md) remains historical evidence with a post-audit expansion.
 
 ### Target F1: one client path, distinct authority and gameplay

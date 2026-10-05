@@ -2,6 +2,16 @@
 
 Keep entries short. Add a new entry when a choice changes a durable contract.
 
+## Decision maintenance convention
+
+Use the [decision template](templates/DECISION.md) for future entries within this file. Keep unique
+`## D-### — Title` headings so tooling can extract titles without copying bodies. Future entries
+record status, decision, rationale, consequences, explicit Supersedes/Superseded-by IDs (including
+partial scope) and references. Preserve old rationale; mark supersession through an explicit newer
+record/reference rather than rewriting history. Stage metadata selects relevant decisions; textual
+recency is not a conflict rule. Mutable execution state belongs only to [stages.toml](stages.toml).
+D-053–D-059 expand the planning portion of D-045; its measured/historical rationale remains evidence.
+
 ## D-001 — Familiar behavior, not exact Beta compatibility
 
 Status: accepted.
@@ -855,3 +865,24 @@ measured leading candidate, not a selected dependency. See [NETWORKING](NETWORKI
 
 D-052 remains the implemented durable transfer decision. Its general source-before-retirement rule
 also binds future cross-space transitions; this pass adds no backend, journal or save-format change.
+
+## D-060 — Progressive documentation with single-owner mutable planning
+
+Status: accepted for documentation/tooling; no product stage activated.
+
+Decision: a small TOML registry owns stage order/state/focus; authored Markdown contracts own scope.
+Generated navigation never owns architecture or rewrites manual prose. GitHub Issues remains the live
+concern tracker. Compact context selects pointers/decision titles and optional issue summaries; offline
+checks require only Python stdlib/Git, never assets or network. Historical evidence stays baseline-bound.
+
+Rationale: changing a stage or recovering an interrupted session must not require reading/revising
+many unrelated documents. A database, framework or architecture metadata mirror is unnecessary.
+
+Consequences: stage insertion changes registry/one contract and generated views. Accepted closeout
+updates state, report/evidence navigation and issues; operational docs stay stable. Python 3.11+ is
+an explicit documentation/CI requirement. Source hints are refreshed after structural refactoring.
+
+Supersedes: AGENTS' mandatory full-document reading model and ROADMAP's duplicated future scope;
+no prior architectural invariant or historical decision rationale is superseded.
+Superseded by: none.
+References: [INDEX](INDEX.md), [registry](stages.toml), [DOCINFRA1 report](DOCINFRA1_REPORT.md).

@@ -51,8 +51,9 @@ within authorized stages. `docs/DEFECTS.md` owns tracking policy/history/index, 
 
 ## Documentation discipline
 
-Update architecture/decision documents when the implementation changes a durable contract. Do not
-rewrite documentation as a substitute for code.
+Use [INDEX](INDEX.md) to select the canonical owner. Update architecture/decisions when a durable
+contract changes. Reports preserve their baseline. Only docs-sync owns generated navigation; never
+rewrite manual prose through generation or update docs as a substitute for implementation.
 
 ## Research
 
@@ -77,21 +78,21 @@ ignored `target/render-tests/`; do not commit local proprietary-texture captures
 remain GPU/asset independent. Captures do not replace manual acceptance when a milestone requires
 interactive review; M3's required review is complete.
 
-## Current plan and future structural work
+## Planning and closeout ownership
 
-Read the current [ROADMAP](ROADMAP.md), not the original PRE_M5 sequence as an active plan.
-R2 is closed; F1 → A1 → C2 → BG1 → DX2 → RF1 → VS1 → READY1 precedes separate M5 activation.
-Each pass starts only its authorized stage. Distinguish implemented facts, accepted invariants and
-planned migration; retain historical reports as evidence of their measured workloads.
+[Registry](stages.toml) owns order/state/focus; [stage contracts](stages/INDEX.md) own detailed scope.
+Use `just codex-context [STAGE]` and the selected contract. Neither the historical PRE_M5 audit nor
+registry focus activates a stage. [INDEX](INDEX.md) defines current versus historical ownership.
 
-RF1 starts after foundational contracts settle and preserves behavior/performance unless fixing a
-separately tracked defect. Inventory dependencies, orchestration/change hotspots and transitional
-boundaries first; optimize change locality, not LOC. Its concise `docs/CODE_MAP.md` must explain
-where mechanisms/policy live, mutation/presentation/persistence/content/control paths and extension
-points, then be updated for VS1. No ECS/trait-object storage rewrite or format churn for aesthetics.
-READY1 re-audits the expanded architecture, including moving-space storage/lifetime evidence; repeating
-only the historical PRE_M5 checklist cannot pass. Docs-only edits need diff/link/consistency checks,
-not expensive compilation; bootstrap-check currently includes builds and is unsuitable for that scope.
+At accepted closeout, reconcile labelled issues, add a baseline-specific report using the
+[report template](templates/REPORT.md), update [EVIDENCE_INDEX](EVIDENCE_INDEX.md), and deliberately
+update registry state/focus. Closed stages remain in the sequence; advance focus only after acceptance
+and owner authorization. Run `just docs-sync` and `just docs-check`; stop before the next stage.
+No repository-wide status replacement is needed. New planning uses `just stage-new` plus one contract;
+architectural changes additionally update their canonical domain docs and decisions.
+
+Docs-only work uses docs tests/checks and diff review, not expensive Rust bootstrap. Tooling changes
+also validate affected command/CI paths. Normal `just ci` includes offline docs integrity.
 
 ## GitHub issue implementation and stage closure
 
@@ -104,8 +105,8 @@ post the final SHA/tests/acceptance/CI/invariant comment, then close completed. 
 closures need an explicit rationale/canonical link; use the correct reason, not completed. Migration
 does not resolve the underlying concern. See [TOOLING](TOOLING.md) for portable query/close examples.
 
-Before F1/A1/C2/BG1/DX2/RF1/VS1/READY1 closeout, query open issues for that stage. Account for each
+Before any stage closeout, query open issues using its registry issue label. Account for each
 closure, owner transfer with rationale or explicit bounded waiver. No unresolved owned P0/P1 may be
-silently carried past closure. ROADMAP still owns sequencing; do not ticket every future capability.
+silently carried past closure. The registry owns sequencing; do not ticket every future capability.
 Offline builds/tests remain independent of GitHub; unavailable tracking access means reconciliation
 and issue closure cannot be claimed complete.

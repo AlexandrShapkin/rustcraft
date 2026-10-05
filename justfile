@@ -1,5 +1,8 @@
 set shell := ["bash", "-euc"]
 
+# Override with --set python python on Windows installations without python3.
+python := "python3"
+
 # Show the available project commands.
 default:
     @just --list --unsorted
@@ -61,7 +64,7 @@ lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Normal local/CI quality gate.
-ci: fmt-check check test lint
+ci: docs-test docs-check fmt-check check test lint
 
 # Minimal repository bootstrap validation.
 bootstrap-check: doctor fmt-check check test refs-status
@@ -325,3 +328,27 @@ s1-bench columns="10000" cycles="100" output="target/s1":
     cargo run --release -p rustcraft-world --example s1 -- {{columns}} {{cycles}} {{quote(output)}}/current.json
     cargo run --release -p rustcraft-world --example s1_split -- {{columns}} {{cycles}} {{quote(output)}}/split.json
     cargo run --release -p rustcraft-world --example s1 -- --auxiliary {{quote(output)}}/auxiliary.json
+
+# Offline documentation integrity; no Rust build or GitHub access.
+docs-check:
+    {{python}} scripts/docs.py check
+
+# Lightweight documentation-tool regression tests.
+docs-test:
+    {{python}} -m unittest discover -s scripts/tests -p 'test_docs.py'
+
+# Update only generated navigation views.
+docs-sync:
+    {{python}} scripts/docs.py sync
+
+# Compact task context. Example: just codex-context F1 --offline
+codex-context *args:
+    {{python}} scripts/docs.py context {{args}}
+
+# Insert a planned stage after an existing stage; no commits or GitHub mutations.
+stage-new id title after:
+    {{python}} scripts/docs.py new-stage {{quote(id)}} {{quote(title)}} --after {{quote(after)}}
+
+# Current tracked paths, replacing a committed stale tree snapshot.
+project-tree:
+    git ls-files

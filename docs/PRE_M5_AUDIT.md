@@ -768,7 +768,9 @@ local grids, hierarchy, optional composite physics, lifecycle and persistence. N
 implementation stages is started by this documentation pass.
 
 [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) supplies the current source-to-plan gap table;
-[ROADMAP](ROADMAP.md) owns complete stage/acceptance contracts. S1/RSM1 conclusions remain valid
+[Stage contracts](stages/INDEX.md) now own complete implementation/acceptance scope; the
+[registry](stages.toml) owns mutable sequencing/state. This expansion records the owner decision at its
+audit baseline, not live stage status. S1/RSM1 conclusions remain valid
 for measured single-world workloads. VS1/READY1 must recheck S1 triggers and bounded ownership for
 spaces, transform-only updates, split/merge and reference changes, not claim these were already measured.
 READY1 must validate the expanded foundational checklist, not simply repeat this original audit.

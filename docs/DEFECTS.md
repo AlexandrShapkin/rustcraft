@@ -5,7 +5,7 @@ tracker** for confirmed defects, concrete architecture debt, bounded performance
 and actionable implementation feature gaps. Issue open/closed state and labels belong to GitHub.
 This file contains policy and a fixed migration index, not another manually maintained queue.
 If repository prose and an Issue disagree about current state, **GitHub Issues wins**.
-[ROADMAP](ROADMAP.md) remains authoritative for stage sequencing/contracts, not issue lifecycle.
+[Stage registry](stages.toml) owns sequencing/state; [contracts](stages/INDEX.md) own scope, not issue lifecycle.
 
 ## Classification and labels
 

@@ -32,6 +32,13 @@ check_cargo_subcommand() {
 
 echo '== Required / baseline =='
 check_cmd git git
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' >/dev/null 2>&1; then
+  printf '[ok]      %-18s %s\n' 'Python 3.11+' "$(python3 --version)"
+  ok=$((ok + 1))
+else
+  printf '[missing] %-18s %s\n' 'Python 3.11+' 'python3 with stdlib tomllib required for docs/CI'
+  missing=$((missing + 1))
+fi
 check_cmd rustc rustc
 check_cmd cargo cargo
 check_cmd rustfmt rustfmt

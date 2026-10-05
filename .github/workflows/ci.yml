@@ -13,6 +13,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Documentation tool tests
+        run: python -m unittest discover -s scripts/tests -p "test_docs.py"
+      - name: Documentation integrity (offline)
+        run: python scripts/docs.py check
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

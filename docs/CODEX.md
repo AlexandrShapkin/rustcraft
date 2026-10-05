@@ -1,40 +1,32 @@
 # Codex operating notes
 
-Codex should treat `AGENTS.md` as the compact always-on contract and use the detailed documents and
-repo-local skills for task-specific depth.
+## Progressive loading
 
-## Normal loop
+Read [AGENTS](../AGENTS.md), then run `just codex-context [STAGE]` (or append `--offline`). Read the
+selected contract and the small pointer set needed for the task. Open relevant decision sections by
+ID; do not scan all DECISIONS or load historical reports/performance files unless evidence requires it.
+[INDEX](INDEX.md) defines canonical owners and precedence. Context output is navigation, not a
+snapshot of implementation or permission to activate the focus stage.
 
-1. Read `AGENTS.md` and the documents relevant to the batch.
-2. Run `just doctor` once per environment and `just bootstrap-check` before substantial changes when
-   the workspace is expected to build.
-3. Implement a coherent batch rather than one micro-change at a time.
-4. Validate with `just` recipes.
-5. Search/update/create GitHub Issues for actionable findings; do not maintain a Markdown live queue.
-   Report P0/P1 immediately and fix within authorized scope, or obtain explicit disposition.
-6. Update durable docs for implemented contracts or explicit owner-approved plans, clearly distinguishing them.
+Use native git/rg/targeted reads for known locations; use structural navigation when discovering
+unfamiliar architecture and symbol-aware tools when they add value. Missing optional tools are not
+blockers. Use the relevant repository skills, including
+[stage-execution](../.agents/skills/stage-execution/SKILL.md) and
+[documentation-maintenance](../.agents/skills/documentation-maintenance/SKILL.md).
 
-For behavior/protocol/asset research, run `just refs-status` and use `reference/SOURCES.md` to choose
-sources. Do not scan every external repository by default. `just refs-lock` can snapshot the exact
-commits consulted for a durable research result.
+## Interrupted session recovery
 
-When available, Serena is preferred for symbol-aware repository navigation/refactors and Context7
-for current third-party API documentation. Ordinary shell/git/rg/jq tools remain first-class and
-are often faster for simple tasks.
+Start with `git status --short`, `git log -5 --oneline`, `just codex-context [STAGE]` and the relevant
+GitHub issue state. Establish actual HEAD/remote, inspect unknown changes and existing report/artifact
+pointers before repeating expensive work. Never reset, stash, clean or overwrite unknown dirty work
+just to reach a remembered baseline. Preserve user planning input. Record unfinished work/evidence in
+the authorized report or issue so the next session can recover without chat history.
 
-The user wants low-interaction autonomous progress. Do not stop to ask about routine private API
-names, helper placement or minor dependency choices. Ask only when a decision materially changes
-the product contract and cannot reasonably be inferred.
+## Bounded execution
 
-## Issue tracking contract
-
-Read [DEFECTS](DEFECTS.md) for policy and [WORKFLOW](WORKFLOW.md) for implementation closure.
-Search both open and closed GitHub Issues; revalidate current evidence and avoid duplicate/speculative
-tickets. Every new actionable concern needs type/severity/area, stage where assigned, evidence and
-acceptance. Do not duplicate current Open/Closed state in repository Markdown.
-
-Inspect the issue before implementation; reference it with `Refs #N`, avoiding automatic close keywords
-until required tests/acceptance and Ubuntu/Windows CI have passed. Post final SHA/evidence/resulting
-invariant, then close using completed, not_planned or duplicate appropriately. A stage closeout must
-reconcile its labelled open issues and cannot silently leave owned P0/P1 unresolved. ROADMAP is the
-stage contract, GitHub the actionable queue. No later stage starts just because its Issue exists.
+The selected stage contract bounds the work; owner instructions still determine authorization.
+Validate focused changes first and broaden only as required by [WORKFLOW](WORKFLOW.md). Update
+canonical docs only when contracts change, keeping implementation facts distinct from accepted targets.
+For issue search, evidence, non-auto-close references and acceptance/CI closure use
+[DEFECTS](DEFECTS.md) and [WORKFLOW](WORKFLOW.md); do not reproduce their lifecycle here.
+Stop after the authorized batch even if the next stage appears in context.

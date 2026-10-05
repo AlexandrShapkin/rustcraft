@@ -1,0 +1,114 @@
+# Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
+version = 1
+focus = "F1"
+sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
+
+[[stage]]
+id = "F1"
+title = "unified client path & real-hardware field validation"
+state = "planned"
+contract = "docs/stages/F1.md"
+issue_label = "stage:F1"
+relevant_docs = ["docs/DEBUGGING.md", "docs/CONFIGURATION.md", "docs/ARCHITECTURE.md"]
+decisions = ["D-048", "D-050", "D-052", "D-053"]
+source_areas = ["crates/client", "crates/control", "crates/runtime", "crates/scripting-rhai"]
+
+[[stage]]
+id = "A1"
+title = "external identity, policy boundary & trust preparation"
+state = "planned"
+contract = "docs/stages/A1.md"
+issue_label = "stage:A1"
+relevant_docs = ["docs/ARCHITECTURE_AUDIT.md", "docs/AGENTS_AND_BOTS.md", "docs/GAMEPLAY_CONTRACT.md", "docs/SECURITY.md"]
+decisions = ["D-024", "D-025", "D-028", "D-053"]
+source_areas = ["crates/agent-api", "crates/bot-api", "crates/mod-api", "crates/runtime", "crates/control"]
+
+[[stage]]
+id = "C2"
+title = "unified content definition & capability model"
+state = "planned"
+contract = "docs/stages/C2.md"
+issue_label = "stage:C2"
+relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/GAMEPLAY_CONTRACT.md", "docs/MODDING.md"]
+decisions = ["D-024", "D-028", "D-054"]
+source_areas = ["crates/game-api", "crates/mod-api", "crates/content", "crates/minecraft-b173", "crates/sandbox-test"]
+
+[[stage]]
+id = "BG1"
+title = "generalized block geometry & model system"
+state = "planned"
+contract = "docs/stages/BG1.md"
+issue_label = "stage:BG1"
+relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/ARCHITECTURE.md", "docs/RENDER_DIAGNOSTICS.md"]
+decisions = ["D-054", "D-055"]
+source_areas = ["crates/render", "crates/render-profile", "crates/game-api", "crates/engine-core", "crates/world", "crates/sandbox-test"]
+
+[[stage]]
+id = "DX2"
+title = "tooling equivalence, workflow convergence & retirement"
+state = "planned"
+contract = "docs/stages/DX2.md"
+issue_label = "stage:DX2"
+relevant_docs = ["docs/TOOLING.md", "docs/SCRIPTING.md", "docs/GAMEPLAY_CONTRACT.md"]
+decisions = ["D-007", "D-044", "D-053"]
+source_areas = ["justfile", "crates/client", "crates/server", "crates/control", "crates/sandbox-test", "scripts"]
+
+[[stage]]
+id = "RF1"
+title = "structural codebase refactor & code-graph optimization"
+state = "planned"
+contract = "docs/stages/RF1.md"
+issue_label = "stage:RF1"
+relevant_docs = ["docs/ARCHITECTURE_AUDIT.md", "docs/ARCHITECTURE.md", "docs/TOOLING.md"]
+decisions = ["D-024", "D-056"]
+source_areas = ["crates", "justfile"]
+
+[[stage]]
+id = "VS1"
+title = "voxel spaces, kinematics & optional composite physics"
+state = "planned"
+contract = "docs/stages/VS1.md"
+issue_label = "stage:VS1"
+relevant_docs = ["docs/VOXEL_SPACES.md", "docs/ARCHITECTURE.md", "docs/NETWORKING.md", "docs/S1_PERSISTENCE_DECISION.md"]
+decisions = ["D-052", "D-055", "D-057", "D-058", "D-059"]
+source_areas = ["crates/world", "crates/engine-core", "crates/game-api", "crates/runtime", "crates/render", "crates/agent-api", "crates/bot-api"]
+
+[[stage]]
+id = "READY1"
+title = "final pre-M5 readiness gate"
+state = "planned"
+contract = "docs/stages/READY1.md"
+issue_label = "stage:READY1"
+relevant_docs = ["docs/ARCHITECTURE_AUDIT.md", "docs/VOXEL_SPACES.md", "docs/SECURITY.md", "docs/RELEASE.md"]
+decisions = ["D-051", "D-052", "D-053", "D-054", "D-055", "D-056", "D-057", "D-058", "D-059"]
+source_areas = ["crates", "scripts", "justfile", ".github/workflows"]
+
+[[stage]]
+id = "M5"
+title = "multiplayer + server content resolution"
+state = "inactive"
+contract = "docs/stages/M5.md"
+issue_label = "stage:M5"
+relevant_docs = ["docs/NETWORKING.md", "docs/CONTENT_SYSTEM.md", "docs/SECURITY.md", "docs/AGENTS_AND_BOTS.md"]
+decisions = ["D-005", "D-028", "D-053", "D-057", "D-059"]
+source_areas = ["crates/server", "crates/client", "crates/control", "crates/content", "crates/agent-api", "crates/bot-api"]
+
+[[stage]]
+id = "M6"
+title = "third-party modding"
+state = "inactive"
+contract = "docs/stages/M6.md"
+issue_label = "stage:M6"
+relevant_docs = ["docs/MODDING.md", "docs/CONTENT_SYSTEM.md", "docs/SECURITY.md"]
+decisions = ["D-006", "D-054", "D-055", "D-057"]
+source_areas = ["crates/game-api", "crates/mod-api", "crates/content", "crates/server"]
+
+[[stage]]
+id = "M7"
+title = "evidence-driven optimization campaign"
+state = "inactive"
+contract = "docs/stages/M7.md"
+issue_label = "stage:M7"
+relevant_docs = ["docs/PERFORMANCE.md", "docs/ARCHITECTURE.md"]
+decisions = ["D-008", "D-018", "D-029", "D-030", "D-049", "D-050", "D-051"]
+source_areas = ["crates/render", "crates/runtime", "crates/world", "crates/client"]

@@ -52,16 +52,13 @@ git clone https://github.com/AlexandrShapkin/rustcraft.git
 
 ## Main entry points
 
-- `AGENTS.md` — compact repository instructions for Codex;
-- `docs/PRODUCT.md` — product definition/non-goals;
-- `docs/ARCHITECTURE.md` — engine/gameplay/platform boundaries;
-- `docs/AGENTS_AND_BOTS.md` — native Agent/Controller/Bot API direction;
-- `docs/CONTENT_SYSTEM.md` — server-defined content and automatic resolution;
-- `docs/PERFORMANCE.md` — evidence-driven optimization rules;
-- `docs/ROADMAP.md` — implementation sequence;
-- `reference/SOURCES.md` — how to use the Beta/reference ecosystem;
-- `.agents/skills/` — task-specific Codex workflows;
-- `justfile` — stable project command surface.
+- [Documentation index](docs/INDEX.md) — ownership, precedence and task-oriented navigation;
+- [Roadmap overview](docs/ROADMAP.md) and [stage index](docs/stages/INDEX.md) — plan and contracts;
+- [AGENTS](AGENTS.md) — compact agent bootstrap;
+- [Tooling](docs/TOOLING.md) — commands and optional tools.
+
+Start agent navigation with `just codex-context [STAGE]`; use `--offline` to skip GitHub.
+`just docs-check` validates documentation integrity without a Rust build or network access.
 
 ## Reference sources
 
