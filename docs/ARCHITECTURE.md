@@ -492,7 +492,7 @@ ordering are implemented. Current sequence/state is in the [registry](stages.tom
 implementation gates are in [stage contracts](stages/INDEX.md); source gaps are in [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md).
 The original [PRE_M5_AUDIT](PRE_M5_AUDIT.md) remains historical evidence with a post-audit expansion.
 
-### Target F1: one client path, distinct authority and gameplay
+### F1: one client path, distinct authority and gameplay
 
 One normal graphical executable/runtime path is `rustcraft-client`. Process responsibility
 (graphical client vs headless host), session authority (who owns simulation), game-owned player
@@ -504,13 +504,18 @@ examples do not silently replace today's Control keys.
 
 Survival/creative/spectator are game-owned player state (conceptually
 `minecraft-b173:gamemode/survival`, `/creative`, `/spectator`), not executable types or developer
-privileges. Current Development/Survival implementation and CLI aliases remain transition facts.
+privileges. Current Development/Survival implementation is game/session state selected at startup; CLI aliases
+remain compatibility surfaces until DX2.
 Trusted local Rhai still requires explicit authorization and bounded roots/quotas. Same executable
 never implies same authority or untrusted script autoexec.
 
-Target input: input → semantic diagnostic action → capability check → effect. The normal path must
-route F3/F4 consistently; `--devtools` must not select a different correct input implementation.
-Current devtools-gated chord routing and F1 field contract are in [DEBUGGING](DEBUGGING.md).
+Current F1 implementation routes input → semantic diagnostic action → capability check → effect.
+A composition-local session records the local principal, grant role and existing Control capabilities.
+Normal startup grants diagnostic inspection/selection; `--player` reduces grants and `--devtools`
+explicitly adds trusted operations, without selecting another event/runtime path. Mechanisms inspect
+capabilities, not role names. There is no remote authentication/grant protocol in this local structure.
+Field acceptance is still pending; routing and the bounded hardware workflow are in
+[DEBUGGING](DEBUGGING.md).
 Specialist acceptance drivers are test harnesses over the product composition, not client variants.
 DX2 retires them only after equivalent Control/semantic/scenario coverage is proven.
 

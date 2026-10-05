@@ -227,3 +227,67 @@ fn s1_transfer_marker_normalization_matches_encoded_fields() {
     let after = encode_chunk_file(&c).unwrap().1.raw_payload_bytes;
     assert_eq!(after - before, 16 + 8 + 4 + 4);
 }
+
+#[test]
+fn f1_checkpoint_failed_publication_preserves_reopen_and_worker_ack_order() {
+    let (root, store) = fixture();
+    let record = |revision| PlayerRecord {
+        player_id: "f1-player".into(),
+        revision,
+        components: vec![PlayerComponent {
+            id: "test:player".into(),
+            schema_version: 1,
+            payload: vec![revision as u8],
+        }],
+        recovered_from_checkpoint: false,
+    };
+    store.store_player(&record(1)).unwrap();
+    let existing = [
+        store.player_slot_path("f1-player", 0),
+        store.player_slot_path("f1-player", 1),
+    ];
+    let target = existing.iter().find(|p| !p.exists()).unwrap();
+    // Fail replacement after the callback and the library's pre-publication file sync.
+    fs::create_dir(target).unwrap();
+    let scheduler = PlayerSaveScheduler::new();
+    scheduler.submit(store.clone(), record(2)).unwrap();
+    let wait = || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(c) = scheduler.take_completed().pop() {
+                return c;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "checkpoint worker timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    };
+    let failed = wait();
+    assert!(failed.result.is_err());
+    assert_eq!(failed.revision, 2);
+    assert!(failed.worker_completed >= failed.worker_started);
+    assert_eq!(scheduler.metrics().successes, 0);
+    fs::remove_dir(target).unwrap();
+    let reopened = WorldStorage::open(&root, "fault").unwrap();
+    assert_eq!(
+        reopened.load_player("f1-player").unwrap().unwrap().revision,
+        1
+    );
+    scheduler.submit(reopened.clone(), record(2)).unwrap();
+    let complete = wait();
+    assert!(complete.result.is_ok());
+    assert!(complete.worker_completed >= complete.worker_started);
+    assert_eq!(
+        reopened.load_player("f1-player").unwrap().unwrap().revision,
+        2
+    );
+    // A torn newest slot still recovers the previous acknowledged checkpoint.
+    fs::write(target, b"incomplete").unwrap();
+    let recovered = reopened.load_player("f1-player").unwrap().unwrap();
+    assert_eq!(recovered.revision, 1);
+    assert!(recovered.recovered_from_checkpoint);
+    drop(scheduler);
+    fs::remove_dir_all(root).unwrap();
+}

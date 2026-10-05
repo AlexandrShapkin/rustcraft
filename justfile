@@ -73,13 +73,17 @@ bootstrap-check: doctor fmt-check check test refs-status
 smoke:
     cargo run -p rustcraft-server -- --smoke
 
-# Launch the local graphical client.
-client:
-    cargo run -p rustcraft-client
+# Canonical normal client; optional local grants/game state are arguments to one runtime.
+client *args:
+    cargo run -p rustcraft-client -- {{args}}
+
+# Same normal client in the release profile (for measured play comparisons).
+client-release *args:
+    cargo run --release -p rustcraft-client -- {{args}}
 
 # Start the authoritative survival profile with an empty inventory.
 client-survival:
-    cargo run -p rustcraft-client -- --survival
+    just client --survival
 
 # Start a renderer benchmark profile; FIFO/vsync may still be selected by the platform.
 client-bench:
@@ -244,7 +248,7 @@ minecraft-resource-report:
 
 # Explicit trusted developer tools; ordinary startup does not execute scripts.
 dev-client:
-    cargo run -p rustcraft-client -- --devtools
+    just client --devtools
 
 script-check path="scripts":
     cargo run -p rustcraft-server -- --script-check "{{path}}"
@@ -352,3 +356,17 @@ stage-new id title after:
 # Current tracked paths, replacing a committed stale tree snapshot.
 project-tree:
     git ls-files
+
+# F1 bounded AMD/RADV/Vulkan measurement; dev/release sequential, disposable saves/config.
+f1-client profile="both":
+    python3 scripts/f1_client.py {{quote(profile)}}
+
+# Production WindowEvent payload routing regression; deterministic, no GPU/display/assets.
+f1-input-window-test:
+    CARGO_BUILD_JOBS=2 cargo test -p rustcraft-client window_route_tests
+
+# Focused input, local grants, timing and durability tests, sequential Cargo commands.
+f1-test:
+    CARGO_BUILD_JOBS=2 cargo test -p rustcraft-client
+    CARGO_BUILD_JOBS=2 cargo test -p rustcraft-scripting-rhai
+    CARGO_BUILD_JOBS=2 cargo test -p rustcraft-world

@@ -46,11 +46,11 @@ impl ClientApp {
         }
         self.dx_text.clear();
     }
-    pub(super) fn dev_key(&mut self, event: &winit::event::KeyEvent) -> bool {
+    pub(super) fn dev_key(&mut self, event: &developer_input::ClientKeyEvent<'_>) -> bool {
         let PhysicalKey::Code(code) = event.physical_key else {
             return false;
         };
-        if (code != KeyCode::Slash || event.text.as_deref() == Some("/"))
+        if (code != KeyCode::Slash || event.text == Some("/"))
             && self.developer_shortcut(code, event.state, event.repeat)
         {
             return true;
@@ -91,14 +91,13 @@ impl ClientApp {
                     use rustcraft_control::Host;
                     ClientHost { app: self }.prepare_diagnostics(&[Domain::Entities]);
                 }
+                let context = self.session.context.clone();
                 if let Err(error) = rustcraft_control::execute(
                     &mut ClientHost { app: self },
-                    &rustcraft_control::Context::developer(
-                        rustcraft_control::Source::DeveloperConsole,
-                    ),
+                    &context,
                     &rustcraft_control::Action::DebugUi(input),
                 ) {
-                    self.devtools.as_mut().unwrap().print(&error);
+                    self.input_denied(&error);
                 }
                 self.dev_focus_transition();
             }

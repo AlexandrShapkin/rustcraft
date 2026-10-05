@@ -11,6 +11,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,6 +20,8 @@ jobs:
           python-version: '3.11'
       - name: Documentation tool tests
         run: python -m unittest discover -s scripts/tests -p "test_docs.py"
+      - name: F1 field wrapper tests
+        run: python -m unittest discover -s scripts/tests -p "test_f1_client.py"
       - name: Documentation integrity (offline)
         run: python scripts/docs.py check
       - uses: dtolnay/rust-toolchain@stable

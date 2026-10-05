@@ -632,13 +632,27 @@ pub struct DevTools {
 }
 impl DevTools {
     pub fn new(root: &Path, registry: rustcraft_control::Registry) -> ControlResult<Self> {
-        let root = ScriptRoot::new(root)?;
+        Self::with_context(
+            root,
+            registry,
+            Context::developer(rustcraft_control::Source::DeveloperConsole),
+        )
+    }
+    pub fn with_context(
+        root: &Path,
+        registry: rustcraft_control::Registry,
+        context: Context,
+    ) -> ControlResult<Self> {
+        // Native diagnostic/command UI must not require an installed script tree.
+        // A context without script.load cannot resolve/execute scripts from this fallback root.
+        let root = if context.require("script.load").is_err() && !root.exists() {
+            ScriptRoot::new(Path::new("."))?
+        } else {
+            ScriptRoot::new(root)?
+        };
         let worker = worker::Worker::new(root.clone());
         let mut tools = Self {
-            runtime: RhaiRuntime::new(
-                Context::developer(rustcraft_control::Source::DeveloperConsole),
-                Limits::default(),
-            ),
+            runtime: RhaiRuntime::new(context, Limits::default()),
             repl: RhaiSession::new("console"),
             registry,
             root,
@@ -937,6 +951,10 @@ impl DevTools {
         host: &mut impl rustcraft_control::Host,
         _state_leased: bool,
     ) -> ControlResult<()> {
+        let line = line.trim_start();
+        if !line.starts_with('/') {
+            self.runtime.context().require("script.load")?;
+        }
         let mut demand = rustcraft_control::diagnostics::query_domains(line);
         if line.contains("fn ") {
             self.repl_domains.extend(demand.iter().copied());
@@ -1034,11 +1052,9 @@ impl DevTools {
         path: &str,
         host: &mut impl rustcraft_control::Host,
     ) -> ControlResult<()> {
-        self.start_with_context(
-            path,
-            Context::developer(rustcraft_control::Source::Scenario),
-            host,
-        )
+        let mut context = self.runtime.context().clone();
+        context.source = rustcraft_control::Source::Scenario;
+        self.start_with_context(path, context, host)
     }
     pub fn start_with_context(
         &mut self,
@@ -2140,6 +2156,50 @@ mod tooling_tests {
         assert!(!tools.loaded.contains_key(&path.join("candidate.rhai")));
         std::fs::remove_dir_all(path).unwrap();
     }
+    #[test]
+    fn ordinary_console_denies_rhai_but_keeps_native_commands() {
+        let path = std::env::temp_dir().join(format!("f1-console-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        let context = Context::read_only(rustcraft_control::Source::DeveloperConsole);
+        let mut tools =
+            DevTools::with_context(&path, rustcraft_control::engine_registry(), context).unwrap();
+        tools.evaluate(" /help", &mut TestHost, false).unwrap();
+        assert!(
+            tools
+                .start("missing.rhai", &mut TestHost)
+                .unwrap_err()
+                .contains("capability denied")
+        );
+        DevTools::with_context(
+            &path.join("absent"),
+            rustcraft_control::engine_registry(),
+            Context::read_only(rustcraft_control::Source::DeveloperConsole),
+        )
+        .unwrap();
+        for line in ["1 + 1", "  1 + 1", "  // comment\n1 + 1"] {
+            assert!(tools.evaluate(line, &mut TestHost, false).is_err());
+        }
+        assert!(
+            tools
+                .evaluate("/script missing.rhai", &mut TestHost, false)
+                .is_err()
+        );
+        assert!(
+            tools
+                .evaluate(
+                    "/config set rustcraft:ui/font_scale 1.5",
+                    &mut TestHost,
+                    false
+                )
+                .is_err()
+        );
+        let mut trusted = DevTools::new(&path, rustcraft_control::engine_registry()).unwrap();
+        trusted.evaluate("1 + 1", &mut TestHost, false).unwrap();
+        drop(tools);
+        drop(trusted);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn console_editor_commands_repl_and_recovery() {
         let path = std::env::temp_dir().join(format!("dx1-editor-{}", std::process::id()));

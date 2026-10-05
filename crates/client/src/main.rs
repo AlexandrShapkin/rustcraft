@@ -1,6 +1,7 @@
 mod configuration;
 mod developer_input;
 mod devtools;
+mod f1;
 mod lifetime;
 mod p1;
 #[cfg(test)]
@@ -10,6 +11,7 @@ mod render_tests;
 #[cfg(test)]
 mod resource_tests;
 mod rsm1;
+mod session;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
 use rustcraft_engine_core::{BlockId, Vec3};
 mod bench;
@@ -346,6 +348,9 @@ impl Controller for LocalHumanController {
 }
 
 struct ClientApp {
+    f1_campaign: Option<f1::Campaign>,
+    f1_trace: f1::Trace,
+    f1_failure: Option<String>,
     p1_campaign: Option<p1::Campaign>,
     p1_failure: Option<String>,
     view_state: presentation::ViewState,
@@ -353,6 +358,7 @@ struct ClientApp {
     rsm1_campaign: Option<rsm1::Campaign>,
     rsm1_failure: Option<String>,
     f3_chord: developer_input::F3Chord,
+    session: session::LocalSession,
     font_scale: f32,
     console_service_focus: bool,
     pending_console_input: Option<rustcraft_scripting_rhai::ConsoleInput>,
@@ -1544,6 +1550,9 @@ impl ClientApp {
         };
         control_state.sync_config();
         Self {
+            f1_campaign: None,
+            f1_trace: Default::default(),
+            f1_failure: None,
             p1_campaign: None,
             p1_failure: None,
             view_state: presentation::ViewState::default(),
@@ -1551,6 +1560,7 @@ impl ClientApp {
             rsm1_campaign: None,
             rsm1_failure: None,
             f3_chord: Default::default(),
+            session: session::LocalSession::normal(),
             pending_console_input: None,
             console_service_focus: false,
             font_scale: control_state.config.effective(keys::FONT_SCALE).float() as f32,
@@ -2216,7 +2226,20 @@ impl ClientApp {
     }
 
     fn service_player_autosave(&mut self) {
+        let started = Instant::now();
+        self.service_player_autosave_inner();
+        self.f1_trace
+            .main_service("service_player_autosave", started, Instant::now());
+    }
+    fn service_player_autosave_inner(&mut self) {
         for completion in self.player_save_scheduler.take_completed() {
+            self.f1_trace.worker(
+                "player",
+                completion.worker_started,
+                completion.worker_completed,
+                completion.io.sync_ms,
+                completion.result.is_ok(),
+            );
             if completion.result.is_ok() {
                 let completed_revisions = self
                     .player_checkpoint_receipts
@@ -2282,7 +2305,20 @@ impl ClientApp {
     }
 
     fn service_world_state_autosave(&mut self) {
+        let started = Instant::now();
+        self.service_world_state_autosave_inner();
+        self.f1_trace
+            .main_service("service_world_state_autosave", started, Instant::now());
+    }
+    fn service_world_state_autosave_inner(&mut self) {
         for completion in self.world_state_save_scheduler.take_completed() {
+            self.f1_trace.worker(
+                "world_state",
+                completion.worker_started,
+                completion.worker_completed,
+                completion.io.sync_ms,
+                completion.result.is_ok(),
+            );
             if completion.result.is_ok() {
                 self.world_state_persisted_revision =
                     self.world_state_persisted_revision.max(completion.revision);
@@ -2372,15 +2408,6 @@ impl ClientApp {
             self.latest_player_record = Some(record);
         }
         Ok(())
-    }
-    fn debug_key(&mut self, code: KeyCode, state: ElementState, repeat: bool) -> bool {
-        if code != KeyCode::F3 {
-            return false;
-        }
-        if state == ElementState::Pressed && !repeat {
-            self.debug = !self.debug;
-        }
-        true
     }
     fn stream_budget_available(&self) -> bool {
         let deadline = self.stream_stage_deadline.or_else(|| {
@@ -3829,10 +3856,23 @@ impl ClientApp {
     }
 
     fn service_world_saves(&mut self, dirty: Vec<rustcraft_engine_core::ChunkPos>) {
+        let started = Instant::now();
+        self.service_world_saves_inner(dirty);
+        self.f1_trace
+            .main_service("service_world_saves", started, Instant::now());
+    }
+    fn service_world_saves_inner(&mut self, dirty: Vec<rustcraft_engine_core::ChunkPos>) {
         for position in dirty {
             self.persistence_dirty.mark_dirty(position);
         }
         for completion in self.save_scheduler.take_completed() {
+            self.f1_trace.worker(
+                "column",
+                completion.worker_started,
+                completion.worker_completed,
+                completion.result.as_ref().map_or(0., |m| m.durability_ms),
+                completion.result.is_ok(),
+            );
             let success = completion.result.is_ok();
             if let Err(error) = completion.result {
                 eprintln!(
@@ -4959,6 +4999,8 @@ impl ClientApp {
             Err(_) => {}
         }
         self.presentation_timing.gpu_frame(renderer.frame_timing);
+        self.f1_trace
+            .frame(Instant::now(), renderer.frame_timing.total_ms);
         self.frame_phases.render_present_ms =
             render_present_started.elapsed().as_secs_f64() * 1000.0;
         self.frame_phase_samples
@@ -5309,6 +5351,9 @@ impl ApplicationHandler for ClientApp {
         let Some(window) = self.window.clone() else {
             return;
         };
+        if self.route_window_input(&event) == Some(developer_input::InputEffect::Exit) {
+            event_loop.exit();
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -5333,29 +5378,6 @@ impl ApplicationHandler for ClientApp {
                     self.controller.wheel(delta);
                 }
             }
-            WindowEvent::Focused(false) => {
-                self.rebase_presentation();
-                self.f3_chord.clear();
-                window.set_ime_allowed(false);
-                if let Some(tools) = self.devtools.as_mut() {
-                    tools.input(rustcraft_scripting_rhai::ConsoleInput::Preedit(
-                        String::new(),
-                    ));
-                }
-                self.controller.break_held = false;
-                self.controller.place_pressed = false;
-                if self.controller.captured {
-                    self.controller.release(&window);
-                } else {
-                    self.controller.look = Vec3::ZERO;
-                }
-            }
-            WindowEvent::Focused(true) => {
-                self.last_frame = Instant::now();
-                self.clock = Default::default();
-                self.rebase_presentation();
-                window.set_ime_allowed(self.devtools.as_ref().is_some_and(|d| d.console_open))
-            }
             WindowEvent::Ime(ime) if self.dev_focus() => {
                 if let Some(tools) = self.devtools.as_mut().filter(|d| d.console_open) {
                     use rustcraft_scripting_rhai::ConsoleInput;
@@ -5367,43 +5389,6 @@ impl ApplicationHandler for ClientApp {
                         _ => {}
                     }
                     self.dx_text.clear();
-                }
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if self.devtools.is_some() && self.dev_key(&event) {
-                    return;
-                }
-
-                if let PhysicalKey::Code(code) = event.physical_key {
-                    if self.debug_key(code, event.state, event.repeat) {
-                        // Client-only shortcut consumed before semantic gameplay input.
-                    } else if code == KeyCode::KeyE
-                        && event.state == ElementState::Pressed
-                        && !event.repeat
-                    {
-                        self.inventory_open = !self.inventory_open;
-                        if self.inventory_open {
-                            self.controller.release(&window);
-                        } else {
-                            self.controller.capture(&window);
-                        }
-                    } else if code == KeyCode::Escape && event.state == ElementState::Pressed {
-                        if self.controller.captured {
-                            self.controller.release(&window);
-                        } else {
-                            event_loop.exit();
-                        }
-                    } else if code == KeyCode::KeyC
-                        && event.state == ElementState::Pressed
-                        && !event.repeat
-                        && self.inventory_open
-                    {
-                        if let Some(sim) = self.simulation.as_mut() {
-                            let _ = sim.craft_first_available("log_to_planks");
-                        }
-                    } else {
-                        self.controller.key(code, event.state);
-                    }
                 }
             }
             WindowEvent::MouseInput { state, button, .. }
@@ -5504,6 +5489,7 @@ impl ApplicationHandler for ClientApp {
         self.service_devtools_measured(_event_loop);
         self.service_rsm1_campaign();
         self.service_p1_campaign();
+        self.service_f1_campaign();
         if self.dx_exit_pending
             && self.dx_capture.is_none()
             && !self.renderer.as_ref().is_some_and(|r| r.capture_pending())
@@ -5539,6 +5525,8 @@ impl ApplicationHandler for ClientApp {
 
         let ticks = self.control_state.fixed.take_ticks(budget.steps);
         self.responsiveness.executed_ticks += u64::from(ticks);
+        self.f1_trace
+            .fixed_budget(now, budget.due_steps, ticks, budget.dropped_seconds);
         self.metrics.steps = ticks;
         for _ in 0..ticks {
             self.fixed_step();
@@ -6180,6 +6168,13 @@ fn run_world_travel_test() {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--f1-probe") {
+        if let Err(error) = f1::probe() {
+            eprintln!("F1 graphics unavailable: {error}");
+            std::process::exit(2);
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--config-report") {
         let mut config = rustcraft_control::config::settings::engine(true);
         rustcraft_control::config::settings::load(
@@ -6239,7 +6234,7 @@ fn main() {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance"
-            | "--ux1-acceptance" | "--rsm1-acceptance" | "--p1-acceptance" => {}
+            | "--ux1-acceptance" | "--rsm1-acceptance" | "--p1-acceptance" | "--f1-acceptance" => {}
             "--set-config" | "--config-file" => {
                 args.next().expect("configuration option requires value");
             }
@@ -6252,7 +6247,7 @@ fn main() {
                     std::process::exit(2);
                 }
             }
-            "--survival" => {}
+            "--survival" | "--player" => {}
             "--stream-perf" => {}
             "--world-travel-test" => {}
             "--fidelity-m3" => {}
@@ -6297,30 +6292,33 @@ fn main() {
     }
     let event_loop = EventLoop::new().expect("create event loop");
     let mut app = ClientApp::new(diagnostic, capture);
-    if std::env::args().any(|a| a == "--devtools" || a == "--scenario" || a == "--dx-overhead") {
-        let mut registry = rustcraft_control::engine_registry();
-        rustcraft_minecraft_b173::control::register_commands(&mut registry).expect("game commands");
-        app.devtools = Some(
-            rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), registry)
-                .unwrap_or_else(|e| {
-                    eprintln!("{e}");
-                    std::process::exit(2)
-                }),
-        );
-        let args = std::env::args().collect::<Vec<_>>();
-        if args.iter().any(|a| a == "--dx-overhead") {
-            app.dx_probe = Some(Default::default());
-        }
-        app.dx_abort_frame = args
-            .iter()
-            .position(|a| a == "--dx-abort-after-frames")
-            .and_then(|i| args.get(i + 1))
-            .and_then(|n| n.parse().ok());
-        app.scenario_path = args
-            .iter()
-            .position(|a| a == "--scenario")
-            .and_then(|i| args.get(i + 1).cloned());
+    let args = std::env::args().collect::<Vec<_>>();
+    app.session = session::LocalSession::from_args(&args);
+    let mut registry = rustcraft_control::engine_registry();
+    rustcraft_minecraft_b173::control::register_commands(&mut registry).expect("game commands");
+    app.devtools = Some(
+        rustcraft_scripting_rhai::DevTools::with_context(
+            std::path::Path::new("scripts"),
+            registry,
+            app.session.context.clone(),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2)
+        }),
+    );
+    if args.iter().any(|a| a == "--dx-overhead") {
+        app.dx_probe = Some(Default::default());
     }
+    app.dx_abort_frame = args
+        .iter()
+        .position(|a| a == "--dx-abort-after-frames")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse().ok());
+    app.scenario_path = args
+        .iter()
+        .position(|a| a == "--scenario")
+        .and_then(|i| args.get(i + 1).cloned());
     if std::env::args().any(|a| {
         a == "--dux-acceptance"
             || a == "--c1-acceptance"
@@ -6329,15 +6327,6 @@ fn main() {
             || a == "--p1-acceptance"
     }) {
         app.dux_fixture = true;
-        app.devtools = Some(
-            rustcraft_scripting_rhai::DevTools::new(std::path::Path::new("scripts"), {
-                let mut r = rustcraft_control::engine_registry();
-                rustcraft_minecraft_b173::control::register_commands(&mut r)
-                    .expect("package commands");
-                r
-            })
-            .expect("devtools"),
-        );
         app.scenario_path = Some(
             if std::env::args().any(|a| a == "--ux1-acceptance") {
                 "scripts/scenarios/ux1.rhai"
@@ -6369,7 +6358,11 @@ fn main() {
     } else {
         world_name
     };
-    app.presentation_timing.enabled = app.devtools.is_some();
+    if args.iter().any(|a| a == "--f1-acceptance") {
+        app.f1_campaign = Some(f1::Campaign::new());
+        app.f1_trace.enabled = true;
+    }
+    app.presentation_timing.enabled = app.session.context.require("debug.configure").is_ok();
     app.survival_start = std::env::args().any(|a| a == "--survival");
     app.stream_perf = std::env::args().any(|a| a == "--stream-perf");
     if app.stream_perf {
@@ -6379,6 +6372,15 @@ fn main() {
     app.camera_motion = std::env::args().any(|a| a == "--camera-motion");
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("client event loop failed: {error}");
+        std::process::exit(1);
+    }
+    if app.f1_failure.is_some() || app.f1_campaign.is_some() {
+        let error = app
+            .f1_failure
+            .clone()
+            .unwrap_or_else(|| "F1 incomplete (startup, adapter, or workload failure)".into());
+        let _ = f1::write_failure(&error);
+        eprintln!("{error}");
         std::process::exit(1);
     }
     if app.p1_failure.is_some() || app.p1_campaign.is_some() {
@@ -7373,15 +7375,16 @@ mod m2_input_tests {
         assert_eq!(c.next_intent().scroll_hotbar, 0);
     }
     #[test]
-    fn f3_is_client_state_and_ignores_repeat_and_release() {
+    fn f3_is_client_state_and_toggles_on_bare_release() {
         let mut app = ClientApp::new(None, None);
         app.debug = false;
-        assert!(app.debug_key(KeyCode::F3, ElementState::Pressed, false));
+        assert!(app.developer_shortcut(KeyCode::F3, ElementState::Pressed, false));
+        assert!(!app.debug);
+        app.developer_shortcut(KeyCode::F3, ElementState::Pressed, true);
+        app.developer_shortcut(KeyCode::F3, ElementState::Released, false);
         assert!(app.debug);
-        app.debug_key(KeyCode::F3, ElementState::Pressed, true);
-        app.debug_key(KeyCode::F3, ElementState::Released, false);
-        assert!(app.debug);
-        app.debug_key(KeyCode::F3, ElementState::Pressed, false);
+        app.developer_shortcut(KeyCode::F3, ElementState::Pressed, false);
+        app.developer_shortcut(KeyCode::F3, ElementState::Released, false);
         assert!(!app.debug);
         assert_eq!(app.controller.next_intent(), AgentIntent::default());
     }

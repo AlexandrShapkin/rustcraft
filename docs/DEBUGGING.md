@@ -1,11 +1,14 @@
 # Developer diagnostics
 
-Current: the developer selector, console and shared diagnostic providers require explicit
-`--devtools` (or a developer scenario/harness). Normal startup still has legacy F3 Overview,
-but lacks the developer selector/console path. With devtools, **F4 opens the
-in-game selector**. Arrow keys select, Tab switches pages/overlays, Enter activates/toggles, H shows
-provider/shortcut help, C selects the crosshair/player section, E selects the next bounded active
-EntityId, and Escape/F4 closes. Backquote opens the existing console; F10 aborts scenarios.
+Current F1 implementation: normal startup and explicit trusted `--devtools` use the same
+WindowEvent router and diagnostic presentation. `just client` grants local diagnostic inspection
+and selection (`debug.inspect`, `debug.configure` and read capabilities), without mutation or Rhai
+permission. `--player` demonstrates an ungranted diagnostic selector through the same route;
+unavailable actions report capability denial. `--devtools` grants trusted local Control/Rhai
+operations; it changes grants, not keyboard routing or gameplay mode. **F4 opens the in-game
+selector**. Arrow keys select, Tab switches pages/overlays, Enter activates/toggles, H shows help,
+C selects the crosshair/player section, E selects the next bounded active EntityId, and Escape/F4
+closes. Backquote requires `script.load`; Slash opens native command entry. F10 aborts scenarios.
 F3 Overview preserves the existing cached FPS/timing/stream summaries; `debug().legacy_overview_text`
 reads that same cached observation. The legacy collector is suppressed when another page, selector
 or console hides it. The selector and console are mutually exclusive. UI focus clears held human input/releases the
@@ -87,7 +90,7 @@ F4 -> Runtime settings uses the shared configuration plane. Left/Right selects a
 
 ## UX1 controls and text
 
-With explicit devtools, hold F3 then press 1 Streaming, 2 World, 3 Entities, 4 Lighting,
+Hold F3 then press 1 Streaming, 2 World, 3 Entities, 4 Lighting,
 5 Meshing, 6 Renderer, 7 Persistence, 8 Scripts, 9 Settings. Digits are consumed and never select
 hotbar slots. Bare F3 toggles Overview on release. Repeat/focus loss cannot leave a chord active.
 F4 remains the complete selector; shortcuts are metadata conveniences, not view identities.
@@ -123,7 +126,7 @@ F4 -> Presentation, `/debug page presentation`, or Rhai `presentation()` reads t
 submit/present-call distributions, acquisition wait, alpha/state age, authoritative and shown
 transforms, duplicate counts and application mouse-to-camera extraction latency. Physical scanout
 and VRR are explicitly unavailable. Medium-cost summaries sample at C1 diagnostic cadence; inactive
-views do not call the provider. Devtools opt-in retains bounded scalar recent timing, not resources.
+views do not call the provider. Local diagnostic admission retains bounded scalar recent timing, not resources.
 The viewport rounds timing values; JSON tuples identify columns in `statistics_columns`.
 Stationary/paused duplicate transforms are normal. See [P1_REPORT.md](P1_REPORT.md).
 
@@ -135,25 +138,33 @@ exclude checkpoint/failed-write bytes; they are not SSD/NAND write or isolated f
 Use `just scenario-client scripts/scenarios/s1_diagnostics.rhai` for a disposable graphical smoke.
 Use isolated save/config paths as for other acceptance runs. Full storage evaluation is headless.
 
-## Target F1 routing and real-human field validation
+## F1 routing and field acceptance (pending hardware)
 
-Current source evidence: `ClientApp::window_event` calls `dev_key` only when `devtools.is_some()`;
-otherwise `debug_key` and normal controller handling run. Thus UX1's held F3+digit router is not the
-normal startup router. `just client-survival` and `just dev-client` select the same executable with
-different launch admission/state. F1 owns correcting this known workflow inconsistency; it is not
-claimed fixed by UX1/R2 unit or specialist acceptance.
+The production `WindowEvent` adapter copies physical key/state/repeat/text into one safe payload
+and feeds the complete client router. That router owns developer admission, gameplay digit/ordinary
+key routing, inventory transitions and focus reset. winit's KeyEvent has private platform fields;
+deterministic integration tests exercise this production payload boundary plus real Focused events,
+not only the shortcut helper. Shared-desktop global injection is not a CI dependency.
 
-Target: one normal rustcraft-client runtime/input path; input → semantic diagnostic action → capability
-check → effect. F3/F4 routing is available through that path; denied actions report availability without
-granting powers. Roles/capabilities and game-owned gamemode are independent. Explicit trusted local
-Rhai authorization remains. Specialist acceptance workloads drive the same composition using Control,
-semantic actions and scenarios; DX2 retires redundant drivers only after equivalence.
+Held F3 digits are consumed even if capability admission fails; ordinary digits select the hotbar.
+Bare F3 toggles on release, repeats do not retrigger developer effects, and losing focus clears the
+chord and entire human controller. Default local diagnostic grants do not grant world mutation,
+configuration writes or trusted Rhai. Game mode remains independently game-owned session state.
 
-F1 field evidence must exercise normal startup and real WindowEvent F3/F4, compare dev/release builds,
-and record AMD Radeon Vega 8 / RADV / Vulkan behavior. Matched phases: stationary, mouse-pan, walk,
-walk+pan. Record frame/render/present-call cadence distributions, duplicate camera states,
-mouse-to-camera response and long-frame/checkpoint events on one monotonic timeline. Application
-present calls are not physical scanout. A background checkpoint `sync_ms` tail is **not automatically
-a frame stall**: correlate overlap and event-thread blocking before assigning causation. If release is
-smooth and dev is not, adjust developer workflow/documentation to measured facts rather than inventing
-a renderer fix. Current P1 software-GPU evidence is not this new hardware acceptance.
+`just f1-client` runs matched dev then release field workloads sequentially, through the normal
+client runtime, with disposable world/config/cache below `target/f1/run-NONCE/`. Optional argument
+`dev` or `release` runs one profile. It requires AMD/RADV/Vulkan and rejects missing/other graphics;
+set `RUSTCRAFT_TERRAIN_TEXTURE` to a local licensed terrain PNG if the default local asset is absent.
+The normal owner build profiles are retained. Each run has 30-second stationary/pan/walk/walk+pan
+phases after readiness and a 420-second application timeout (wrapper 600 seconds).
+
+Return `target/f1/run-NONCE/summary.json`; per-profile summaries and `timeline.json` preserve exact
+adapter/driver/backend, profile, present mode, window/surface, effective C1 settings, presentation
+statistics, fixed-step budgets, mouse extraction latency, duplicate transforms and checkpoint events.
+Motion is automated through normal human-controller/mouse ingestion, not a physical mouse device.
+At least twenty successful player checkpoints are required. CLI checkpoint cadence is 1000 ms in
+both disposable runs. Worker publication envelopes and main-thread submission/completion service
+spans share the monotonic frame timeline; overlap is correlation, not proof of a frame stall.
+`sync_ms` includes atomic publication/directory work, not isolated fsync. No scanout, input-to-photon
+or subjective smoothness is measured. Hardware acceptance and any necessary owner observation remain
+pending; see [F1_REPORT](F1_REPORT.md). P1 presentation policy is unchanged.

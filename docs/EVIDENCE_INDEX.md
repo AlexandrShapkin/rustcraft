@@ -37,3 +37,9 @@ SHAs, CI runs or metrics. This is not a second evidence database.
 [PRE_M5_AUDIT](PRE_M5_AUDIT.md) preserves original chronology plus owner-approved expansion;
 [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) maps migration pressure. [DEFECTS_HISTORY](DEFECTS_HISTORY.md)
 preserves completed pre-Issue evidence. These do not override newer stage planning or GitHub live state.
+
+## In-progress stage evidence (not accepted closeout)
+
+| Stage | Progress artifact | Remaining acceptance |
+| --- | --- | --- |
+| F1 | [Implementation progress](F1_REPORT.md) | Owner-machine AMD/RADV/Vulkan dev/release measurements and issue/CI reconciliation; F1 remains active. |

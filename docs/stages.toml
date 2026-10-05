@@ -6,7 +6,7 @@ sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", 
 [[stage]]
 id = "F1"
 title = "unified client path & real-hardware field validation"
-state = "planned"
+state = "active"
 contract = "docs/stages/F1.md"
 issue_label = "stage:F1"
 relevant_docs = ["docs/DEBUGGING.md", "docs/CONFIGURATION.md", "docs/ARCHITECTURE.md"]

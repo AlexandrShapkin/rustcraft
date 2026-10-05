@@ -18,7 +18,7 @@ Current focus: **F1**. Execution order and state are generated from [stages.toml
 
 | Stage | State | Contract |
 | --- | --- | --- |
-| F1 | planned | [unified client path & real-hardware field validation](stages/F1.md) |
+| F1 | active | [unified client path & real-hardware field validation](stages/F1.md) |
 | A1 | planned | [external identity, policy boundary & trust preparation](stages/A1.md) |
 | C2 | planned | [unified content definition & capability model](stages/C2.md) |
 | BG1 | planned | [generalized block geometry & model system](stages/BG1.md) |

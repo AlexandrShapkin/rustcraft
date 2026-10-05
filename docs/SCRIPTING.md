@@ -12,10 +12,11 @@ adapts the transitional simulation. Client/server own composition, workers and c
 Release archives include only the project-owned allowlisted example scripts and this guide; local scripts
 are not automatically packaged. Run developer binaries from the directory containing scripts/.
 
-Start explicitly with `just dev-client`. Backquote toggles the console; Escape closes it;
+Start trusted Rhai explicitly with `just client --devtools` (`just dev-client` is a compatibility alias). Backquote toggles the console; Escape closes it;
 F10 cancels the scenario. Arrows/Home/End/Backspace edit, Up/Down browse history, PageUp/PageDown
-scroll output and Tab completes command names. Ordinary release/debug startup enables no console
-and executes no scripts. `--scenario PATH` explicitly opts into scenario tooling.
+scroll output and Tab completes command names. Ordinary release/debug startup has the same diagnostic/native-command UI but no trusted Rhai grant
+and executes no scripts. Backquote and all non-command console evaluation require `script.load`;
+opening native command entry with Slash does not grant it. `--scenario PATH` explicitly opts into scenario tooling.
 
 ```text
 /help

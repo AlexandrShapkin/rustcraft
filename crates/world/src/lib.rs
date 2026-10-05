@@ -566,6 +566,9 @@ struct SaveJob {
     chunk: StoredChunk,
 }
 pub struct SaveCompletion {
+    /// Transient monotonic worker interval; never persisted.
+    pub worker_started: std::time::Instant,
+    pub worker_completed: std::time::Instant,
     pub queue_wait_ms: f64,
     pub token: SaveToken,
     pub result: Result<ChunkEncodingMetrics, String>,
@@ -619,6 +622,7 @@ impl SaveScheduler {
                         let queue_wait_ms = job.queued_at.elapsed().as_secs_f64() * 1000.0;
                         wait_total.fetch_add((queue_wait_ms * 1000.0) as u64, Ordering::Relaxed);
                         wait_max.fetch_max((queue_wait_ms * 1000.0) as u64, Ordering::Relaxed);
+                        let started = std::time::Instant::now();
                         let result = job
                             .storage
                             .store_chunk_measured(&job.chunk)
@@ -631,6 +635,8 @@ impl SaveScheduler {
                         }
                         if result_tx
                             .send(SaveCompletion {
+                                worker_started: started,
+                                worker_completed: std::time::Instant::now(),
                                 queue_wait_ms,
                                 token: job.token,
                                 result,
@@ -2524,6 +2530,9 @@ fn validate_player_id(id: &str) -> Result<(), WorldError> {
 
 #[derive(Debug)]
 pub struct PlayerSaveCompletion {
+    /// Transient monotonic worker interval; never persisted.
+    pub worker_started: std::time::Instant,
+    pub worker_completed: std::time::Instant,
     pub player_id: String,
     pub revision: u64,
     pub result: Result<(), WorldError>,
@@ -2598,6 +2607,8 @@ impl PlayerSaveScheduler {
                     let io = result.as_ref().copied().unwrap_or_default();
                     if result_sender
                         .send(PlayerSaveCompletion {
+                            worker_started: started,
+                            worker_completed: std::time::Instant::now(),
                             player_id,
                             revision,
                             result: result.map(|_| ()),
@@ -2700,6 +2711,9 @@ impl Drop for PlayerSaveScheduler {
 
 #[derive(Debug)]
 pub struct WorldStateSaveCompletion {
+    /// Transient monotonic worker interval; never persisted.
+    pub worker_started: std::time::Instant,
+    pub worker_completed: std::time::Instant,
     pub revision: u64,
     pub result: Result<(), WorldError>,
     pub elapsed_ms: f64,
@@ -2772,6 +2786,8 @@ impl WorldStateSaveScheduler {
                     let io = result.as_ref().copied().unwrap_or_default();
                     if result_sender
                         .send(WorldStateSaveCompletion {
+                            worker_started: started,
+                            worker_completed: std::time::Instant::now(),
                             revision,
                             result: result.map(|_| ()),
                             elapsed_ms,
@@ -3189,7 +3205,8 @@ fn durable_write_slot(path: &Path, data: &[u8]) -> Result<(f64, f64), WorldError
             let write_started = std::time::Instant::now();
             file.write_all(data)?;
             write_ms = write_started.elapsed().as_secs_f64() * 1000.0;
-            file.sync_all()?;
+            // atomicwrites 0.4.4 write_with_options syncs the same temp file after this
+            // callback succeeds and before replacement on Unix and Windows. Do not sync twice.
             Ok(())
         })
         .map_err(|error| WorldError::Io(error.into()))?;
