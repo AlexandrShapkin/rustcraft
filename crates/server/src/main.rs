@@ -222,10 +222,10 @@ fn persisted_column(
                 .map(|chunk| (y, chunk))
         })
         .collect::<Vec<_>>();
-    let records = simulation
-        .items
+    let snapshot = simulation.entity_column_snapshot(position);
+    let records = snapshot
+        .records
         .iter()
-        .filter(|entity| entity.column() == position)
         .map(|entity| {
             rustcraft_minecraft_b173::world_persistence::encode_item_entity(
                 entity,
@@ -234,7 +234,6 @@ fn persisted_column(
             .unwrap()
         })
         .collect();
-    let snapshot = simulation.entity_column_snapshot(position);
     let tombstones = snapshot
         .tombstones
         .iter()
@@ -515,7 +514,7 @@ fn run_world_state_roundtrip() {
     let receipt_player =
         rustcraft_minecraft_b173::player_persistence::encode_revision(&restored, 2, &[]).unwrap();
     storage.store_player(&receipt_player).unwrap(); // inventory+receipt first
-    restored.commit_pickup_receipts(&[picked.id]);
+    restored.commit_pickup_receipts(&restored.pickup_receipts());
     store_simulation_column(&storage, &mut restored, picked.column());
     let pruned_player =
         rustcraft_minecraft_b173::player_persistence::encode_revision(&restored, 3, &[]).unwrap();

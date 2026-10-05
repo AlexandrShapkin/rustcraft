@@ -3,6 +3,8 @@ mod developer_input;
 mod devtools;
 mod lifetime;
 mod p1;
+#[cfg(test)]
+mod persistence_tests;
 mod presentation;
 mod render_tests;
 mod rsm1;
@@ -448,7 +450,7 @@ struct ClientApp {
     player_encode_ms_last: f64,
     player_checkpoint_ms_last: f64,
     player_save_scheduler: rustcraft_world::PlayerSaveScheduler,
-    player_checkpoint_receipts: HashMap<u64, Vec<rustcraft_engine_core::EntityId>>,
+    player_checkpoint_receipts: HashMap<u64, Vec<rustcraft_runtime::PickupReceipt>>,
     player_autosave_writes: u64,
     last_world_state_autosave: Instant,
     world_state_autosave_interval: Duration,
@@ -2260,14 +2262,8 @@ impl ClientApp {
         match self.player_save_scheduler.submit(storage, record) {
             Ok(()) => {
                 if let Some(simulation) = self.simulation.as_ref() {
-                    self.player_checkpoint_receipts.insert(
-                        self.player_revision,
-                        simulation
-                            .pickup_receipts()
-                            .into_iter()
-                            .map(|receipt| receipt.entity_id)
-                            .collect(),
-                    );
+                    self.player_checkpoint_receipts
+                        .insert(self.player_revision, simulation.pickup_receipts());
                 }
                 self.last_player_autosave = Instant::now();
                 self.player_autosave_writes = self.player_autosave_writes.saturating_add(1);
@@ -3716,7 +3712,8 @@ impl ClientApp {
             let dx = i64::from(position.x) - i64::from(center.x);
             let dz = i64::from(position.z) - i64::from(center.z);
             let still_near = dx.abs().max(dz.abs()) <= i64::from(retain_radius);
-            let pinned_now = simulation.lighting.integrating_column() == Some(position);
+            let pinned_now = simulation.lighting.integrating_column() == Some(position)
+                || simulation.entity_transfer_pending(position);
             if still_near || pinned_now {
                 if still_near {
                     self.simulation
@@ -3838,13 +3835,11 @@ impl ClientApp {
             }
             self.persistence_dirty
                 .complete_save(completion.token, success);
-            if success
-                && let Some(snapshot) = self.entity_save_snapshots.remove(&(
-                    completion.token.position.x,
-                    completion.token.position.z,
-                    completion.token.generation,
-                ))
-            {
+            if let Some(snapshot) = retire_entity_save_snapshot(
+                &mut self.entity_save_snapshots,
+                completion.token,
+                success,
+            ) {
                 self.entity_records_saved = self
                     .entity_records_saved
                     .saturating_add(snapshot.entities.len() as u64);
@@ -3954,14 +3949,8 @@ impl ClientApp {
                 eprintln!("world shutdown player save submission failed: {error}");
             } else {
                 if let Some(simulation) = self.simulation.as_ref() {
-                    self.player_checkpoint_receipts.insert(
-                        record.revision,
-                        simulation
-                            .pickup_receipts()
-                            .into_iter()
-                            .map(|receipt| receipt.entity_id)
-                            .collect(),
-                    );
+                    self.player_checkpoint_receipts
+                        .insert(record.revision, simulation.pickup_receipts());
                 }
                 let deadline = Instant::now() + Duration::from_secs(60);
                 while self.player_persisted_revision < record.revision && Instant::now() < deadline
@@ -4028,15 +4017,14 @@ impl ClientApp {
                 }
                 self.persistence_dirty
                     .complete_save(completion.token, success);
-                if success
-                    && let Some(snapshot) = self.entity_save_snapshots.remove(&(
-                        completion.token.position.x,
-                        completion.token.position.z,
-                        completion.token.generation,
-                    ))
-                    && self.simulation.as_mut().is_some_and(|simulation| {
-                        simulation.note_entity_column_persisted(&snapshot)
-                    })
+                if let Some(snapshot) = retire_entity_save_snapshot(
+                    &mut self.entity_save_snapshots,
+                    completion.token,
+                    success,
+                ) && self
+                    .simulation
+                    .as_mut()
+                    .is_some_and(|simulation| simulation.note_entity_column_persisted(&snapshot))
                 {
                     self.player_dirty = true;
                 }
@@ -5749,10 +5737,10 @@ fn encode_simulation_column(
                 .map(|chunk| (y, chunk))
         })
         .collect::<Vec<_>>();
-    let spatial_records = simulation
-        .items
+    let snapshot = simulation.entity_column_snapshot(position);
+    let spatial_records = snapshot
+        .records
         .iter()
-        .filter(|entity| entity.column() == position)
         .map(|entity| {
             rustcraft_minecraft_b173::world_persistence::encode_item_entity(
                 entity,
@@ -5761,7 +5749,6 @@ fn encode_simulation_column(
             .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let snapshot = simulation.entity_column_snapshot(position);
     let spatial_tombstones = snapshot
         .tombstones
         .iter()
@@ -7389,4 +7376,14 @@ mod m2_input_tests {
         assert!(!app.debug);
         assert_eq!(app.controller.next_intent(), AgentIntent::default());
     }
+}
+
+/// Every terminal result retires its immutable snapshot; failures cannot acknowledge ownership.
+fn retire_entity_save_snapshot(
+    snapshots: &mut HashMap<(i32, i32, u64), rustcraft_runtime::EntityColumnSnapshot>,
+    token: rustcraft_world::SaveToken,
+    success: bool,
+) -> Option<rustcraft_runtime::EntityColumnSnapshot> {
+    let snapshot = snapshots.remove(&(token.position.x, token.position.z, token.generation));
+    if success { snapshot } else { None }
 }

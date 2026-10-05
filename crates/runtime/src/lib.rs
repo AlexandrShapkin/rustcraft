@@ -78,15 +78,17 @@ pub struct Simulation {
     frozen_entity_columns: HashSet<ChunkPos>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct DurableEntityState {
     owner: ChunkPos,
     revision: u64,
+    entity: ItemEntity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct PickupReceiptState {
-    source: ChunkPos,
+    receipt: PickupReceipt,
+    before: Option<ItemEntity>,
     player_durable: bool,
 }
 
@@ -96,13 +98,20 @@ struct PickupReceiptState {
 pub struct PickupReceipt {
     pub entity_id: EntityId,
     pub source: ChunkPos,
+    /// Zero denotes a legacy full-removal receipt.
+    pub before_revision: u64,
+    pub after_revision: u64,
+    pub before_count: u16,
+    pub accepted_count: u16,
+    pub remaining_count: u16,
 }
 
 /// Entity metadata captured with one immutable column save snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntityColumnSnapshot {
     pub position: ChunkPos,
     pub entities: Vec<(EntityId, u64)>,
+    pub records: Vec<ItemEntity>,
     pub tombstones: Vec<(EntityId, ChunkPos, u64)>,
 }
 
@@ -578,7 +587,9 @@ impl Simulation {
         }
         let mut crossed_into = Vec::new();
         for entity in &mut self.items {
-            if self.frozen_entity_columns.contains(&entity.column()) {
+            if self.frozen_entity_columns.contains(&entity.column())
+                || self.pickup_receipts.contains_key(&entity.id)
+            {
                 continue;
             }
             let owner_before = entity.column();
@@ -608,11 +619,23 @@ impl Simulation {
         let expired = self
             .items
             .iter()
-            .filter(|entity| entity.age >= 300.0)
+            .filter(|entity| {
+                entity.age >= 300.0
+                    && !self.pickup_receipts.contains_key(&entity.id)
+                    && !self
+                        .entity_tombstones
+                        .values()
+                        .any(|markers| markers.contains_key(&entity.id))
+                    && !self
+                        .entity_durable
+                        .get(&entity.id)
+                        .is_some_and(|durable| durable.owner != entity.column())
+            })
             .map(|entity| (entity.id, entity.column()))
             .collect::<Vec<_>>();
         if !expired.is_empty() {
-            self.items.retain(|entity| entity.age < 300.0);
+            self.items
+                .retain(|entity| !expired.iter().any(|(id, _)| *id == entity.id));
             for (_, source) in expired {
                 self.persistence_dirty_chunks.insert(source);
             }
@@ -755,7 +778,21 @@ impl Simulation {
     fn merge_items(&mut self) {
         for i in 0..self.items.len() {
             for j in ((i + 1)..self.items.len()).rev() {
-                if self.items[i].stack.item == self.items[j].stack.item
+                if !self.pickup_receipts.contains_key(&self.items[i].id)
+                    && !self.pickup_receipts.contains_key(&self.items[j].id)
+                    && ![&self.items[i], &self.items[j]].iter().any(|entity| {
+                        if self
+                            .entity_tombstones
+                            .values()
+                            .any(|markers| markers.contains_key(&entity.id))
+                        {
+                            return true;
+                        }
+                        self.entity_durable
+                            .get(&entity.id)
+                            .is_some_and(|durable| durable.owner != entity.column())
+                    })
+                    && self.items[i].stack.item == self.items[j].stack.item
                     && self.items[i].column() == self.items[j].column()
                     && (self.items[i].position - self.items[j].position)
                         .x
@@ -790,26 +827,50 @@ impl Simulation {
         let radius = 1.5;
         let mut i = 0;
         while i < self.items.len() {
-            let e = &self.items[i];
-            let d = e.position - self.player.position;
-            if e.pickup_delay <= 0. && d.x * d.x + d.y * d.y + d.z * d.z < radius * radius {
-                let rem = self.inventory.insert_partial(e.stack, &self.registry);
-                if rem.count < e.stack.count {
-                    if rem.count == 0 {
-                        let removed = self.items.remove(i);
-                        self.pickup_receipts.insert(
-                            removed.id,
-                            PickupReceiptState {
-                                source: removed.column(),
-                                player_durable: false,
+            let before = self.items[i];
+            if self.pickup_receipts.contains_key(&before.id)
+                || self.pickup_receipts.len() >= 512
+                || before.persistence_revision == u64::MAX
+                || self
+                    .entity_tombstones
+                    .values()
+                    .any(|markers| markers.contains_key(&before.id))
+                || self
+                    .entity_durable
+                    .get(&before.id)
+                    .is_some_and(|durable| durable.owner != before.column())
+            {
+                i += 1;
+                continue;
+            }
+            let d = before.position - self.player.position;
+            if before.pickup_delay <= 0. && d.x * d.x + d.y * d.y + d.z * d.z < radius * radius {
+                let rem = self.inventory.insert_partial(before.stack, &self.registry);
+                if rem.count < before.stack.count {
+                    let after_revision = before.persistence_revision.saturating_add(1);
+                    self.pickup_receipts.insert(
+                        before.id,
+                        PickupReceiptState {
+                            receipt: PickupReceipt {
+                                entity_id: before.id,
+                                source: before.column(),
+                                before_revision: before.persistence_revision,
+                                after_revision,
+                                before_count: before.stack.count,
+                                accepted_count: before.stack.count - rem.count,
+                                remaining_count: rem.count,
                             },
-                        );
+                            before: Some(before),
+                            player_durable: false,
+                        },
+                    );
+                    self.persistence_dirty_chunks.insert(before.column());
+                    if rem.count == 0 {
+                        self.items.remove(i);
                         continue;
                     }
                     self.items[i].stack = rem;
-                    self.items[i].persistence_revision =
-                        self.items[i].persistence_revision.saturating_add(1);
-                    self.persistence_dirty_chunks.insert(self.items[i].column());
+                    self.items[i].persistence_revision = after_revision;
                 }
             }
             i += 1;
@@ -820,35 +881,33 @@ impl Simulation {
     #[must_use]
     pub fn pickup_receipts(&self) -> Vec<PickupReceipt> {
         self.pickup_receipts
-            .iter()
-            .map(|(entity_id, state)| PickupReceipt {
-                entity_id: *entity_id,
-                source: state.source,
-            })
+            .values()
+            .map(|state| state.receipt)
             .collect()
     }
 
-    /// Restore receipts before spatial records are activated so an old entity checkpoint cannot
-    /// resurrect an item already transferred to the player inventory.
+    /// Restore the player-side transition before activating spatial records.
     pub fn restore_pickup_receipts(&mut self, receipts: impl IntoIterator<Item = PickupReceipt>) {
         for receipt in receipts {
             self.pickup_receipts.insert(
                 receipt.entity_id,
                 PickupReceiptState {
-                    source: receipt.source,
+                    receipt,
+                    before: None,
                     player_durable: true,
                 },
             );
         }
     }
 
-    /// Once the receipt-bearing player revision is durable, remove the source entity in the next
-    /// atomic column checkpoint. Receipts remain until that checkpoint succeeds.
-    pub fn commit_pickup_receipts(&mut self, durable_ids: &[EntityId]) {
-        for id in durable_ids {
-            if let Some(state) = self.pickup_receipts.get_mut(id) {
+    /// Acknowledge only the exact transition captured by the durable player revision.
+    pub fn commit_pickup_receipts(&mut self, durable_receipts: &[PickupReceipt]) {
+        for receipt in durable_receipts {
+            if let Some(state) = self.pickup_receipts.get_mut(&receipt.entity_id)
+                && state.receipt == *receipt
+            {
                 state.player_durable = true;
-                self.persistence_dirty_chunks.insert(state.source);
+                self.persistence_dirty_chunks.insert(state.receipt.source);
             }
         }
     }
@@ -864,22 +923,31 @@ impl Simulation {
                 .insert(*id, (*source, *revision));
         }
         let mut old_owners = Vec::new();
-        for (id, revision) in &snapshot.entities {
-            let Some(entity) = self.items.iter().find(|entity| entity.id == *id) else {
-                continue;
-            };
-            if entity.persistence_revision > *revision || entity.column() != snapshot.position {
+        for entity in &snapshot.records {
+            let id = entity.id;
+            let revision = entity.persistence_revision;
+            if self
+                .entity_durable
+                .get(&id)
+                .is_some_and(|previous| previous.revision > revision)
+            {
                 continue;
             }
             if let Some(previous) = self.entity_durable.insert(
-                *id,
+                id,
                 DurableEntityState {
                     owner: snapshot.position,
-                    revision: *revision,
+                    revision,
+                    entity: *entity,
                 },
             ) && previous.owner != snapshot.position
             {
                 old_owners.push(previous.owner);
+            }
+            if let Some(active) = self.items.iter().find(|active| active.id == id)
+                && (active.column() != snapshot.position || active.persistence_revision > revision)
+            {
+                self.persistence_dirty_chunks.insert(active.column());
             }
         }
         self.persistence_dirty_chunks.extend(old_owners);
@@ -887,12 +955,16 @@ impl Simulation {
         let mut tombstone_columns_to_rewrite = Vec::new();
         for (owner, markers) in &mut self.entity_tombstones {
             let before = markers.len();
-            markers.retain(|id, (source, _)| {
+            markers.retain(|id, (source, revision)| {
                 !(*source == snapshot.position
-                    && self
-                        .entity_durable
+                    && (saved
                         .get(id)
-                        .is_some_and(|durable| durable.owner != *source))
+                        .is_some_and(|saved_revision| saved_revision > revision)
+                        || (!saved.contains_key(id)
+                            && self
+                                .entity_durable
+                                .get(id)
+                                .is_some_and(|durable| durable.owner != *source))))
             });
             if markers.len() != before {
                 tombstone_columns_to_rewrite.push(*owner);
@@ -907,13 +979,23 @@ impl Simulation {
             .pickup_receipts
             .iter()
             .filter(|(id, state)| {
-                state.player_durable && state.source == snapshot.position && !saved.contains_key(id)
+                state.player_durable
+                    && state.receipt.source == snapshot.position
+                    && if state.receipt.remaining_count == 0 {
+                        !saved.contains_key(id)
+                    } else {
+                        saved
+                            .get(id)
+                            .is_some_and(|revision| *revision >= state.receipt.after_revision)
+                    }
             })
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         for id in &removed_receipts {
             self.pickup_receipts.remove(id);
-            self.entity_durable.remove(id);
+            if !self.items.iter().any(|entity| entity.id == *id) {
+                self.entity_durable.remove(id);
+            }
         }
         self.entity_durable.retain(|id, durable| {
             durable.owner != snapshot.position
@@ -956,7 +1038,21 @@ impl Simulation {
                 .or_default()
                 .insert(*id, (*source, *revision));
         }
-        entities.retain(|entity| !self.pickup_receipts.contains_key(&entity.id));
+        entities.retain_mut(|entity| {
+            let Some(state) = self.pickup_receipts.get(&entity.id) else {
+                return true;
+            };
+            let receipt = state.receipt;
+            if receipt.remaining_count == 0 {
+                return false;
+            }
+            if entity.persistence_revision <= receipt.before_revision {
+                entity.stack.count = receipt.remaining_count;
+                entity.persistence_revision = receipt.after_revision;
+                self.persistence_dirty_chunks.insert(position);
+            }
+            true
+        });
         for entity in entities {
             if let Some(index) = self.items.iter().position(|active| active.id == entity.id) {
                 if self.items[index].persistence_revision >= entity.persistence_revision {
@@ -977,11 +1073,64 @@ impl Simulation {
                 DurableEntityState {
                     owner: position,
                     revision: entity.persistence_revision,
+                    entity,
                 },
             );
             self.items.push(entity);
         }
+        if self
+            .entity_tombstones
+            .values()
+            .any(|markers| markers.values().any(|(source, _)| *source == position))
+            || self
+                .pickup_receipts
+                .values()
+                .any(|state| state.receipt.source == position)
+        {
+            self.persistence_dirty_chunks.insert(position);
+        }
         Ok(())
+    }
+
+    /// Retain pre-transfer records until the destination domain acknowledges durability.
+    #[must_use]
+    pub fn persistent_entity_records(&self, position: ChunkPos) -> Vec<ItemEntity> {
+        let mut records = self
+            .items
+            .iter()
+            .filter(|entity| entity.column() == position)
+            .map(|entity| (entity.id, *entity))
+            .collect::<BTreeMap<_, _>>();
+        for (id, state) in &self.pickup_receipts {
+            if !state.player_durable {
+                records.remove(id);
+                if let Some(before) = state.before
+                    && before.column() == position
+                {
+                    records.insert(*id, before);
+                }
+            }
+        }
+        for (id, durable) in &self.entity_durable {
+            if durable.owner == position
+                && self
+                    .items
+                    .iter()
+                    .any(|entity| entity.id == *id && entity.column() != position)
+            {
+                records.insert(*id, durable.entity);
+            }
+            // Retain a durable fallback if the runtime record was removed by pickup.
+            if durable.owner == position
+                && self
+                    .pickup_receipts
+                    .get(id)
+                    .is_some_and(|state| !state.player_durable)
+            {
+                records.entry(*id).or_insert(durable.entity);
+            }
+        }
+        records.into_values().collect()
     }
 
     #[must_use]
@@ -1002,14 +1151,14 @@ impl Simulation {
                 tombstones.insert(entity.id, (durable.owner, entity.persistence_revision));
             }
         }
+        let records = self.persistent_entity_records(position);
         EntityColumnSnapshot {
             position,
-            entities: self
-                .items
+            entities: records
                 .iter()
-                .filter(|entity| entity.column() == position)
                 .map(|entity| (entity.id, entity.persistence_revision))
                 .collect(),
+            records,
             tombstones: tombstones
                 .into_iter()
                 .map(|(id, (source, revision))| (id, source, revision))
@@ -1020,6 +1169,25 @@ impl Simulation {
     #[must_use]
     pub fn entity_column_positions(&self) -> HashSet<ChunkPos> {
         self.items.iter().map(ItemEntity::column).collect()
+    }
+
+    /// Source terrain must remain resident while a later acknowledgement still needs a rewrite.
+    #[must_use]
+    pub fn entity_transfer_pending(&self, position: ChunkPos) -> bool {
+        self.pickup_receipts
+            .values()
+            .any(|state| state.receipt.source == position)
+            || self.entity_durable.iter().any(|(id, durable)| {
+                durable.owner == position
+                    && self
+                        .items
+                        .iter()
+                        .any(|entity| entity.id == *id && entity.column() != position)
+            })
+            || self
+                .entity_tombstones
+                .values()
+                .any(|markers| markers.values().any(|(source, _)| *source == position))
     }
 
     pub fn freeze_entity_column(&mut self, position: ChunkPos) -> bool {
@@ -1834,7 +2002,7 @@ mod interaction_tests {
 
         // Simulate the inventory+receipt checkpoint acknowledgement, followed by the source
         // column checkpoint. A stale source record remains suppressed throughout.
-        s.commit_pickup_receipts(&[id]);
+        s.commit_pickup_receipts(&s.pickup_receipts());
         let snapshot = s.entity_column_snapshot(ChunkPos { x: 0, z: 0 });
         assert!(s.note_entity_column_persisted(&snapshot));
         assert!(s.pickup_receipts().is_empty());

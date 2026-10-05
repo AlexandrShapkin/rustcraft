@@ -755,3 +755,28 @@ physical scanout. Owner display validation remains conditional. See P1_REPORT.md
 ## D-051 — Retain measured persistence backend for initial M5
 
 See [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). S1 measures whole-column amplification and accepts the current physical backend within the documented caller/workload envelope; no production migration or S1.3. Durable component and backend acknowledgement contracts remain separate from runtime/network layouts.
+
+## D-052 — Retain recoverable source records across durable entity transfers
+
+Column encoding and acknowledgements use one immutable entity snapshot. Keep the last acknowledged
+entity payload at its durable owner while a move's destination is unacknowledged, and keep each
+pickup's pre-transfer payload until the receipt-bearing player checkpoint succeeds. A completion
+acknowledges its captured payload even if simulation has since advanced; lower revisions cannot
+replace newer durable ownership. A source snapshot still containing an old copy cannot retire its
+transfer tombstone. Pending source rewrites pin terrain residency.
+
+Partial pickup needs more identity than the old boolean receipt. Extend only the Minecraft-owned
+pickup-receipt component to schema v2 with before/after entity revisions and before/accepted/remaining
+quantities; continue decoding schema v1 full-removal receipts. Generic player/chunk/world envelopes,
+item codec and frozen generators remain unchanged. Recovery replaces a pre-transition quantity with
+the recorded post quantity only when its entity revision is at or before the expected source
+revision; an already post-transition record is untouched. Player acknowledgements match the exact
+receipt captured in their revision rather than EntityId alone. An entity has at most one unfinished
+pickup: its remainder cannot move, merge, expire or transfer again until the source acknowledgement.
+Pickup/merge of a migrating entity waits for old-source cleanup so a receipt cannot be pruned while
+an unreferenced old-owner copy survives. The receipt limit defers new transfers rather than making
+an oversized player checkpoint unsaveable. Ordinary simulation and unrelated entities keep running.
+
+Every terminal column-save completion removes its snapshot, including failures. Only successful
+completions advance ownership or prune receipts; failure leaves the latest dirty generation retryable.
+No database, production backend switch, generic journal or S1.3 is introduced.

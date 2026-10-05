@@ -14,7 +14,7 @@ pub const TRANSFORM_COMPONENT: &str = "minecraft_b173:player/transform";
 pub const INVENTORY_COMPONENT: &str = "minecraft_b173:player/inventory";
 pub const GAME_MODE_COMPONENT: &str = "minecraft_b173:player/game_mode";
 pub const PICKUP_RECEIPTS_COMPONENT: &str = "minecraft_b173:player/pickup_receipts";
-pub const PICKUP_RECEIPTS_SCHEMA_VERSION: u32 = 1;
+pub const PICKUP_RECEIPTS_SCHEMA_VERSION: u32 = 2;
 pub const LEGACY_COMPONENT: &str = "rustcraft:legacy-player-payload";
 const SLOT_COUNT: usize = 36;
 const MAX_KEY_BYTES: usize = 256;
@@ -344,6 +344,11 @@ fn encode_pickup_receipts(sim: &Simulation) -> Result<Vec<u8>, PlayerCodecError>
         out.extend_from_slice(&receipt.entity_id.0.to_le_bytes());
         out.extend_from_slice(&receipt.source.x.to_le_bytes());
         out.extend_from_slice(&receipt.source.z.to_le_bytes());
+        out.extend_from_slice(&receipt.before_revision.to_le_bytes());
+        out.extend_from_slice(&receipt.after_revision.to_le_bytes());
+        out.extend_from_slice(&receipt.before_count.to_le_bytes());
+        out.extend_from_slice(&receipt.accepted_count.to_le_bytes());
+        out.extend_from_slice(&receipt.remaining_count.to_le_bytes());
     }
     Ok(out)
 }
@@ -351,7 +356,7 @@ fn encode_pickup_receipts(sim: &Simulation) -> Result<Vec<u8>, PlayerCodecError>
 fn decode_pickup_receipts(
     component: &PlayerComponent,
 ) -> Result<Vec<PickupReceipt>, PlayerCodecError> {
-    if component.schema_version != PICKUP_RECEIPTS_SCHEMA_VERSION {
+    if ![1, PICKUP_RECEIPTS_SCHEMA_VERSION].contains(&component.schema_version) {
         return Err(PlayerCodecError::Invalid(
             "unsupported pickup receipt component schema",
         ));
@@ -371,7 +376,43 @@ fn decode_pickup_receipts(
             x: i32::from_le_bytes(reader.take(4)?.try_into().unwrap()),
             z: i32::from_le_bytes(reader.take(4)?.try_into().unwrap()),
         };
-        receipts.push(PickupReceipt { entity_id, source });
+        let mut receipt = PickupReceipt {
+            entity_id,
+            source,
+            before_revision: 0,
+            after_revision: 0,
+            before_count: 0,
+            accepted_count: 0,
+            remaining_count: 0,
+        };
+        if component.schema_version == 2 {
+            receipt.before_revision = u64::from_le_bytes(reader.take(8)?.try_into().unwrap());
+            receipt.after_revision = u64::from_le_bytes(reader.take(8)?.try_into().unwrap());
+            receipt.before_count = reader.u16()?;
+            receipt.accepted_count = reader.u16()?;
+            receipt.remaining_count = reader.u16()?;
+            if receipt.before_revision == 0
+                && (receipt.after_revision != 0
+                    || receipt.before_count != 0
+                    || receipt.accepted_count != 0
+                    || receipt.remaining_count != 0)
+            {
+                return Err(PlayerCodecError::Invalid(
+                    "invalid legacy pickup transition",
+                ));
+            }
+            if receipt.before_revision != 0
+                && (receipt.after_revision <= receipt.before_revision
+                    || receipt.accepted_count == 0
+                    || u32::from(receipt.before_count)
+                        != u32::from(receipt.accepted_count) + u32::from(receipt.remaining_count))
+            {
+                return Err(PlayerCodecError::Invalid(
+                    "invalid pickup quantity transition",
+                ));
+            }
+        }
+        receipts.push(receipt);
     }
     reader.finish()?;
     receipts.sort_by_key(|receipt| receipt.entity_id);
@@ -520,6 +561,23 @@ mod tests {
     use super::*;
     use rustcraft_engine_core::ItemId;
     use rustcraft_mod_api::GameplayModule;
+    #[test]
+    fn legacy_full_pickup_receipt_component_still_decodes() {
+        let id = EntityId::from_parts(77, 1);
+        let mut payload = 1u16.to_le_bytes().to_vec();
+        payload.extend_from_slice(&id.0.to_le_bytes());
+        payload.extend_from_slice(&(-2i32).to_le_bytes());
+        payload.extend_from_slice(&3i32.to_le_bytes());
+        let receipts = decode_pickup_receipts(&PlayerComponent {
+            id: PICKUP_RECEIPTS_COMPONENT.into(),
+            schema_version: 1,
+            payload,
+        })
+        .unwrap();
+        assert_eq!(receipts[0].entity_id, id);
+        assert_eq!(receipts[0].remaining_count, 0);
+    }
+
     #[test]
     fn semantic_item_and_all_player_state_roundtrip() {
         let mut registry = BlockRegistry::default();
@@ -772,11 +830,7 @@ mod tests {
             assert_eq!(recovered.inventory.slot(0).unwrap().count, 3);
         }
 
-        let ids = picked
-            .pickup_receipts()
-            .into_iter()
-            .map(|receipt| receipt.entity_id)
-            .collect::<Vec<_>>();
+        let ids = picked.pickup_receipts();
         picked.commit_pickup_receipts(&ids);
         let snapshot = picked.entity_column_snapshot(stale_source.column());
         assert!(picked.note_entity_column_persisted(&snapshot));
@@ -794,6 +848,11 @@ mod tests {
             PickupReceipt {
                 entity_id: EntityId::from_parts(99, counter),
                 source,
+                before_revision: 0,
+                after_revision: 0,
+                before_count: 0,
+                accepted_count: 0,
+                remaining_count: 0,
             }
         }));
         assert_eq!(picked.pickup_receipts().len(), MAX_PICKUP_RECEIPTS);
@@ -805,11 +864,7 @@ mod tests {
                 .len(),
             MAX_PICKUP_RECEIPTS
         );
-        let stress_ids = picked
-            .pickup_receipts()
-            .into_iter()
-            .map(|receipt| receipt.entity_id)
-            .collect::<Vec<_>>();
+        let stress_ids = picked.pickup_receipts();
         picked.commit_pickup_receipts(&stress_ids);
         let stress_snapshot = picked.entity_column_snapshot(source);
         assert!(picked.note_entity_column_persisted(&stress_snapshot));
