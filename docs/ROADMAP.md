@@ -273,3 +273,5 @@ asset classes and mechanical dependency updates. Milestone history and frozen M4
 Evaluate data layouts, storage engines, SIMD, io_uring, allocators, PGO/BOLT and high-player-count
 partitioning only against representative benchmarks. R1 resource/render workloads should supply
 reusable evidence for this later campaign.
+
+S1 local evaluation is accepted, pending public CI. [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md) retain the current backend for bounded initial M5; no S1.3. PM5-004 final disposition awaits publication acceptance. R2 and subsequent stages remain inactive.

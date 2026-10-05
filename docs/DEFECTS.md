@@ -114,3 +114,5 @@ authoritative 20 TPS. Shared timing and discontinuity/input-once tests are docum
 [P1_REPORT.md](P1_REPORT.md). Ubuntu and Windows implementation CI 37256205733 passed. P1 is CLOSED and PM5-003 is resolved.
 Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
 S1 and subsequent stages are inactive.
+
+S1 local evaluation is accepted, pending public CI. [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md) retain the current backend for bounded initial M5; no S1.3. PM5-004 final disposition awaits publication acceptance. R2 and subsequent stages remain inactive.

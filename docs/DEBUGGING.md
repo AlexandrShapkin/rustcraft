@@ -125,3 +125,11 @@ and VRR are explicitly unavailable. Medium-cost summaries sample at C1 diagnosti
 views do not call the provider. Devtools opt-in retains bounded scalar recent timing, not resources.
 The viewport rounds timing values; JSON tuples identify columns in `statistics_columns`.
 Stationary/paused duplicate transforms are normal. See [P1_REPORT.md](P1_REPORT.md).
+
+S1 Persistence observations include successful column raw/application-write bytes, encode/compression/
+write/atomic-publication envelope totals, save queue wait total/max, current oldest dirty age,
+coalesced pre-save mutations and stale acknowledgements. These are the same demanded Snapshot fields
+returned by `persistence()` in Rhai/Control and captured in bundles. Totals reset on store open and
+exclude checkpoint/failed-write bytes; they are not SSD/NAND write or isolated fsync counters.
+Use `just scenario-client scripts/scenarios/s1_diagnostics.rhai` for a disposable graphical smoke.
+Use isolated save/config paths as for other acceptance runs. Full storage evaluation is headless.

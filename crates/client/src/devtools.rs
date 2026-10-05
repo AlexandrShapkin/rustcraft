@@ -707,11 +707,24 @@ impl rustcraft_control::Host for ClientHost<'_> {
                     let player = a.player_save_scheduler.metrics();
                     let world = a.world_state_save_scheduler.metrics();
                     serde_json::json!({"dirty":a.persistence_dirty.dirty_count(),
+                    "oldest_dirty_ms":a.persistence_dirty.oldest_dirty_ms(),
+                    "stale_save_acks":a.persistence_dirty.metrics().stale_acks,
+                    "coalesced_dirty_mutations":a.persistence_dirty.metrics().coalesced_mutations,
                     "dirty_subset_cap":16,"dirty_subset_truncated":a.persistence_dirty.dirty_count()>16,"dirty_subset":a.persistence_dirty.diagnostic_entries(16).map(|(p,g,s)|serde_json::json!({"chunk":[p.x,p.z],
                     "generation":g,
                     "saving":s})).collect::<Vec<_>>(),
+                    "column_io":a.world_storage.as_ref().map(|store| {
+                        let m = store.io_metrics();
+                        serde_json::json!({"columns":m.columns,"raw_bytes":m.raw_bytes,
+                            "application_write_bytes":m.application_write_bytes,"encode_us":m.encode_us,
+                            "compression_us":m.compression_us,"write_us":m.write_us,
+                            "durability_envelope_us":m.durability_us,
+                            "scope":"successful column writes since open; not device writes or isolated fsync"})
+                    }),
                     "queued":saves.queued,
                     "inflight":saves.in_flight,
+                    "queue_wait_total_us":saves.queue_wait_us,
+                    "queue_wait_max_us":saves.max_queue_wait_us,
                     "failures":saves.failed,
                     "player_revision":a.player_revision,
                     "player_persisted":a.player_persisted_revision,

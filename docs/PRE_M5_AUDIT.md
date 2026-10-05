@@ -748,3 +748,5 @@ A transient client position clock and pending-look preview repair those defects;
 [Detailed results](P1_REPORT.md) distinguish application timing from unavailable physical scanout.
 P1 is CLOSED; PM5-003 is resolved after local acceptance and Ubuntu/Windows implementation CI 37256205733. No S1 or subsequent implementation is authorized by this
 update. The historical audit findings/contracts above remain the planning baseline.
+
+S1 local evaluation is accepted, pending public CI. [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md) retain the current backend for bounded initial M5; no S1.3. PM5-004 final disposition awaits publication acceptance. R2 and subsequent stages remain inactive.

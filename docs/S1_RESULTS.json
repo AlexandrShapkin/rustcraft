@@ -1,0 +1,2767 @@
+{
+  "schema": 1,
+  "starting_sha": "e07d8bd4110a972588c2ceafe55df400521d72cb",
+  "host": {
+    "os": "Linux 7.2.7-zen1-1-zen x86_64",
+    "cpu": "AMD Ryzen 5 PRO 2500U, 8 logical CPUs",
+    "rust": "1.98.0",
+    "profile": "release",
+    "filesystem": "ext4",
+    "device": "Intel SSDPEKKF256G8L NVMe /dev/nvme0n1p2",
+    "cache": "fresh-directory writes; warm/process-reopen reads; OS cache retained",
+    "large_tier_load": "concurrent local validation; not matched quiet-host latency"
+  },
+  "normalization": "application bytes / changed payload bytes; voxel variant2, entity1; transfer three ordered writes normalize to256 bytes (96+32+96+32). Corrected earlier marker36 denominator to encoded32; measured IO and times unchanged.",
+  "baseline_before_candidates": {
+    "backend": "current_per_column",
+    "cache": "fresh-directory writes; warm and process-storage-reopen reads, OS cache not dropped",
+    "checkpoints": {
+      "application_write_bytes": 2334976,
+      "directory_sync_calls_unix": 768,
+      "file_sync_calls": 512,
+      "latency": {
+        "count": 256,
+        "max_ms": 25.169752,
+        "p50_ms": 4.509328,
+        "p95_ms": 6.399453,
+        "p99_ms": 15.019523,
+        "sum_ms": 1263.7554519999994
+      },
+      "sync_replace_envelope": {
+        "count": 256,
+        "max_ms": 24.908545,
+        "p50_ms": 4.1471979999999995,
+        "p95_ms": 5.903368,
+        "p99_ms": 14.582034,
+        "sum_ms": 1170.3922809999997
+      },
+      "write": {
+        "count": 256,
+        "max_ms": 0.21965200000000001,
+        "p50_ms": 0.049029,
+        "p95_ms": 0.067956,
+        "p99_ms": 0.09833700000000001,
+        "sum_ms": 12.912817999999994
+      }
+    },
+    "churn": {
+      "application_write_bytes": 235595033,
+      "atomic_replaces": 10000,
+      "compression": {
+        "count": 10000,
+        "max_ms": 3.644197,
+        "p50_ms": 0.532333,
+        "p95_ms": 1.0372890000000001,
+        "p99_ms": 1.399837,
+        "sum_ms": 5983.66155700002
+      },
+      "directory_sync_calls_unix": 30000,
+      "durability_envelope": {
+        "count": 10000,
+        "max_ms": 112.16854,
+        "p50_ms": 3.450457,
+        "p95_ms": 12.607536,
+        "p99_ms": 14.770742,
+        "sum_ms": 44853.10877500003
+      },
+      "encode": {
+        "count": 10000,
+        "max_ms": 12.482453,
+        "p50_ms": 3.195116,
+        "p95_ms": 6.443384000000001,
+        "p99_ms": 8.409986,
+        "sum_ms": 36133.34946899993
+      },
+      "encoded_raw_bytes": 673001678,
+      "file_sync_calls": 10000,
+      "logical_changed_bytes": 30000,
+      "operation": {
+        "count": 10000,
+        "max_ms": 116.674653,
+        "p50_ms": 7.39644,
+        "p95_ms": 18.26066,
+        "p99_ms": 23.461139999999997,
+        "sum_ms": 87515.6829229997
+      },
+      "write_all": {
+        "count": 10000,
+        "max_ms": 0.36017299999999997,
+        "p50_ms": 0.040159,
+        "p95_ms": 0.071518,
+        "p99_ms": 0.093658,
+        "sum_ms": 443.052200000004
+      },
+      "write_all_calls": 10000,
+      "write_amplification": 7853.1677666666665
+    },
+    "columns": 10000,
+    "components": {
+      "count": 48,
+      "namespaces": 3,
+      "unknown_preserved": true
+    },
+    "compression": "zlib fast if smaller",
+    "config": {
+      "rustcraft:diagnostics/sample_interval_ms": {
+        "effective": 250,
+        "requested": 250,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:identity/chunk_width": {
+        "effective": 16,
+        "requested": 16,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:identity/control_version": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:lighting/work_budget": {
+        "effective": 32,
+        "requested": 32,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:lighting/workers": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:meshing/upload_bytes": {
+        "effective": 8388608,
+        "requested": 8388608,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/upload_sections": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/workers": {
+        "effective": 3,
+        "requested": 3,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:persistence/player_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:persistence/world_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:renderer/present_policy": {
+        "effective": "PreferFifo",
+        "requested": "PreferFifo",
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:scripts/reload_interval_ms": {
+        "effective": 500,
+        "requested": 500,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:streaming/load_radius": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/lookahead": {
+        "effective": false,
+        "requested": false,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/main_budget_ms": {
+        "effective": 2.0,
+        "requested": 2.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:streaming/retain_radius": {
+        "effective": 5,
+        "requested": 5,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:ui/font_scale": {
+        "effective": 1.0,
+        "requested": 1.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      }
+    },
+    "creation": {
+      "application_write_bytes": 235578773,
+      "atomic_replaces": 10000,
+      "compression": {
+        "count": 10000,
+        "max_ms": 7.524534,
+        "p50_ms": 0.654208,
+        "p95_ms": 1.315049,
+        "p99_ms": 2.869585,
+        "sum_ms": 7786.480707000019
+      },
+      "directory_sync_calls_unix": 30000,
+      "durability_envelope": {
+        "count": 10000,
+        "max_ms": 128.099156,
+        "p50_ms": 3.364345,
+        "p95_ms": 11.196463,
+        "p99_ms": 19.279868999999998,
+        "sum_ms": 47916.32873200005
+      },
+      "encode": {
+        "count": 10000,
+        "max_ms": 31.134025,
+        "p50_ms": 3.169626,
+        "p95_ms": 7.907127999999998,
+        "p99_ms": 13.105932,
+        "sum_ms": 38720.201507999955
+      },
+      "encoded_raw_bytes": 672719960,
+      "file_sync_calls": 10000,
+      "logical_changed_bytes": 656320000,
+      "operation": {
+        "count": 10000,
+        "max_ms": 137.872939,
+        "p50_ms": 7.420122,
+        "p95_ms": 19.285737,
+        "p99_ms": 29.119722,
+        "sum_ms": 95291.3926100003
+      },
+      "write_all": {
+        "count": 10000,
+        "max_ms": 2.032114,
+        "p50_ms": 0.043302,
+        "p95_ms": 0.072636,
+        "p99_ms": 0.105322,
+        "sum_ms": 494.1291260000012
+      },
+      "write_all_calls": 10000,
+      "write_amplification": 0.35893889108971233
+    },
+    "creation_wall_s": 133.39737497,
+    "cycles": 100,
+    "durability": "atomicwrites file sync + replacement + Unix directory sync; Windows directory sync unsupported",
+    "entities_initial": 10000,
+    "entity_lookup_after_decode": {
+      "count": 2000,
+      "max_ms": 0.0396,
+      "p50_ms": 0.0024449999999999997,
+      "p95_ms": 0.005657000000000001,
+      "p99_ms": 0.005797,
+      "sum_ms": 7.064387000000163
+    },
+    "entity_only_dense": {
+      "application_write_bytes": 3721498,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 6.17624,
+        "p50_ms": 1.510815,
+        "p95_ms": 3.623945,
+        "p99_ms": 5.141116,
+        "sum_ms": 188.44010799999992
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 40.111332999999995,
+        "p50_ms": 6.742166999999999,
+        "p95_ms": 17.114983,
+        "p99_ms": 20.347255,
+        "sum_ms": 796.8294259999998
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 20.533732,
+        "p50_ms": 10.645268999999999,
+        "p95_ms": 16.207948,
+        "p99_ms": 18.423118,
+        "sum_ms": 1066.4317180000005
+      },
+      "encoded_raw_bytes": 21090800,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 54.14112900000001,
+        "p50_ms": 20.091077,
+        "p95_ms": 30.26219,
+        "p99_ms": 39.319468,
+        "sum_ms": 2062.64092
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 1.716918,
+        "p50_ms": 0.06453400000000001,
+        "p95_ms": 0.10210899999999999,
+        "p99_ms": 1.205468,
+        "sum_ms": 9.600442999999999
+      },
+      "write_all_calls": 100,
+      "write_amplification": 37214.98
+    },
+    "entity_only_sparse": {
+      "application_write_bytes": 2362239,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 8.062244,
+        "p50_ms": 1.215245,
+        "p95_ms": 3.340877,
+        "p99_ms": 4.714104,
+        "sum_ms": 165.83788099999998
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 26.776741,
+        "p50_ms": 6.137059,
+        "p95_ms": 17.283580999999998,
+        "p99_ms": 26.399455,
+        "sum_ms": 742.377097
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 23.553687,
+        "p50_ms": 10.031012,
+        "p95_ms": 16.003732,
+        "p99_ms": 22.326779000000002,
+        "sum_ms": 1020.63117
+      },
+      "encoded_raw_bytes": 6729500,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 37.765071999999996,
+        "p50_ms": 17.856283,
+        "p95_ms": 33.526520999999995,
+        "p99_ms": 37.25418,
+        "sum_ms": 1940.389163
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 1.059777,
+        "p50_ms": 0.060553,
+        "p95_ms": 0.089188,
+        "p99_ms": 0.258275,
+        "sum_ms": 7.610023999999999
+      },
+      "write_all_calls": 100,
+      "write_amplification": 23622.39
+    },
+    "file_scaling": [
+      {
+        "columns": 1000,
+        "objects": [
+          1001,
+          1,
+          23557549
+        ]
+      },
+      {
+        "columns": 10000,
+        "objects": [
+          10001,
+          1,
+          235578880
+        ]
+      }
+    ],
+    "final_objects": [
+      10005,
+      2,
+      235623855
+    ],
+    "flush_ms": 0.058178,
+    "queue": {
+      "ack_latency": {
+        "count": 1000,
+        "max_ms": 164.723104,
+        "p50_ms": 68.491388,
+        "p95_ms": 94.746183,
+        "p99_ms": 112.504049,
+        "sum_ms": 65965.11362699998
+      },
+      "drained": true,
+      "oldest_admitted_ms": 164.711999,
+      "peak_pending_inflight": 10,
+      "per_worker_capacity": 4,
+      "remaining": 0,
+      "wall_s": 8.963781752,
+      "workers": 2,
+      "writes_per_s": 111.5600566442707
+    },
+    "random_edits": {
+      "application_write_bytes": 2362196,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 4.4336899999999995,
+        "p50_ms": 1.1579750000000002,
+        "p95_ms": 3.023516,
+        "p99_ms": 4.047046,
+        "sum_ms": 153.672514
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 32.416037,
+        "p50_ms": 5.813202,
+        "p95_ms": 14.585736,
+        "p99_ms": 20.60141,
+        "sum_ms": 692.0317799999997
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 18.111693,
+        "p50_ms": 7.942395,
+        "p95_ms": 16.511132,
+        "p99_ms": 17.705076,
+        "sum_ms": 890.4547279999999
+      },
+      "encoded_raw_bytes": 6729500,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 200,
+      "operation": {
+        "count": 100,
+        "max_ms": 44.733386,
+        "p50_ms": 15.734143,
+        "p95_ms": 27.875071000000002,
+        "p99_ms": 38.171691,
+        "sum_ms": 1747.2851610000007
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.36185,
+        "p50_ms": 0.059574999999999996,
+        "p95_ms": 0.11977900000000001,
+        "p99_ms": 0.312332,
+        "sum_ms": 7.403014000000002
+      },
+      "write_all_calls": 100,
+      "write_amplification": 11810.98
+    },
+    "random_read": {
+      "count": 2000,
+      "max_ms": 13.757685,
+      "p50_ms": 1.5155640000000001,
+      "p95_ms": 2.485944,
+      "p99_ms": 3.5934220000000003,
+      "sum_ms": 3382.0375470000013
+    },
+    "reopen_ms": 0.9272180000000001,
+    "schema": 1,
+    "sections_per_column": 8,
+    "sequential_read": {
+      "count": 1000,
+      "max_ms": 11.47568,
+      "p50_ms": 2.149656,
+      "p95_ms": 3.030848,
+      "p99_ms": 3.77508,
+      "sum_ms": 2247.335361999999
+    },
+    "startup_global_index_bytes": 0,
+    "storage_trend": [
+      {
+        "cycle": 1,
+        "objects": [
+          10005,
+          2,
+          235620779
+        ]
+      },
+      {
+        "cycle": 10,
+        "objects": [
+          10005,
+          2,
+          235620910
+        ]
+      },
+      {
+        "cycle": 20,
+        "objects": [
+          10005,
+          2,
+          235621160
+        ]
+      },
+      {
+        "cycle": 30,
+        "objects": [
+          10005,
+          2,
+          235621478
+        ]
+      },
+      {
+        "cycle": 40,
+        "objects": [
+          10005,
+          2,
+          235621753
+        ]
+      },
+      {
+        "cycle": 50,
+        "objects": [
+          10005,
+          2,
+          235622135
+        ]
+      },
+      {
+        "cycle": 60,
+        "objects": [
+          10005,
+          2,
+          235622517
+        ]
+      },
+      {
+        "cycle": 70,
+        "objects": [
+          10005,
+          2,
+          235622822
+        ]
+      },
+      {
+        "cycle": 80,
+        "objects": [
+          10005,
+          2,
+          235623197
+        ]
+      },
+      {
+        "cycle": 90,
+        "objects": [
+          10005,
+          2,
+          235623619
+        ]
+      },
+      {
+        "cycle": 100,
+        "objects": [
+          10005,
+          2,
+          235623855
+        ]
+      }
+    ],
+    "transfers": {
+      "application_write_bytes": 7063120,
+      "atomic_replaces": 300,
+      "compression": {
+        "count": 300,
+        "max_ms": 7.848737999999999,
+        "p50_ms": 0.8865000000000001,
+        "p95_ms": 1.593438,
+        "p99_ms": 1.976939,
+        "sum_ms": 287.95136
+      },
+      "directory_sync_calls_unix": 900,
+      "durability_envelope": {
+        "count": 300,
+        "max_ms": 35.68323000000001,
+        "p50_ms": 3.9938269999999996,
+        "p95_ms": 7.7819,
+        "p99_ms": 16.255161,
+        "sum_ms": 1430.113840999999
+      },
+      "encode": {
+        "count": 300,
+        "max_ms": 13.707197999999998,
+        "p50_ms": 5.387098,
+        "p95_ms": 10.458722,
+        "p99_ms": 13.020724000000001,
+        "sum_ms": 1776.416983000001
+      },
+      "encoded_raw_bytes": 20210039,
+      "file_sync_calls": 300,
+      "logical_changed_bytes": 25600,
+      "operation": {
+        "count": 300,
+        "max_ms": 44.017997,
+        "p50_ms": 10.705263,
+        "p95_ms": 18.418228,
+        "p99_ms": 27.230221999999998,
+        "sum_ms": 3516.449313
+      },
+      "write_all": {
+        "count": 300,
+        "max_ms": 0.901167,
+        "p50_ms": 0.050356,
+        "p95_ms": 0.096871,
+        "p99_ms": 0.144992,
+        "sum_ms": 17.718709000000004
+      },
+      "write_all_calls": 300,
+      "write_amplification": 275.903125
+    }
+  },
+  "current_standard": {
+    "backend": "current_per_column",
+    "cache": "fresh-directory writes; warm and process-storage-reopen reads, OS cache not dropped",
+    "checkpoints": {
+      "application_write_bytes": 2334976,
+      "directory_sync_calls_unix": 768,
+      "file_sync_calls": 512,
+      "latency": {
+        "count": 256,
+        "max_ms": 30.447431,
+        "p50_ms": 10.902617999999999,
+        "p95_ms": 13.038443000000001,
+        "p99_ms": 15.119931,
+        "sum_ms": 2825.7285440000014
+      },
+      "sync_replace_envelope": {
+        "count": 256,
+        "max_ms": 30.077271,
+        "p50_ms": 10.612496,
+        "p95_ms": 12.659762000000002,
+        "p99_ms": 14.724978,
+        "sum_ms": 2754.278604999999
+      },
+      "write": {
+        "count": 256,
+        "max_ms": 0.21469300000000002,
+        "p50_ms": 0.039740000000000004,
+        "p95_ms": 0.064324,
+        "p99_ms": 0.075079,
+        "sum_ms": 10.716418999999998
+      }
+    },
+    "churn": {
+      "application_write_bytes": 235595033,
+      "atomic_replaces": 10000,
+      "compression": {
+        "count": 10000,
+        "max_ms": 1.923087,
+        "p50_ms": 0.5209480000000001,
+        "p95_ms": 0.87137,
+        "p99_ms": 1.122284,
+        "sum_ms": 5638.079312000007
+      },
+      "directory_sync_calls_unix": 30000,
+      "durability_envelope": {
+        "count": 10000,
+        "max_ms": 187.050308,
+        "p50_ms": 3.361265,
+        "p95_ms": 9.645259,
+        "p99_ms": 47.526068,
+        "sum_ms": 46130.71601499996
+      },
+      "encode": {
+        "count": 10000,
+        "max_ms": 11.784857,
+        "p50_ms": 3.47755,
+        "p95_ms": 5.647947,
+        "p99_ms": 7.003501,
+        "sum_ms": 37136.681107999946
+      },
+      "encoded_raw_bytes": 673001678,
+      "file_sync_calls": 10000,
+      "logical_changed_bytes": 30000,
+      "operation": {
+        "count": 10000,
+        "max_ms": 194.589844,
+        "p50_ms": 7.525078,
+        "p95_ms": 13.971105,
+        "p99_ms": 54.314039,
+        "sum_ms": 89449.37206700041
+      },
+      "write_all": {
+        "count": 10000,
+        "max_ms": 0.310456,
+        "p50_ms": 0.03967,
+        "p95_ms": 0.06663100000000001,
+        "p99_ms": 0.089676,
+        "sum_ms": 433.45009700000384
+      },
+      "write_all_calls": 10000,
+      "write_amplification": 7853.1677666666665
+    },
+    "columns": 10000,
+    "components": {
+      "count": 48,
+      "namespaces": 3,
+      "unknown_preserved": true
+    },
+    "compression": "zlib fast if smaller",
+    "config": {
+      "rustcraft:diagnostics/sample_interval_ms": {
+        "effective": 250,
+        "requested": 250,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:identity/chunk_width": {
+        "effective": 16,
+        "requested": 16,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:identity/control_version": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:lighting/work_budget": {
+        "effective": 32,
+        "requested": 32,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:lighting/workers": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:meshing/upload_bytes": {
+        "effective": 8388608,
+        "requested": 8388608,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/upload_sections": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/workers": {
+        "effective": 3,
+        "requested": 3,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:persistence/player_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:persistence/world_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:renderer/present_policy": {
+        "effective": "PreferFifo",
+        "requested": "PreferFifo",
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:scripts/reload_interval_ms": {
+        "effective": 500,
+        "requested": 500,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:streaming/load_radius": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/lookahead": {
+        "effective": false,
+        "requested": false,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/main_budget_ms": {
+        "effective": 2.0,
+        "requested": 2.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:streaming/retain_radius": {
+        "effective": 5,
+        "requested": 5,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:ui/font_scale": {
+        "effective": 1.0,
+        "requested": 1.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      }
+    },
+    "creation": {
+      "application_write_bytes": 235578773,
+      "atomic_replaces": 10000,
+      "compression": {
+        "count": 10000,
+        "max_ms": 2.4700870000000004,
+        "p50_ms": 0.637305,
+        "p95_ms": 1.0002010000000001,
+        "p99_ms": 1.27426,
+        "sum_ms": 6799.992806000021
+      },
+      "directory_sync_calls_unix": 30000,
+      "durability_envelope": {
+        "count": 10000,
+        "max_ms": 68.40236200000001,
+        "p50_ms": 3.3211070000000005,
+        "p95_ms": 10.809241,
+        "p99_ms": 12.358047000000001,
+        "sum_ms": 45412.62190100003
+      },
+      "encode": {
+        "count": 10000,
+        "max_ms": 12.006604,
+        "p50_ms": 3.4454250000000006,
+        "p95_ms": 5.610793,
+        "p99_ms": 6.999594,
+        "sum_ms": 36767.7786950002
+      },
+      "encoded_raw_bytes": 672719960,
+      "file_sync_calls": 10000,
+      "logical_changed_bytes": 656320000,
+      "operation": {
+        "count": 10000,
+        "max_ms": 72.27661400000001,
+        "p50_ms": 7.678522999999999,
+        "p95_ms": 16.235719999999997,
+        "p99_ms": 20.033984,
+        "sum_ms": 89882.1664879997
+      },
+      "write_all": {
+        "count": 10000,
+        "max_ms": 0.19758199999999998,
+        "p50_ms": 0.039251,
+        "p95_ms": 0.064393,
+        "p99_ms": 0.083181,
+        "sum_ms": 423.77534800000325
+      },
+      "write_all_calls": 10000,
+      "write_amplification": 0.35893889108971233
+    },
+    "creation_wall_s": 125.68306723,
+    "cycles": 100,
+    "decode": {
+      "count": 2000,
+      "max_ms": 3.3733090000000003,
+      "p50_ms": 1.1212700000000002,
+      "p95_ms": 1.8014789999999996,
+      "p99_ms": 2.2256399999999994,
+      "sum_ms": 2509.842923999998
+    },
+    "decompression": {
+      "count": 2000,
+      "max_ms": 0.899587,
+      "p50_ms": 0.33888199999999996,
+      "p95_ms": 0.49938200000000005,
+      "p99_ms": 0.631107,
+      "sum_ms": 723.7146370000002
+    },
+    "durability": "atomicwrites file sync + replacement + Unix directory sync; Windows directory sync unsupported",
+    "entities_initial": 10000,
+    "entity_lookup_after_decode": {
+      "count": 2000,
+      "max_ms": 0.056294,
+      "p50_ms": 0.0023740000000000002,
+      "p95_ms": 0.005238,
+      "p99_ms": 0.005727,
+      "sum_ms": 6.27670500000008
+    },
+    "entity_only_dense": {
+      "application_write_bytes": 3721498,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 2.315179,
+        "p50_ms": 1.3102980000000002,
+        "p95_ms": 1.807849,
+        "p99_ms": 2.2160729999999997,
+        "sum_ms": 120.576584
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 31.570693,
+        "p50_ms": 10.80889,
+        "p95_ms": 12.033773,
+        "p99_ms": 17.635763999999998,
+        "sum_ms": 1115.9672
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 12.664302,
+        "p50_ms": 7.103166999999999,
+        "p95_ms": 9.303804,
+        "p99_ms": 11.074289,
+        "sum_ms": 670.6315840000001
+      },
+      "encoded_raw_bytes": 21090800,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 41.68941,
+        "p50_ms": 19.50235,
+        "p95_ms": 23.071533000000002,
+        "p99_ms": 29.475516,
+        "sum_ms": 1914.3498389999997
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.14177800000000002,
+        "p50_ms": 0.056851,
+        "p95_ms": 0.100223,
+        "p99_ms": 0.13353700000000002,
+        "sum_ms": 5.962584000000003
+      },
+      "write_all_calls": 100,
+      "write_amplification": 37214.98
+    },
+    "entity_only_sparse": {
+      "application_write_bytes": 2362239,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 1.494191,
+        "p50_ms": 0.849762,
+        "p95_ms": 1.209516,
+        "p99_ms": 1.406888,
+        "sum_ms": 79.19614599999998
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 31.778472999999998,
+        "p50_ms": 10.740865,
+        "p95_ms": 12.238617,
+        "p99_ms": 15.248369,
+        "sum_ms": 1090.1694690000002
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 12.052838000000001,
+        "p50_ms": 5.937023000000001,
+        "p95_ms": 8.238302000000001,
+        "p99_ms": 9.017174,
+        "sum_ms": 539.8909039999999
+      },
+      "encoded_raw_bytes": 6729500,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 38.698166,
+        "p50_ms": 16.852142,
+        "p95_ms": 21.159551,
+        "p99_ms": 23.513561,
+        "sum_ms": 1715.6348010000002
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.093588,
+        "p50_ms": 0.049937,
+        "p95_ms": 0.082623,
+        "p99_ms": 0.09351799999999999,
+        "sum_ms": 5.149835000000001
+      },
+      "write_all_calls": 100,
+      "write_amplification": 23622.39
+    },
+    "file_scaling": [
+      {
+        "columns": 1000,
+        "objects": [
+          1001,
+          1,
+          23557549
+        ]
+      },
+      {
+        "columns": 10000,
+        "objects": [
+          10001,
+          1,
+          235578880
+        ]
+      }
+    ],
+    "final_objects": [
+      10005,
+      2,
+      235623855
+    ],
+    "flush_ms": 0.188159,
+    "isolated_sync_calibration": {
+      "directory_sync_unix": {
+        "count": 128,
+        "max_ms": 0.051405,
+        "p50_ms": 0.020464,
+        "p95_ms": 0.042325,
+        "p99_ms": 0.048751,
+        "sum_ms": 2.8506639999999996
+      },
+      "file_sync": {
+        "count": 128,
+        "max_ms": 45.379964,
+        "p50_ms": 0.934158,
+        "p95_ms": 1.385207,
+        "p99_ms": 2.463523,
+        "sum_ms": 170.170835
+      },
+      "scope": "isolated 4KiB append and sync; not actual atomic-write internal fsync timing",
+      "write": {
+        "count": 128,
+        "max_ms": 0.099039,
+        "p50_ms": 0.030521999999999997,
+        "p95_ms": 0.054478000000000006,
+        "p99_ms": 0.078714,
+        "sum_ms": 4.061959
+      }
+    },
+    "paced_queue": {
+      "capacity": 8,
+      "count": 300,
+      "dirty_peak": 5,
+      "dirty_to_ack": {
+        "count": 300,
+        "max_ms": 92.716886,
+        "p50_ms": 15.457734,
+        "p95_ms": 47.179324,
+        "p99_ms": 76.236442,
+        "sum_ms": 5616.060149
+      },
+      "elapsed_s": 5.99557823,
+      "queue_wait": {
+        "count": 300,
+        "max_ms": 68.50240000000001,
+        "p50_ms": 0.035339999999999996,
+        "p95_ms": 22.401918,
+        "p99_ms": 50.463266,
+        "sum_ms": 786.5530959999999
+      },
+      "remaining": 0,
+      "source_writes_per_s": 50,
+      "trend": [
+        {
+          "completed": 50,
+          "dirty": 0
+        },
+        {
+          "completed": 100,
+          "dirty": 0
+        },
+        {
+          "completed": 150,
+          "dirty": 0
+        },
+        {
+          "completed": 200,
+          "dirty": 0
+        },
+        {
+          "completed": 250,
+          "dirty": 0
+        },
+        {
+          "completed": 300,
+          "dirty": 0
+        }
+      ],
+      "workers": 1
+    },
+    "process_reopen": {
+      "cache": "new process, OS cache retained",
+      "first_100_reads": {
+        "count": 100,
+        "max_ms": 11.081038,
+        "p50_ms": 1.920979,
+        "p95_ms": 3.339852,
+        "p99_ms": 4.402802,
+        "sum_ms": 220.160892
+      },
+      "open_metadata_ms": 0.157847
+    },
+    "queue": {
+      "ack_latency": {
+        "count": 1000,
+        "max_ms": 261.375738,
+        "p50_ms": 150.5894,
+        "p95_ms": 174.371992,
+        "p99_ms": 244.381873,
+        "sum_ms": 152740.948523
+      },
+      "drained": true,
+      "oldest_admitted_ms": 261.36714700000005,
+      "peak_pending_inflight": 9,
+      "per_worker_capacity": 8,
+      "queue_wait": {
+        "count": 1000,
+        "max_ms": 247.898358,
+        "p50_ms": 134.422852,
+        "p95_ms": 156.45076699999998,
+        "p99_ms": 222.494823,
+        "sum_ms": 136581.988352
+      },
+      "remaining": 0,
+      "wall_s": 17.411559031,
+      "workers": 1,
+      "writes_per_s": 57.433110855815585
+    },
+    "random_edits": {
+      "application_write_bytes": 2362196,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 1.383771,
+        "p50_ms": 0.854233,
+        "p95_ms": 1.29605,
+        "p99_ms": 1.3781839999999999,
+        "sum_ms": 79.89841000000001
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 16.394332,
+        "p50_ms": 10.436635,
+        "p95_ms": 12.462949,
+        "p99_ms": 12.955401000000002,
+        "sum_ms": 1055.44683
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 9.623539000000001,
+        "p50_ms": 5.983397,
+        "p95_ms": 8.113914,
+        "p99_ms": 9.304084,
+        "sum_ms": 535.843091
+      },
+      "encoded_raw_bytes": 6729500,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 200,
+      "operation": {
+        "count": 100,
+        "max_ms": 23.221623,
+        "p50_ms": 17.078987,
+        "p95_ms": 20.743016,
+        "p99_ms": 21.998488000000002,
+        "sum_ms": 1678.0021429999997
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.15281299999999998,
+        "p50_ms": 0.051334,
+        "p95_ms": 0.08828,
+        "p99_ms": 0.118241,
+        "sum_ms": 5.535436000000002
+      },
+      "write_all_calls": 100,
+      "write_amplification": 11810.98
+    },
+    "random_read": {
+      "count": 2000,
+      "max_ms": 3.9486139999999996,
+      "p50_ms": 1.523081,
+      "p95_ms": 2.3711230000000003,
+      "p99_ms": 2.903333,
+      "sum_ms": 3340.328221999995
+    },
+    "read_io": {
+      "count": 2000,
+      "max_ms": 0.18026699999999998,
+      "p50_ms": 0.044002000000000006,
+      "p95_ms": 0.086746,
+      "p99_ms": 0.125858,
+      "sum_ms": 94.573583
+    },
+    "reopen_ms": 0.8134699999999999,
+    "schema": 1,
+    "sections_per_column": 8,
+    "sequential_read": {
+      "count": 1000,
+      "max_ms": 4.519445,
+      "p50_ms": 2.070516,
+      "p95_ms": 3.100781,
+      "p99_ms": 3.9144590000000004,
+      "sum_ms": 2220.595600999999
+    },
+    "startup_global_index_bytes": 0,
+    "storage_trend": [
+      {
+        "cycle": 1,
+        "objects": [
+          10005,
+          2,
+          235620779
+        ]
+      },
+      {
+        "cycle": 10,
+        "objects": [
+          10005,
+          2,
+          235620910
+        ]
+      },
+      {
+        "cycle": 20,
+        "objects": [
+          10005,
+          2,
+          235621160
+        ]
+      },
+      {
+        "cycle": 30,
+        "objects": [
+          10005,
+          2,
+          235621478
+        ]
+      },
+      {
+        "cycle": 40,
+        "objects": [
+          10005,
+          2,
+          235621753
+        ]
+      },
+      {
+        "cycle": 50,
+        "objects": [
+          10005,
+          2,
+          235622135
+        ]
+      },
+      {
+        "cycle": 60,
+        "objects": [
+          10005,
+          2,
+          235622517
+        ]
+      },
+      {
+        "cycle": 70,
+        "objects": [
+          10005,
+          2,
+          235622822
+        ]
+      },
+      {
+        "cycle": 80,
+        "objects": [
+          10005,
+          2,
+          235623197
+        ]
+      },
+      {
+        "cycle": 90,
+        "objects": [
+          10005,
+          2,
+          235623619
+        ]
+      },
+      {
+        "cycle": 100,
+        "objects": [
+          10005,
+          2,
+          235623855
+        ]
+      }
+    ],
+    "transfers": {
+      "application_write_bytes": 7063120,
+      "atomic_replaces": 300,
+      "compression": {
+        "count": 300,
+        "max_ms": 1.719848,
+        "p50_ms": 0.6346499999999999,
+        "p95_ms": 1.2045569999999999,
+        "p99_ms": 1.3812570000000002,
+        "sum_ms": 215.35647699999987
+      },
+      "directory_sync_calls_unix": 900,
+      "durability_envelope": {
+        "count": 300,
+        "max_ms": 32.054416,
+        "p50_ms": 10.610471,
+        "p95_ms": 12.632453000000002,
+        "p99_ms": 15.469138,
+        "sum_ms": 3198.534907
+      },
+      "encode": {
+        "count": 300,
+        "max_ms": 10.61927,
+        "p50_ms": 4.335974,
+        "p95_ms": 7.805075000000001,
+        "p99_ms": 8.888667,
+        "sum_ms": 1473.405003
+      },
+      "encoded_raw_bytes": 20210039,
+      "file_sync_calls": 300,
+      "logical_changed_bytes": 25600,
+      "operation": {
+        "count": 300,
+        "max_ms": 39.358587,
+        "p50_ms": 15.844326999999998,
+        "p95_ms": 20.275007000000002,
+        "p99_ms": 21.692581,
+        "sum_ms": 4905.806992000004
+      },
+      "write_all": {
+        "count": 300,
+        "max_ms": 0.103505,
+        "p50_ms": 0.046305,
+        "p95_ms": 0.077873,
+        "p99_ms": 0.09701,
+        "sum_ms": 14.852988999999996
+      },
+      "write_all_calls": 300,
+      "write_amplification": 275.903125
+    }
+  },
+  "split_standard": {
+    "backend": "benchmark_only_split_blobs",
+    "churn": {
+      "application_write_bytes": 235432926,
+      "atomic_replaces": 20000,
+      "compression": {
+        "count": 20000,
+        "max_ms": 1.8755620000000002,
+        "p50_ms": 0.375614,
+        "p95_ms": 0.8028420000000001,
+        "p99_ms": 1.069363,
+        "sum_ms": 6488.197638999991
+      },
+      "directory_sync_calls_unix": 60000,
+      "durability_envelope": {
+        "count": 20000,
+        "max_ms": 198.39069800000001,
+        "p50_ms": 3.240078,
+        "p95_ms": 5.045788,
+        "p99_ms": 16.409523999999998,
+        "sum_ms": 76683.62534499976
+      },
+      "encode": {
+        "count": 20000,
+        "max_ms": 11.886635,
+        "p50_ms": 2.423619,
+        "p95_ms": 5.183034,
+        "p99_ms": 6.758685,
+        "sum_ms": 37596.21822200007
+      },
+      "encoded_raw_bytes": 673041678,
+      "file_sync_calls": 20000,
+      "logical_changed_bytes": 30000,
+      "operation": {
+        "count": 20000,
+        "max_ms": 205.014303,
+        "p50_ms": 6.3152479999999995,
+        "p95_ms": 11.228895,
+        "p99_ms": 22.323543,
+        "sum_ms": 121632.03745499965
+      },
+      "write_all": {
+        "count": 20000,
+        "max_ms": 0.33720100000000003,
+        "p50_ms": 0.032965,
+        "p95_ms": 0.059157,
+        "p99_ms": 0.083951,
+        "sum_ms": 635.9124169999957
+      },
+      "write_all_calls": 20000,
+      "write_amplification": 7847.7642
+    },
+    "columns": 10000,
+    "compaction": "not applicable; replacement",
+    "creation": {
+      "application_write_bytes": 235420188,
+      "atomic_replaces": 20000,
+      "compression": {
+        "count": 20000,
+        "max_ms": 2.197339,
+        "p50_ms": 0.399084,
+        "p95_ms": 0.975711,
+        "p99_ms": 1.250685,
+        "sum_ms": 7948.81809699999
+      },
+      "directory_sync_calls_unix": 60000,
+      "durability_envelope": {
+        "count": 20000,
+        "max_ms": 188.14000199999998,
+        "p50_ms": 3.200927,
+        "p95_ms": 11.079877999999999,
+        "p99_ms": 15.464021999999998,
+        "sum_ms": 88613.8628500003
+      },
+      "encode": {
+        "count": 20000,
+        "max_ms": 10.944235,
+        "p50_ms": 2.431952,
+        "p95_ms": 5.407063000000001,
+        "p99_ms": 6.856511,
+        "sum_ms": 37770.73373699994
+      },
+      "encoded_raw_bytes": 672759960,
+      "file_sync_calls": 20000,
+      "logical_changed_bytes": 656320000,
+      "operation": {
+        "count": 20000,
+        "max_ms": 188.282064,
+        "p50_ms": 6.623159,
+        "p95_ms": 16.032262,
+        "p99_ms": 22.387354000000002,
+        "sum_ms": 135389.7813479997
+      },
+      "write_all": {
+        "count": 20000,
+        "max_ms": 0.280071,
+        "p50_ms": 0.032897,
+        "p95_ms": 0.059646,
+        "p99_ms": 0.079551,
+        "sum_ms": 640.2437789999951
+      },
+      "write_all_calls": 20000,
+      "write_amplification": 0.3586972635299854
+    },
+    "creation_wall_s": 173.116021005,
+    "cycles": 100,
+    "durability": "same AtomicFile sync/replace per blob; ordered transfer as current; no cross-blob transaction",
+    "entity_lookup_physical": {
+      "count": 2000,
+      "max_ms": 0.32106700000000005,
+      "p50_ms": 0.024584,
+      "p95_ms": 0.039112,
+      "p99_ms": 0.064744,
+      "sum_ms": 52.226628999999875
+    },
+    "entity_only_dense": {
+      "application_write_bytes": 523605,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 0.557627,
+        "p50_ms": 0.26512399999999997,
+        "p95_ms": 0.43177,
+        "p99_ms": 0.545264,
+        "sum_ms": 26.108103000000007
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 24.01099,
+        "p50_ms": 3.1014500000000003,
+        "p95_ms": 4.387329,
+        "p99_ms": 5.47814,
+        "sum_ms": 343.11085600000007
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 0.4203850000000001,
+        "p50_ms": 0.202474,
+        "p95_ms": 0.3193929999999999,
+        "p99_ms": 0.41724300000000003,
+        "sum_ms": 21.111515000000008
+      },
+      "encoded_raw_bytes": 14100400,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 24.889197,
+        "p50_ms": 3.632537,
+        "p95_ms": 4.943631000000001,
+        "p99_ms": 6.010762000000001,
+        "sum_ms": 394.3982059999999
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.081437,
+        "p50_ms": 0.029054999999999997,
+        "p95_ms": 0.04456,
+        "p99_ms": 0.068167,
+        "sum_ms": 2.974053000000001
+      },
+      "write_all_calls": 100,
+      "write_amplification": 5236.05
+    },
+    "entity_only_sparse": {
+      "application_write_bytes": 20398,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 0.12271499999999999,
+        "p50_ms": 0.051893,
+        "p95_ms": 0.085348,
+        "p99_ms": 0.107558,
+        "sum_ms": 5.621390999999998
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 8.754476,
+        "p50_ms": 3.093837,
+        "p95_ms": 3.668367,
+        "p99_ms": 4.207275,
+        "sum_ms": 317.03984900000006
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 0.013550000000000006,
+        "p50_ms": 0.007193999999999999,
+        "p95_ms": 0.012361999999999998,
+        "p99_ms": 0.01319999999999999,
+        "sum_ms": 0.8064639999999998
+      },
+      "encoded_raw_bytes": 14500,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 8.845203,
+        "p50_ms": 3.1981129999999998,
+        "p95_ms": 3.8146880000000003,
+        "p99_ms": 4.290459,
+        "sum_ms": 326.456938
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.038134,
+        "p50_ms": 0.016273000000000003,
+        "p95_ms": 0.030032999999999997,
+        "p99_ms": 0.037156,
+        "sum_ms": 1.780094
+      },
+      "write_all_calls": 100,
+      "write_amplification": 203.98
+    },
+    "final_objects": [
+      20000,
+      4,
+      235426030
+    ],
+    "flush_ms": 1.270158,
+    "isolated_sync_calibration": {
+      "directory_sync_unix": {
+        "count": 128,
+        "max_ms": 0.071449,
+        "p50_ms": 0.023747,
+        "p95_ms": 0.040858,
+        "p99_ms": 0.054966,
+        "sum_ms": 3.0749649999999993
+      },
+      "file_sync": {
+        "count": 128,
+        "max_ms": 1.600863,
+        "p50_ms": 1.024102,
+        "p95_ms": 1.366611,
+        "p99_ms": 1.5357,
+        "sum_ms": 134.65784499999998
+      },
+      "scope": "isolated 4KiB append and sync; not actual atomic-write internal fsync timing",
+      "write": {
+        "count": 128,
+        "max_ms": 0.084021,
+        "p50_ms": 0.032687,
+        "p95_ms": 0.056503,
+        "p99_ms": 0.075849,
+        "sum_ms": 4.151736
+      }
+    },
+    "limitations": "additional file/recovery domains; terrain and entity changes are separate durable operations; not a production-ready backend",
+    "migration": {
+      "all_columns_semantically_validated": true,
+      "application_io": {
+        "application_write_bytes": 23543107,
+        "atomic_replaces": 2000,
+        "compression": {
+          "count": 2000,
+          "max_ms": 1.658484,
+          "p50_ms": 0.379525,
+          "p95_ms": 0.753462,
+          "p99_ms": 0.9884130000000001,
+          "sum_ms": 632.3364700000009
+        },
+        "directory_sync_calls_unix": 6000,
+        "durability_envelope": {
+          "count": 2000,
+          "max_ms": 24.800221999999998,
+          "p50_ms": 3.092633,
+          "p95_ms": 4.3081760000000004,
+          "p99_ms": 4.980621,
+          "sum_ms": 6560.673966000001
+        },
+        "encode": {
+          "count": 2000,
+          "max_ms": 10.114616,
+          "p50_ms": 2.541994,
+          "p95_ms": 4.889056,
+          "p99_ms": 6.416793999999999,
+          "sum_ms": 3694.2464859999977
+        },
+        "encoded_raw_bytes": 67276320,
+        "file_sync_calls": 2000,
+        "logical_changed_bytes": 65632000,
+        "operation": {
+          "count": 2000,
+          "max_ms": 29.653868,
+          "p50_ms": 5.864829,
+          "p95_ms": 9.232224,
+          "p99_ms": 11.565526,
+          "sum_ms": 10975.502219000015
+        },
+        "write_all": {
+          "count": 2000,
+          "max_ms": 0.144085,
+          "p50_ms": 0.032895999999999995,
+          "p95_ms": 0.058598,
+          "p99_ms": 0.08444,
+          "sum_ms": 64.74655899999989
+        },
+        "write_all_calls": 2000,
+        "write_amplification": 0.3587138438566553
+      },
+      "columns": 1000,
+      "convert_ms": 13867.575018,
+      "destination_bytes": 23543107,
+      "peak_bytes": 47100549,
+      "source_bytes": 23557442,
+      "source_intact": true,
+      "validate_ms": 6014.0634549999995
+    },
+    "paced_queue": {
+      "capacity": 8,
+      "count": 300,
+      "dirty_peak": 5,
+      "dirty_to_ack": {
+        "count": 300,
+        "max_ms": 84.03844600000001,
+        "p50_ms": 5.260928,
+        "p95_ms": 6.80942,
+        "p99_ms": 60.559609,
+        "sum_ms": 2069.2794850000005
+      },
+      "elapsed_s": 5.98590108,
+      "queue_wait": {
+        "count": 300,
+        "max_ms": 63.297476,
+        "p50_ms": 0.050147,
+        "p95_ms": 0.41290899999999997,
+        "p99_ms": 38.63415500000001,
+        "sum_ms": 326.357277
+      },
+      "remaining": 0,
+      "source_writes_per_s": 50,
+      "trend": [
+        {
+          "completed": 50,
+          "dirty": 0
+        },
+        {
+          "completed": 100,
+          "dirty": 0
+        },
+        {
+          "completed": 150,
+          "dirty": 0
+        },
+        {
+          "completed": 200,
+          "dirty": 0
+        },
+        {
+          "completed": 250,
+          "dirty": 0
+        },
+        {
+          "completed": 300,
+          "dirty": 0
+        }
+      ],
+      "workers": 1
+    },
+    "random_edits": {
+      "application_write_bytes": 2340274,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 1.20151,
+        "p50_ms": 0.534719,
+        "p95_ms": 0.944558,
+        "p99_ms": 1.0824280000000002,
+        "sum_ms": 57.335836000000015
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 24.165063999999997,
+        "p50_ms": 3.3576349999999997,
+        "p95_ms": 4.694012,
+        "p99_ms": 5.3034609999999995,
+        "sum_ms": 370.99242499999997
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 8.208512,
+        "p50_ms": 3.377192,
+        "p95_ms": 6.030387999999999,
+        "p99_ms": 7.427948000000001,
+        "sum_ms": 367.609075
+      },
+      "encoded_raw_bytes": 6715400,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 200,
+      "operation": {
+        "count": 100,
+        "max_ms": 28.033459999999998,
+        "p50_ms": 7.522375,
+        "p95_ms": 10.79983,
+        "p99_ms": 13.275277,
+        "sum_ms": 801.2373739999998
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.10644100000000001,
+        "p50_ms": 0.04002,
+        "p95_ms": 0.057621000000000006,
+        "p99_ms": 0.08877,
+        "sum_ms": 4.224174000000001
+      },
+      "write_all_calls": 100,
+      "write_amplification": 11701.37
+    },
+    "random_read": {
+      "count": 2000,
+      "max_ms": 16.687237,
+      "p50_ms": 2.02041,
+      "p95_ms": 2.971248,
+      "p99_ms": 4.956386999999999,
+      "sum_ms": 4498.905171000009
+    },
+    "recovery": "same bounded checksummed blobs and transfer order; corrupted conversion destination rejected; source valid",
+    "reopen_ms": 12.688462,
+    "schema": 1,
+    "startup_global_index_bytes": 0,
+    "storage_trend": [
+      {
+        "cycle": 1,
+        "objects": [
+          20000,
+          4,
+          235425288
+        ]
+      },
+      {
+        "cycle": 10,
+        "objects": [
+          20000,
+          4,
+          235425169
+        ]
+      },
+      {
+        "cycle": 20,
+        "objects": [
+          20000,
+          4,
+          235425200
+        ]
+      },
+      {
+        "cycle": 30,
+        "objects": [
+          20000,
+          4,
+          235425238
+        ]
+      },
+      {
+        "cycle": 40,
+        "objects": [
+          20000,
+          4,
+          235425265
+        ]
+      },
+      {
+        "cycle": 50,
+        "objects": [
+          20000,
+          4,
+          235425383
+        ]
+      },
+      {
+        "cycle": 60,
+        "objects": [
+          20000,
+          4,
+          235425537
+        ]
+      },
+      {
+        "cycle": 70,
+        "objects": [
+          20000,
+          4,
+          235425614
+        ]
+      },
+      {
+        "cycle": 80,
+        "objects": [
+          20000,
+          4,
+          235425760
+        ]
+      },
+      {
+        "cycle": 90,
+        "objects": [
+          20000,
+          4,
+          235425925
+        ]
+      },
+      {
+        "cycle": 100,
+        "objects": [
+          20000,
+          4,
+          235426030
+        ]
+      }
+    ],
+    "transfers": {
+      "application_write_bytes": 65675,
+      "atomic_replaces": 300,
+      "compression": {
+        "count": 300,
+        "max_ms": 0.17349,
+        "p50_ms": 0.065373,
+        "p95_ms": 0.11258699999999999,
+        "p99_ms": 0.138639,
+        "sum_ms": 20.52631400000001
+      },
+      "directory_sync_calls_unix": 900,
+      "durability_envelope": {
+        "count": 300,
+        "max_ms": 24.568337,
+        "p50_ms": 3.228565,
+        "p95_ms": 4.325519000000001,
+        "p99_ms": 4.899419,
+        "sum_ms": 1018.5913929999999
+      },
+      "encode": {
+        "count": 300,
+        "max_ms": 0.03485100000000001,
+        "p50_ms": 0.013201000000000004,
+        "p95_ms": 0.018507999999999997,
+        "p99_ms": 0.020533999999999983,
+        "sum_ms": 3.9042780000000046
+      },
+      "encoded_raw_bytes": 74759,
+      "file_sync_calls": 300,
+      "logical_changed_bytes": 25600,
+      "operation": {
+        "count": 300,
+        "max_ms": 24.701876000000002,
+        "p50_ms": 3.347507,
+        "p95_ms": 4.466952,
+        "p99_ms": 5.032959,
+        "sum_ms": 1053.7023310000002
+      },
+      "write_all": {
+        "count": 300,
+        "max_ms": 0.066071,
+        "p50_ms": 0.022838999999999998,
+        "p95_ms": 0.032477,
+        "p99_ms": 0.047144,
+        "sum_ms": 6.6943869999999945
+      },
+      "write_all_calls": 300,
+      "write_amplification": 2.5654296875
+    }
+  },
+  "current_small": {
+    "backend": "current_per_column",
+    "cache": "fresh-directory writes; warm and process-storage-reopen reads, OS cache not dropped",
+    "checkpoints": {
+      "application_write_bytes": 2334976,
+      "directory_sync_calls_unix": 768,
+      "file_sync_calls": 512,
+      "latency": {
+        "count": 256,
+        "max_ms": 49.947598,
+        "p50_ms": 3.602153,
+        "p95_ms": 4.788436,
+        "p99_ms": 5.4097599999999995,
+        "sum_ms": 1006.4652610000003
+      },
+      "sync_replace_envelope": {
+        "count": 256,
+        "max_ms": 49.679541,
+        "p50_ms": 3.333117,
+        "p95_ms": 4.492303,
+        "p99_ms": 5.154344,
+        "sum_ms": 945.9309060000005
+      },
+      "write": {
+        "count": 256,
+        "max_ms": 0.088002,
+        "p50_ms": 0.038554,
+        "p95_ms": 0.058738,
+        "p99_ms": 0.068656,
+        "sum_ms": 9.073312000000001
+      }
+    },
+    "churn": {
+      "application_write_bytes": 246532,
+      "atomic_replaces": 10,
+      "compression": {
+        "count": 10,
+        "max_ms": 0.975498,
+        "p50_ms": 0.577252,
+        "p95_ms": 0.975498,
+        "p99_ms": 0.975498,
+        "sum_ms": 6.4166859999999994
+      },
+      "directory_sync_calls_unix": 30,
+      "durability_envelope": {
+        "count": 10,
+        "max_ms": 4.573531,
+        "p50_ms": 3.3845919999999996,
+        "p95_ms": 4.573531,
+        "p99_ms": 4.573531,
+        "sum_ms": 33.9319
+      },
+      "encode": {
+        "count": 10,
+        "max_ms": 5.760441,
+        "p50_ms": 3.4311079999999996,
+        "p95_ms": 5.760441,
+        "p99_ms": 5.760441,
+        "sum_ms": 37.999765
+      },
+      "encoded_raw_bytes": 815429,
+      "file_sync_calls": 10,
+      "logical_changed_bytes": 30,
+      "operation": {
+        "count": 10,
+        "max_ms": 10.374131,
+        "p50_ms": 7.680355,
+        "p95_ms": 10.374131,
+        "p99_ms": 10.374131,
+        "sum_ms": 78.93851900000001
+      },
+      "write_all": {
+        "count": 10,
+        "max_ms": 0.076967,
+        "p50_ms": 0.043512,
+        "p95_ms": 0.076967,
+        "p99_ms": 0.076967,
+        "sum_ms": 0.480518
+      },
+      "write_all_calls": 10,
+      "write_amplification": 8217.733333333334
+    },
+    "columns": 1000,
+    "components": {
+      "count": 48,
+      "namespaces": 3,
+      "unknown_preserved": true
+    },
+    "compression": "zlib fast if smaller",
+    "config": {
+      "rustcraft:diagnostics/sample_interval_ms": {
+        "effective": 250,
+        "requested": 250,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:identity/chunk_width": {
+        "effective": 16,
+        "requested": 16,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:identity/control_version": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "ImmutableAfterOpen"
+      },
+      "rustcraft:lighting/work_budget": {
+        "effective": 32,
+        "requested": 32,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:lighting/workers": {
+        "effective": 1,
+        "requested": 1,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:meshing/upload_bytes": {
+        "effective": 8388608,
+        "requested": 8388608,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/upload_sections": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:meshing/workers": {
+        "effective": 3,
+        "requested": 3,
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:persistence/player_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:persistence/world_interval_ms": {
+        "effective": 2000,
+        "requested": 2000,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:renderer/present_policy": {
+        "effective": "PreferFifo",
+        "requested": "PreferFifo",
+        "source": "Default",
+        "policy": "RestartRequired"
+      },
+      "rustcraft:scripts/reload_interval_ms": {
+        "effective": 500,
+        "requested": 500,
+        "source": "Default",
+        "policy": "Immediate"
+      },
+      "rustcraft:streaming/load_radius": {
+        "effective": 4,
+        "requested": 4,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/lookahead": {
+        "effective": false,
+        "requested": false,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:streaming/main_budget_ms": {
+        "effective": 2.0,
+        "requested": 2.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      },
+      "rustcraft:streaming/retain_radius": {
+        "effective": 5,
+        "requested": 5,
+        "source": "Default",
+        "policy": "NextTick"
+      },
+      "rustcraft:ui/font_scale": {
+        "effective": 1.0,
+        "requested": 1.0,
+        "source": "Default",
+        "policy": "NextFrame"
+      }
+    },
+    "creation": {
+      "application_write_bytes": 23557442,
+      "atomic_replaces": 1000,
+      "compression": {
+        "count": 1000,
+        "max_ms": 2.167756,
+        "p50_ms": 0.6489109999999999,
+        "p95_ms": 0.9891870000000001,
+        "p99_ms": 1.375628,
+        "sum_ms": 693.344783
+      },
+      "directory_sync_calls_unix": 3000,
+      "durability_envelope": {
+        "count": 1000,
+        "max_ms": 48.929654,
+        "p50_ms": 3.2356170000000004,
+        "p95_ms": 4.586242,
+        "p99_ms": 5.408643,
+        "sum_ms": 3565.2070990000034
+      },
+      "encode": {
+        "count": 1000,
+        "max_ms": 11.686065,
+        "p50_ms": 3.113184,
+        "p95_ms": 4.881747000000001,
+        "p99_ms": 6.38519,
+        "sum_ms": 3339.085634999998
+      },
+      "encoded_raw_bytes": 67272320,
+      "file_sync_calls": 1000,
+      "logical_changed_bytes": 65632000,
+      "operation": {
+        "count": 1000,
+        "max_ms": 52.350217,
+        "p50_ms": 7.182098,
+        "p95_ms": 9.806799999999999,
+        "p99_ms": 13.819626999999999,
+        "sum_ms": 7695.111590999997
+      },
+      "write_all": {
+        "count": 1000,
+        "max_ms": 0.110282,
+        "p50_ms": 0.039881,
+        "p95_ms": 0.062020000000000006,
+        "p99_ms": 0.080178,
+        "sum_ms": 42.76983499999997
+      },
+      "write_all_calls": 1000,
+      "write_amplification": 0.358932258654315
+    },
+    "creation_wall_s": 10.860292371,
+    "cycles": 1,
+    "decode": {
+      "count": 1000,
+      "max_ms": 3.626808,
+      "p50_ms": 1.165749,
+      "p95_ms": 1.7726150000000003,
+      "p99_ms": 2.519656,
+      "sum_ms": 1259.8198009999996
+    },
+    "decompression": {
+      "count": 1000,
+      "max_ms": 1.057423,
+      "p50_ms": 0.347818,
+      "p95_ms": 0.5241020000000001,
+      "p99_ms": 0.749974,
+      "sum_ms": 374.69941600000004
+    },
+    "durability": "atomicwrites file sync + replacement + Unix directory sync; Windows directory sync unsupported",
+    "entities_initial": 1000,
+    "entity_lookup_after_decode": {
+      "count": 1000,
+      "max_ms": 0.07047199999999999,
+      "p50_ms": 0.0023049999999999998,
+      "p95_ms": 0.005238,
+      "p99_ms": 0.005657000000000001,
+      "sum_ms": 3.191410999999976
+    },
+    "entity_only_dense": {
+      "application_write_bytes": 3721498,
+      "atomic_replaces": 100,
+      "compression": {
+        "count": 100,
+        "max_ms": 1.6824489999999999,
+        "p50_ms": 0.76066,
+        "p95_ms": 1.238527,
+        "p99_ms": 1.582503,
+        "sum_ms": 83.50172
+      },
+      "directory_sync_calls_unix": 300,
+      "durability_envelope": {
+        "count": 100,
+        "max_ms": 48.987119,
+        "p50_ms": 3.456322,
+        "p95_ms": 4.504385,
+        "p99_ms": 5.2335460000000005,
+        "sum_ms": 401.1339639999999
+      },
+      "encode": {
+        "count": 100,
+        "max_ms": 8.997456,
+        "p50_ms": 4.329708,
+        "p95_ms": 7.322620000000001,
+        "p99_ms": 8.514909999999999,
+        "sum_ms": 473.88244800000007
+      },
+      "encoded_raw_bytes": 21090800,
+      "file_sync_calls": 100,
+      "logical_changed_bytes": 100,
+      "operation": {
+        "count": 100,
+        "max_ms": 54.908619,
+        "p50_ms": 8.717315999999999,
+        "p95_ms": 13.023417,
+        "p99_ms": 14.944169,
+        "sum_ms": 964.4506059999999
+      },
+      "write_all": {
+        "count": 100,
+        "max_ms": 0.117825,
+        "p50_ms": 0.041976,
+        "p95_ms": 0.067258,
+        "p99_ms": 0.11293600000000001,
+        "sum_ms": 4.7107030000000005
+      },
+      "write_all_calls": 100,
+      "write_amplification": 37214.98
+    },
+    "entity_only_sparse": {
+      "application_write_bytes": 240959,
+      "atomic_replaces": 10,
+      "compression": {
+        "count": 10,
+        "max_ms": 0.7548630000000001,
+        "p50_ms": 0.562865,
+        "p95_ms": 0.7548630000000001,
+        "p99_ms": 0.7548630000000001,
+        "sum_ms": 5.740397
+      },
+      "directory_sync_calls_unix": 30,
+      "durability_envelope": {
+        "count": 10,
+        "max_ms": 5.195412,
+        "p50_ms": 3.312584,
+        "p95_ms": 5.195412,
+        "p99_ms": 5.195412,
+        "sum_ms": 35.643197
+      },
+      "encode": {
+        "count": 10,
+        "max_ms": 4.538608999999999,
+        "p50_ms": 3.7480550000000004,
+        "p95_ms": 4.538608999999999,
+        "p99_ms": 4.538608999999999,
+        "sum_ms": 36.840584
+      },
+      "encoded_raw_bytes": 674570,
+      "file_sync_calls": 10,
+      "logical_changed_bytes": 10,
+      "operation": {
+        "count": 10,
+        "max_ms": 9.327534,
+        "p50_ms": 8.331432999999999,
+        "p95_ms": 9.327534,
+        "p99_ms": 9.327534,
+        "sum_ms": 78.762102
+      },
+      "write_all": {
+        "count": 10,
+        "max_ms": 0.060554000000000004,
+        "p50_ms": 0.043233,
+        "p95_ms": 0.060554000000000004,
+        "p99_ms": 0.060554000000000004,
+        "sum_ms": 0.431768
+      },
+      "write_all_calls": 10,
+      "write_amplification": 24095.9
+    },
+    "file_scaling": [
+      {
+        "columns": 1000,
+        "objects": [
+          1001,
+          1,
+          23557549
+        ]
+      }
+    ],
+    "final_objects": [
+      1005,
+      2,
+      23599440
+    ],
+    "flush_ms": 0.06244,
+    "isolated_sync_calibration": {
+      "directory_sync_unix": {
+        "count": 128,
+        "max_ms": 0.064884,
+        "p50_ms": 0.02214,
+        "p95_ms": 0.04428,
+        "p99_ms": 0.062998,
+        "sum_ms": 3.070295
+      },
+      "file_sync": {
+        "count": 128,
+        "max_ms": 1.6847509999999999,
+        "p50_ms": 0.942181,
+        "p95_ms": 1.4773180000000001,
+        "p99_ms": 1.6218929999999998,
+        "sum_ms": 127.98300800000005
+      },
+      "scope": "isolated 4KiB append and sync; not actual atomic-write internal fsync timing",
+      "write": {
+        "count": 128,
+        "max_ms": 0.075919,
+        "p50_ms": 0.029544,
+        "p95_ms": 0.048611,
+        "p99_ms": 0.053919,
+        "sum_ms": 3.8653229999999996
+      }
+    },
+    "paced_queue": {
+      "capacity": 8,
+      "count": 300,
+      "dirty_peak": 7,
+      "dirty_to_ack": {
+        "count": 300,
+        "max_ms": 125.73811100000002,
+        "p50_ms": 15.730939,
+        "p95_ms": 76.490828,
+        "p99_ms": 117.561579,
+        "sum_ms": 6880.089942000004
+      },
+      "elapsed_s": 5.997197446,
+      "queue_wait": {
+        "count": 300,
+        "max_ms": 102.64337900000001,
+        "p50_ms": 0.034921,
+        "p95_ms": 53.772725,
+        "p99_ms": 92.628736,
+        "sum_ms": 1902.7374889999999
+      },
+      "remaining": 0,
+      "source_writes_per_s": 50,
+      "trend": [
+        {
+          "completed": 50,
+          "dirty": 5
+        },
+        {
+          "completed": 100,
+          "dirty": 0
+        },
+        {
+          "completed": 150,
+          "dirty": 0
+        },
+        {
+          "completed": 200,
+          "dirty": 1
+        },
+        {
+          "completed": 250,
+          "dirty": 0
+        },
+        {
+          "completed": 300,
+          "dirty": 0
+        }
+      ],
+      "workers": 1
+    },
+    "process_reopen": {
+      "cache": "new process, OS cache retained",
+      "first_100_reads": {
+        "count": 100,
+        "max_ms": 5.181301,
+        "p50_ms": 1.966847,
+        "p95_ms": 3.110037,
+        "p99_ms": 3.863573,
+        "sum_ms": 218.413537
+      },
+      "open_metadata_ms": 0.07969100000000001
+    },
+    "queue": {
+      "ack_latency": {
+        "count": 1000,
+        "max_ms": 272.238205,
+        "p50_ms": 150.033624,
+        "p95_ms": 173.380926,
+        "p99_ms": 236.093671,
+        "sum_ms": 151338.01945299996
+      },
+      "drained": true,
+      "oldest_admitted_ms": 272.229335,
+      "peak_pending_inflight": 9,
+      "per_worker_capacity": 8,
+      "queue_wait": {
+        "count": 1000,
+        "max_ms": 251.51257700000002,
+        "p50_ms": 134.082849,
+        "p95_ms": 155.782116,
+        "p99_ms": 213.475794,
+        "sum_ms": 135465.1971109999
+      },
+      "remaining": 0,
+      "wall_s": 17.244151411,
+      "workers": 1,
+      "writes_per_s": 57.99067615250134
+    },
+    "random_edits": {
+      "application_write_bytes": 240958,
+      "atomic_replaces": 10,
+      "compression": {
+        "count": 10,
+        "max_ms": 1.12126,
+        "p50_ms": 0.53814,
+        "p95_ms": 1.12126,
+        "p99_ms": 1.12126,
+        "sum_ms": 6.375828
+      },
+      "directory_sync_calls_unix": 30,
+      "durability_envelope": {
+        "count": 10,
+        "max_ms": 4.266360999999999,
+        "p50_ms": 3.473643,
+        "p95_ms": 4.266360999999999,
+        "p99_ms": 4.266360999999999,
+        "sum_ms": 34.894616
+      },
+      "encode": {
+        "count": 10,
+        "max_ms": 6.287058,
+        "p50_ms": 3.498716,
+        "p95_ms": 6.287058,
+        "p99_ms": 6.287058,
+        "sum_ms": 37.433899
+      },
+      "encoded_raw_bytes": 674570,
+      "file_sync_calls": 10,
+      "logical_changed_bytes": 20,
+      "operation": {
+        "count": 10,
+        "max_ms": 10.703931,
+        "p50_ms": 7.489126,
+        "p95_ms": 10.703931,
+        "p99_ms": 10.703931,
+        "sum_ms": 79.290607
+      },
+      "write_all": {
+        "count": 10,
+        "max_ms": 0.056922,
+        "p50_ms": 0.042255,
+        "p95_ms": 0.056922,
+        "p99_ms": 0.056922,
+        "sum_ms": 0.43596100000000004
+      },
+      "write_all_calls": 10,
+      "write_amplification": 12047.9
+    },
+    "random_read": {
+      "count": 1000,
+      "max_ms": 5.568303,
+      "p50_ms": 1.573074,
+      "p95_ms": 2.3554549999999996,
+      "p99_ms": 3.18086,
+      "sum_ms": 1688.1702669999984
+    },
+    "read_io": {
+      "count": 1000,
+      "max_ms": 2.657526,
+      "p50_ms": 0.041976,
+      "p95_ms": 0.084021,
+      "p99_ms": 0.128092,
+      "sum_ms": 47.741811999999975
+    },
+    "reopen_ms": 0.758425,
+    "schema": 1,
+    "sections_per_column": 8,
+    "sequential_read": {
+      "count": 1000,
+      "max_ms": 4.430351,
+      "p50_ms": 2.062673,
+      "p95_ms": 3.213337,
+      "p99_ms": 3.804767,
+      "sum_ms": 2243.6599769999984
+    },
+    "startup_global_index_bytes": 0,
+    "storage_trend": [
+      {
+        "cycle": 1,
+        "objects": [
+          1005,
+          2,
+          23599440
+        ]
+      }
+    ],
+    "transfers": {
+      "application_write_bytes": 694255,
+      "atomic_replaces": 30,
+      "compression": {
+        "count": 30,
+        "max_ms": 0.8884029999999999,
+        "p50_ms": 0.53388,
+        "p95_ms": 0.692004,
+        "p99_ms": 0.8884029999999999,
+        "sum_ms": 16.381329
+      },
+      "directory_sync_calls_unix": 90,
+      "durability_envelope": {
+        "count": 30,
+        "max_ms": 4.884332,
+        "p50_ms": 3.4108529999999995,
+        "p95_ms": 4.482315000000001,
+        "p99_ms": 4.884332,
+        "sum_ms": 103.998894
+      },
+      "encode": {
+        "count": 30,
+        "max_ms": 5.382381,
+        "p50_ms": 3.247979,
+        "p95_ms": 4.483502,
+        "p99_ms": 5.382381,
+        "sum_ms": 103.19542199999997
+      },
+      "encoded_raw_bytes": 2016989,
+      "file_sync_calls": 30,
+      "logical_changed_bytes": 2560,
+      "operation": {
+        "count": 30,
+        "max_ms": 9.741633,
+        "p50_ms": 7.344551,
+        "p95_ms": 8.8042,
+        "p99_ms": 9.741633,
+        "sum_ms": 225.20389500000005
+      },
+      "write_all": {
+        "count": 30,
+        "max_ms": 0.12348200000000001,
+        "p50_ms": 0.04002,
+        "p95_ms": 0.056084,
+        "p99_ms": 0.12348200000000001,
+        "sum_ms": 1.3229670000000002
+      },
+      "write_all_calls": 30,
+      "write_amplification": 271.193359375
+    }
+  },
+  "auxiliary": {
+    "checkpoint_recovery": {
+      "count": 20,
+      "latency": {
+        "count": 20,
+        "max_ms": 0.11251699999999999,
+        "p50_ms": 0.082135,
+        "p95_ms": 0.10015500000000001,
+        "p99_ms": 0.11251699999999999,
+        "sum_ms": 1.5514189999999997
+      },
+      "unknown_preserved": true
+    },
+    "delete_churn": {
+      "after": [
+        16,
+        1,
+        383299
+      ],
+      "before": [
+        16,
+        1,
+        383299
+      ],
+      "cycles": 100,
+      "identity_restored": true,
+      "io": {
+        "application_write_bytes": 6332399,
+        "atomic_replaces": 200,
+        "compression": {
+          "count": 200,
+          "max_ms": 1.443235,
+          "p50_ms": 0.663787,
+          "p95_ms": 1.126986,
+          "p99_ms": 1.3148630000000001,
+          "sum_ms": 144.75363600000003
+        },
+        "directory_sync_calls_unix": 600,
+        "durability_envelope": {
+          "count": 200,
+          "max_ms": 67.25624400000001,
+          "p50_ms": 3.3694330000000003,
+          "p95_ms": 4.510597,
+          "p99_ms": 47.063879,
+          "sum_ms": 887.6192190000002
+        },
+        "encode": {
+          "count": 200,
+          "max_ms": 9.209351999999999,
+          "p50_ms": 4.339762,
+          "p95_ms": 6.9998000000000005,
+          "p99_ms": 8.050726999999998,
+          "sum_ms": 939.3571139999997
+        },
+        "encoded_raw_bytes": 14023900,
+        "file_sync_calls": 200,
+        "logical_changed_bytes": 19200,
+        "operation": {
+          "count": 200,
+          "max_ms": 76.695449,
+          "p50_ms": 8.576923,
+          "p95_ms": 11.784181,
+          "p99_ms": 53.960730999999996,
+          "sum_ms": 1983.5488500000004
+        },
+        "write_all": {
+          "count": 200,
+          "max_ms": 0.105043,
+          "p50_ms": 0.045328,
+          "p95_ms": 0.06628099999999999,
+          "p99_ms": 0.077177,
+          "sum_ms": 9.637130000000006
+        },
+        "write_all_calls": 200,
+        "write_amplification": 329.81244791666666
+      }
+    },
+    "diagnostic_cost": {
+      "counter_read_batch_1024": {
+        "count": 128,
+        "max_ms": 0.026889,
+        "p50_ms": 0.012502,
+        "p95_ms": 0.012990999999999999,
+        "p99_ms": 0.021512,
+        "sum_ms": 1.6376809999999997
+      },
+      "inactive": "no dirty timestamp scan; fixed accounting only on dirty/write/queue events",
+      "oldest_dirty_121_entries": {
+        "count": 128,
+        "max_ms": 0.034362000000000004,
+        "p50_ms": 0.005238,
+        "p95_ms": 0.005308,
+        "p99_ms": 0.010616,
+        "sum_ms": 0.6965459999999999
+      }
+    },
+    "shutdown": {
+      "acknowledged_on_reopen": 8,
+      "drain_flush_ms": 56.765691,
+      "inflight_at_start": 1,
+      "queued_at_start": 4
+    }
+  },
+  "current_large": {
+    "columns": 50000,
+    "cycles": "only creation/reopen retained as accepted large-tier aggregates",
+    "creation": {
+      "application_write_bytes": 1177904148,
+      "atomic_replaces": 50000,
+      "compression": {
+        "count": 50000,
+        "max_ms": 103.90427700000001,
+        "p50_ms": 0.693184,
+        "p95_ms": 1.851162,
+        "p99_ms": 9.030508,
+        "sum_ms": 52500.389398999876
+      },
+      "directory_sync_calls_unix": 150000,
+      "durability_envelope": {
+        "count": 50000,
+        "max_ms": 306.544877,
+        "p50_ms": 3.3679849999999996,
+        "p95_ms": 16.527279,
+        "p99_ms": 67.49128400000001,
+        "sum_ms": 316991.5460110003
+      },
+      "encode": {
+        "count": 50000,
+        "max_ms": 97.998089,
+        "p50_ms": 3.941946,
+        "p95_ms": 11.49313,
+        "p99_ms": 21.830771000000002,
+        "sum_ms": 258267.59156199975
+      },
+      "encoded_raw_bytes": 3363593320,
+      "file_sync_calls": 50000,
+      "logical_changed_bytes": 3281600000,
+      "operation": {
+        "count": 50000,
+        "max_ms": 392.704814,
+        "p50_ms": 8.297366,
+        "p95_ms": 28.550907,
+        "p99_ms": 103.063135,
+        "sum_ms": 640516.657006999
+      },
+      "write_all": {
+        "count": 50000,
+        "max_ms": 39.727012,
+        "p50_ms": 0.043931,
+        "p95_ms": 0.08814000000000001,
+        "p99_ms": 2.3369150000000003,
+        "sum_ms": 5728.903715000094
+      },
+      "write_all_calls": 50000,
+      "write_amplification": 0.35894202462213554
+    },
+    "creation_wall_s": 897.827312289,
+    "file_scaling": [
+      {
+        "columns": 1000,
+        "objects": [
+          1001,
+          1,
+          23557549
+        ]
+      },
+      {
+        "columns": 10000,
+        "objects": [
+          10001,
+          1,
+          235578880
+        ]
+      },
+      {
+        "columns": 50000,
+        "objects": [
+          50001,
+          1,
+          1177904255
+        ]
+      }
+    ],
+    "final_files": 50005,
+    "final_stored_bytes": 1177946354,
+    "allocated_regular_file_bytes_linux": 1287376896,
+    "directory_list_ms_warm": 157.79033402213827,
+    "process_reopen": {
+      "cache": "new process, OS cache retained",
+      "first_100_reads": {
+        "count": 100,
+        "max_ms": 11.742503,
+        "p50_ms": 5.3470189999999995,
+        "p95_ms": 7.653893999999999,
+        "p99_ms": 11.31563,
+        "sum_ms": 559.5802699999999
+      },
+      "open_metadata_ms": 2.413942
+    },
+    "limitation": "Original harness finished creation/update/churn/read/queue/flush but failed launching tail child after binary rebuild; argv0 launcher fixed, existing completed store validated by fresh process. No large-tail latency/churn aggregates claimed."
+  },
+  "decision": {
+    "backend": "keep_current_per_column",
+    "production_migration": false,
+    "s1_3_required": false,
+    "caller_limit": "current client at most one save/tick =20 admissions/s; first-saving entry can defer other columns; backend 50/s probe is not client throughput",
+    "scope": "initial bounded M5 deployment within measured store/payload/durable-rate envelope; higher load requires measured admission/drain acceptance",
+    "pm5_004": "accepted disposition, closure awaits public CI"
+  }
+}

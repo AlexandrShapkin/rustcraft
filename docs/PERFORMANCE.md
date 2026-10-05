@@ -805,3 +805,7 @@ response, **not a proven FPS or physical cadence gain**. FIFO/redraw/limiter rem
 a rejected Wayland callback experiment. At reported 60 Hz, software frame intervals still frequently
 exceed the 25 ms opportunity threshold. Physical scanout, owner AMD/Vulkan and representative-display
 validation remain unavailable/conditional. See [P1_REPORT.md](P1_REPORT.md) and [P1_RESULTS.json](P1_RESULTS.json).
+
+## S1 persistence evaluation
+
+Release 10k/100-cycle results and 50k supplemental creation are in [S1_REPORT.md](S1_REPORT.md) and S1_RESULTS.json. Atomic durability envelope and semantic encoding dominate elapsed churn; entity placement dominates application write amplification. The isolated split prototype reduces entity bytes but increases mixed churn time/file count. Application bytes are not NAND writes; cache and platform limitations are explicit.

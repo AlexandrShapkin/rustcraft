@@ -315,3 +315,13 @@ p1-test:
 # Matched six 20-second motion phases, disposable world, timing summary and actual surface capture.
 p1-client:
     cargo run -p rustcraft-client -- --p1-acceptance
+
+# Bounded physical-store/recovery correctness; release scale is opt-in.
+s1-test:
+    cargo test -p rustcraft-world s1_
+
+s1-bench columns="10000" cycles="100" output="target/s1":
+    mkdir -p {{quote(output)}}
+    cargo run --release -p rustcraft-world --example s1 -- {{columns}} {{cycles}} {{quote(output)}}/current.json
+    cargo run --release -p rustcraft-world --example s1_split -- {{columns}} {{cycles}} {{quote(output)}}/split.json
+    cargo run --release -p rustcraft-world --example s1 -- --auxiliary {{quote(output)}}/auxiliary.json

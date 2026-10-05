@@ -190,3 +190,13 @@ then exact pause/step/resume/teleport and capture acceptance. Set existing C1 ov
 if changing workloads; compare identical settings. Bounded results live under ignored `target/p1/`,
 captures under `target/captures/`. This is a milestone acceptance alias for later DX2 review, not a
 physical input-to-photon/scanout profiler. `dx-overhead` includes Presentation active/inactive modes.
+
+S1 workflows: `just s1-test` runs bounded physical-publication, unknown-component, transfer/reopen
+and isolated split-candidate correctness. `just s1-bench 10000 100 OUTPUT_DIRECTORY` runs release
+current/split comparisons sequentially plus auxiliary delete/recovery/shutdown/accounting probes.
+Benchmark directories are disposable and outputs belong under ignored `target/s1/`; never commit
+stores, temporary files or operation logs. A 50k/one-cycle current-only diagnostic is
+`cargo run --release -p rustcraft-world --example s1 -- 50000 1 target/s1/large.json`.
+Candidate remains examples/dev-dependencies only, with no normal backend switch or new format.
+These are S1 acceptance aliases for later DX2 review; existing persistence workflows remain.
+See [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md).

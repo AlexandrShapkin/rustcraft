@@ -751,3 +751,7 @@ hitch/focus transitions rebase. Visual selection raycasts from the shown camera;
 remains authoritative. Keep FIFO/redraw/limiter policy: the measured Wayland notification experiment
 worsened software cadence and was removed. Shared bounded application timing is distinct from
 physical scanout. Owner display validation remains conditional. See P1_REPORT.md.
+
+## D-051 — Retain measured persistence backend for initial M5
+
+See [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). S1 measures whole-column amplification and accepts the current physical backend within the documented caller/workload envelope; no production migration or S1.3. Durable component and backend acknowledgement contracts remain separate from runtime/network layouts.

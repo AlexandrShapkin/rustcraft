@@ -742,6 +742,23 @@ impl ControlState {
                             text.push_str(&format!("{p}: {k}\n"));
                         }
                     }
+                } else if d == Domain::Persistence {
+                    let io = &value["column_io"];
+                    text.push_str(&format!("Dirty {} | oldest {} ms | queued {} inflight {} failures {}\nQueue wait total {} / max {} us\nStale acknowledgements {} | coalesced dirty mutations {}\n",value["dirty"],value["oldest_dirty_ms"],value["queued"],value["inflight"],value["failures"],value["queue_wait_total_us"],value["queue_wait_max_us"],value["stale_save_acks"],value["coalesced_dirty_mutations"]));
+                    text.push_str(&format!("Column writes {} | raw {} / application writes {} bytes\nEncode {} | compression {} us\nWrite {} | sync/replace envelope {} us\nSuccessful columns since open; not device writes or isolated fsync\n",io["columns"],io["raw_bytes"],io["application_write_bytes"],io["encode_us"],io["compression_us"],io["write_us"],io["durability_envelope_us"]));
+                    text.push_str(&format!("Player revision {} persisted {} | dirty {} inflight {} failures {}\nWorld revision {} persisted {} | dirty {} inflight {} failures {}\n",value["player_revision"],value["player_persisted"],value["player_dirty"],value["player_inflight"],value["player_failures"],value["world_revision"],value["world_persisted"],value["world_dirty"],value["world_inflight"],value["world_failures"]));
+                    for entry in value["dirty_subset"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .take(3)
+                    {
+                        text.push_str(&format!(
+                            "Dirty chunk {} generation {} save pin {}\n",
+                            entry["chunk"], entry["generation"], entry["saving"]
+                        ));
+                    }
+                    text.push_str("Dirty subset: up to 3 shown; query/capture retains bounded provider subset\n");
                 } else if d == Domain::Presentation {
                     if let Some(reason) = value["unavailable"].as_str() {
                         text.push_str(&format!("UNAVAILABLE: {reason}\n"));
@@ -1016,5 +1033,20 @@ mod tests {
             Some("00000000000000000000000000000001")
         );
         assert_eq!(s.diagnostic_demand(), [Domain::Entity]);
+    }
+    #[test]
+    fn s1_persistence_page_prioritizes_pressure_without_extra_collection() {
+        let mut s = ControlState {
+            page: "persistence".into(),
+            ..Default::default()
+        };
+        s.domains.persistence = json!({"dirty":4,"oldest_dirty_ms":100,"queued":2,"inflight":1,
+            "column_io":{"columns":7,"raw_bytes":1000,"application_write_bytes":300},
+            "dirty_subset":[{"chunk":[-1,2],"generation":7,"saving":true}]});
+        let text = s.diagnostic_text();
+        assert!(text.contains("queued 2 inflight 1"));
+        assert!(text.contains("application writes 300 bytes"));
+        assert!(text.contains("not device writes or isolated fsync"));
+        assert!(s.diagnostics.samples.is_empty());
     }
 }

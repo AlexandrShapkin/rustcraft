@@ -224,6 +224,21 @@ pub struct ChunkEncodingMetrics {
     pub stored_file_bytes: usize,
     pub compression_ms: f64,
     pub compression_method: u8,
+    /// Palette/framing/checksum time excluding compression.
+    pub encode_ms: f64,
+    /// Time inside write_all; application bytes, not device writes.
+    pub write_ms: f64,
+    /// Atomic-file creation, sync, replacement, directory sync and cleanup envelope.
+    /// This is deliberately not advertised as an isolated fsync duration.
+    pub durability_ms: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChunkReadMetrics {
+    pub application_read_bytes: usize,
+    pub read_ms: f64,
+    pub decompression_ms: f64,
+    pub decode_ms: f64,
 }
 
 #[derive(Debug)]
@@ -545,11 +560,13 @@ pub struct GenerationScheduler {
 }
 
 struct SaveJob {
+    queued_at: std::time::Instant,
     storage: WorldStorage,
     token: SaveToken,
     chunk: StoredChunk,
 }
 pub struct SaveCompletion {
+    pub queue_wait_ms: f64,
     pub token: SaveToken,
     pub result: Result<ChunkEncodingMetrics, String>,
 }
@@ -568,6 +585,8 @@ pub struct SaveScheduler {
     in_flight: Arc<AtomicUsize>,
     completed: Arc<AtomicU64>,
     failed: Arc<AtomicU64>,
+    queue_wait_us: Arc<AtomicU64>,
+    max_queue_wait_us: Arc<AtomicU64>,
 }
 
 impl SaveScheduler {
@@ -579,6 +598,8 @@ impl SaveScheduler {
         let in_flight = Arc::new(AtomicUsize::new(0));
         let completed = Arc::new(AtomicU64::new(0));
         let failed = Arc::new(AtomicU64::new(0));
+        let queue_wait_us = Arc::new(AtomicU64::new(0));
+        let max_queue_wait_us = Arc::new(AtomicU64::new(0));
         let mut workers = Vec::new();
         for _ in 0..count {
             let (sender, receiver) = mpsc::sync_channel::<SaveJob>(capacity);
@@ -587,12 +608,17 @@ impl SaveScheduler {
             let flight_count = in_flight.clone();
             let complete_count = completed.clone();
             let failed_count = failed.clone();
+            let wait_total = queue_wait_us.clone();
+            let wait_max = max_queue_wait_us.clone();
             let thread = thread::Builder::new()
                 .name("world-save-worker".into())
                 .spawn(move || {
                     while let Ok(job) = receiver.recv() {
                         flight_count.fetch_add(1, Ordering::Relaxed);
                         queued_count.fetch_sub(1, Ordering::Relaxed);
+                        let queue_wait_ms = job.queued_at.elapsed().as_secs_f64() * 1000.0;
+                        wait_total.fetch_add((queue_wait_ms * 1000.0) as u64, Ordering::Relaxed);
+                        wait_max.fetch_max((queue_wait_ms * 1000.0) as u64, Ordering::Relaxed);
                         let result = job
                             .storage
                             .store_chunk_measured(&job.chunk)
@@ -605,6 +631,7 @@ impl SaveScheduler {
                         }
                         if result_tx
                             .send(SaveCompletion {
+                                queue_wait_ms,
                                 token: job.token,
                                 result,
                             })
@@ -629,6 +656,8 @@ impl SaveScheduler {
             in_flight,
             completed,
             failed,
+            queue_wait_us,
+            max_queue_wait_us,
         }
     }
     pub fn submit(
@@ -639,6 +668,7 @@ impl SaveScheduler {
     ) -> Result<(), WorldError> {
         let index = self.next_worker;
         let job = SaveJob {
+            queued_at: std::time::Instant::now(),
             storage,
             token,
             chunk,
@@ -677,6 +707,8 @@ impl SaveScheduler {
             in_flight: self.in_flight.load(Ordering::Relaxed),
             completed: self.completed.load(Ordering::Relaxed),
             failed: self.failed.load(Ordering::Relaxed),
+            queue_wait_us: self.queue_wait_us.load(Ordering::Relaxed),
+            max_queue_wait_us: self.max_queue_wait_us.load(Ordering::Relaxed),
         }
     }
 }
@@ -699,6 +731,8 @@ pub struct SaveSchedulerMetrics {
     pub in_flight: usize,
     pub completed: u64,
     pub failed: u64,
+    pub queue_wait_us: u64,
+    pub max_queue_wait_us: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1390,15 +1424,26 @@ pub struct SaveToken {
 #[derive(Debug, Default)]
 pub struct PersistenceDirtyTracker {
     dirty: BTreeMap<(i32, i32), u64>,
+    dirty_since: BTreeMap<(i32, i32), std::time::Instant>,
     saving: HashSet<(i32, i32)>,
     next_generation: u64,
     saved: u64,
     failed: u64,
+    stale_acks: u64,
+    coalesced_mutations: u64,
 }
 
 impl PersistenceDirtyTracker {
     pub fn mark_dirty(&mut self, position: ChunkPos) -> u64 {
+        if self.dirty.contains_key(&(position.x, position.z))
+            && !self.saving.contains(&(position.x, position.z))
+        {
+            self.coalesced_mutations += 1;
+        }
         self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        self.dirty_since
+            .entry((position.x, position.z))
+            .or_insert_with(std::time::Instant::now);
         self.dirty
             .insert((position.x, position.z), self.next_generation);
         self.next_generation
@@ -1421,6 +1466,9 @@ impl PersistenceDirtyTracker {
             self.saved += 1;
             if self.dirty.get(&key) == Some(&token.generation) {
                 self.dirty.remove(&key);
+                self.dirty_since.remove(&key);
+            } else {
+                self.stale_acks += 1;
             }
         } else {
             self.failed += 1;
@@ -1437,6 +1485,14 @@ impl PersistenceDirtyTracker {
             .map(|(&(x, z), &generation)| {
                 (ChunkPos { x, z }, generation, self.saving.contains(&(x, z)))
             })
+    }
+    /// Demand-bound observation; timestamps track current dirty columns only.
+    pub fn oldest_dirty_ms(&self) -> f64 {
+        let now = std::time::Instant::now();
+        self.dirty_since
+            .values()
+            .map(|t| now.saturating_duration_since(*t).as_secs_f64() * 1000.0)
+            .fold(0.0, f64::max)
     }
     pub fn dirty_count(&self) -> usize {
         self.dirty.len()
@@ -1462,6 +1518,8 @@ impl PersistenceDirtyTracker {
             saves_in_flight: self.saving.len(),
             saved: self.saved,
             failed: self.failed,
+            stale_acks: self.stale_acks,
+            coalesced_mutations: self.coalesced_mutations,
         }
     }
 }
@@ -1472,6 +1530,9 @@ pub struct SaveMetrics {
     pub saves_in_flight: usize,
     pub saved: u64,
     pub failed: u64,
+    pub stale_acks: u64,
+    /// Repeated dirty marks coalesced before a save starts, not avoided IO calls.
+    pub coalesced_mutations: u64,
 }
 
 /// Small state tracker for lifecycle observability. Chunk bytes are still published atomically
@@ -1705,6 +1766,30 @@ impl Drop for GenerationScheduler {
 #[derive(Debug, Clone)]
 pub struct WorldStorage {
     root: PathBuf,
+    io: Arc<StorageCounters>,
+}
+
+#[derive(Debug, Default)]
+struct StorageCounters {
+    columns: AtomicU64,
+    raw_bytes: AtomicU64,
+    write_bytes: AtomicU64,
+    encode_us: AtomicU64,
+    compression_us: AtomicU64,
+    write_us: AtomicU64,
+    durability_us: AtomicU64,
+}
+
+/// Bounded scalar totals shared by clones/workers. No paths, payloads or history retained.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StorageIoMetrics {
+    pub columns: u64,
+    pub raw_bytes: u64,
+    pub application_write_bytes: u64,
+    pub encode_us: u64,
+    pub compression_us: u64,
+    pub write_us: u64,
+    pub durability_us: u64,
 }
 
 impl WorldStorage {
@@ -1732,9 +1817,24 @@ impl WorldStorage {
             sync_directory(parent)?;
         }
         sync_directory(&root)?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            io: Arc::default(),
+        })
     }
 
+    pub fn io_metrics(&self) -> StorageIoMetrics {
+        let c = &self.io;
+        StorageIoMetrics {
+            columns: c.columns.load(Ordering::Relaxed),
+            raw_bytes: c.raw_bytes.load(Ordering::Relaxed),
+            application_write_bytes: c.write_bytes.load(Ordering::Relaxed),
+            encode_us: c.encode_us.load(Ordering::Relaxed),
+            compression_us: c.compression_us.load(Ordering::Relaxed),
+            write_us: c.write_us.load(Ordering::Relaxed),
+            durability_us: c.durability_us.load(Ordering::Relaxed),
+        }
+    }
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -2049,21 +2149,45 @@ impl WorldStorage {
     }
 
     pub fn store_chunk(&self, chunk: &StoredChunk) -> Result<(), WorldError> {
-        let (bytes, _) = encode_chunk_file(chunk)?;
-        atomic_write(&self.chunk_path(chunk.position), &bytes)
+        self.store_chunk_measured(chunk).map(|_| ())
     }
 
     pub fn store_chunk_measured(
         &self,
         chunk: &StoredChunk,
     ) -> Result<ChunkEncodingMetrics, WorldError> {
-        let (bytes, metrics) = encode_chunk_file(chunk)?;
-        atomic_write(&self.chunk_path(chunk.position), &bytes)?;
+        let (bytes, mut metrics) = encode_chunk_file(chunk)?;
+        let (write_ms, durability_ms) =
+            atomic_write_measured(&self.chunk_path(chunk.position), &bytes)?;
+        metrics.write_ms = write_ms;
+        metrics.durability_ms = durability_ms;
+        let c = &self.io;
+        c.columns.fetch_add(1, Ordering::Relaxed);
+        c.raw_bytes
+            .fetch_add(metrics.raw_payload_bytes as u64, Ordering::Relaxed);
+        c.write_bytes
+            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        for (counter, ms) in [
+            (&c.encode_us, metrics.encode_ms),
+            (&c.compression_us, metrics.compression_ms),
+            (&c.write_us, metrics.write_ms),
+            (&c.durability_us, metrics.durability_ms),
+        ] {
+            counter.fetch_add((ms * 1000.0) as u64, Ordering::Relaxed);
+        }
         Ok(metrics)
     }
 
     pub fn load_chunk(&self, position: ChunkPos) -> Result<StoredChunk, WorldError> {
+        self.load_chunk_measured(position).map(|(chunk, _)| chunk)
+    }
+    pub fn load_chunk_measured(
+        &self,
+        position: ChunkPos,
+    ) -> Result<(StoredChunk, ChunkReadMetrics), WorldError> {
+        let started = std::time::Instant::now();
         let data = read_limited(&self.chunk_path(position), MAX_CHUNK_BYTES)?;
+        let read_ms = started.elapsed().as_secs_f64() * 1000.0;
         let body = verify_file(&data, CHUNK_MAGIC)?;
         let mut header = Reader::new(body);
         let version = header.u32()?;
@@ -2087,6 +2211,7 @@ impl WorldStorage {
             return Err(WorldError::InvalidData("decoded chunk limit"));
         }
         let stored_payload = header.remaining();
+        let decompress_started = std::time::Instant::now();
         let decoded = match method {
             0 if stored_payload.len() == raw_len => stored_payload.to_vec(),
             1 => {
@@ -2103,6 +2228,7 @@ impl WorldStorage {
             }
             _ => return Err(WorldError::InvalidData("unknown compression method")),
         };
+        let decompression_ms = decompress_started.elapsed().as_secs_f64() * 1000.0;
         let mut r = Reader::new(&decoded);
         let mut sections = Vec::with_capacity(count);
         let mut section_ys = HashSet::with_capacity(count);
@@ -2215,12 +2341,22 @@ impl WorldStorage {
             (records, tombstones)
         };
         r.finish()?;
-        Ok(StoredChunk {
-            position,
-            sections,
-            spatial_records,
-            spatial_tombstones,
-        })
+        let metrics = ChunkReadMetrics {
+            application_read_bytes: data.len(),
+            read_ms,
+            decompression_ms,
+            decode_ms: (started.elapsed().as_secs_f64() * 1000.0 - read_ms - decompression_ms)
+                .max(0.0),
+        };
+        Ok((
+            StoredChunk {
+                position,
+                sections,
+                spatial_records,
+                spatial_tombstones,
+            },
+            metrics,
+        ))
     }
 
     pub fn load_runtime_chunk(
@@ -2834,6 +2970,7 @@ fn validate_spatial_records(
 }
 
 fn encode_chunk_file(chunk: &StoredChunk) -> Result<(Vec<u8>, ChunkEncodingMetrics), WorldError> {
+    let encoding_started = std::time::Instant::now();
     if chunk.sections.len() > MAX_SECTIONS {
         return Err(WorldError::InvalidData("too many sections"));
     }
@@ -2940,6 +3077,8 @@ fn encode_chunk_file(chunk: &StoredChunk) -> Result<(Vec<u8>, ChunkEncodingMetri
         stored_file_bytes: out.len(),
         compression_ms,
         compression_method: method,
+        encode_ms: (encoding_started.elapsed().as_secs_f64() * 1000.0 - compression_ms).max(0.0),
+        ..Default::default()
     };
     Ok((out, metrics))
 }
@@ -2999,14 +3138,27 @@ fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, WorldError> {
     Ok(data)
 }
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), WorldError> {
+    atomic_write_measured(path, data).map(|_| ())
+}
+fn atomic_write_measured(path: &Path, data: &[u8]) -> Result<(f64, f64), WorldError> {
     let parent = path
         .parent()
         .ok_or(WorldError::InvalidData("missing parent"))?;
+    let started = std::time::Instant::now();
+    let mut write_ms = 0.0;
     atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
-        .write(|file| file.write_all(data))
+        .write(|file| {
+            let write_started = std::time::Instant::now();
+            let result = file.write_all(data);
+            write_ms = write_started.elapsed().as_secs_f64() * 1000.0;
+            result
+        })
         .map_err(|error| WorldError::Io(error.into()))?;
     sync_directory(parent)?;
-    Ok(())
+    Ok((
+        write_ms,
+        (started.elapsed().as_secs_f64() * 1000.0 - write_ms).max(0.0),
+    ))
 }
 
 #[cfg(unix)]
@@ -4295,3 +4447,6 @@ mod c1_radius_tests {
         assert_eq!(r.desired_column_count(), 49);
     }
 }
+
+#[cfg(test)]
+mod s1_tests;

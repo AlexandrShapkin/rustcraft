@@ -1916,7 +1916,9 @@ dependencies = [
  "atomicwrites",
  "blake3",
  "flate2",
+ "rustcraft-config",
  "rustcraft-engine-core",
+ "serde_json",
 ]
 
 [[package]]

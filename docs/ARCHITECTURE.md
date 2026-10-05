@@ -468,3 +468,13 @@ Two position samples interpolate using the fixed remainder; local orientation pr
 human look and rebases when the tick consumes it. No visual write-back, persistence or server clock.
 Discontinuities snap. Shared Presentation diagnostics contain bounded scalars, not frame resources.
 See [P1_REPORT.md](P1_REPORT.md), decision D-050 and the conditional display/provider limitations.
+
+## Persistence physical evaluation
+
+S1 preserves the column/checkpoint backend and logical formats while measuring physical scaling.
+Storage clones share fixed scalar IO totals; queue waits and current-only dirty timestamps feed
+existing demanded Persistence diagnostics. No game receives raw paths or candidate backend access.
+The benchmark-only split model lives in world examples/dev dependencies, not server composition.
+Future backend capabilities must make durable acknowledgement, transient generations, revision
+idempotency and ordered recovery explicit; component schemas remain separate from physical layout.
+See [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md).

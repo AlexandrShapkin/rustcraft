@@ -14,3 +14,15 @@ atomicwrites.workspace = true
 blake3.workspace = true
 flate2.workspace = true
 rustcraft-engine-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+rustcraft-config.workspace = true
+
+[[example]]
+name = "s1"
+test = true
+
+[[example]]
+name = "s1_split"
+test = true

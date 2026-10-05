@@ -125,3 +125,9 @@ P1 adds no presentation setting or second configuration owner. Existing
 `rustcraft:renderer/present_policy=PreferFifo` remains startup-only; selected surface mode/capabilities
 are reported explicitly. Timing uses effective diagnostic cadence and captures all effective C1
 workload settings. Interpolation is a transient client mechanism, not a mutable simulation policy.
+
+S1 introduces no operational setting or env alias. Benchmarks record C1 compiled-default effective
+settings explicitly and use diagnostic size/cycle/source-rate arguments. They bypass autosave timing
+to measure durable physical operations directly. Worker probes use the current composition's one
+save worker/eight slots; these remain inventory-classified startup policy. No security/schema quota
+is casually raised through C1 for the component evaluation.
