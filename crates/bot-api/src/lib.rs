@@ -1,9 +1,9 @@
 //! Versionable semantic Bot API concepts. No transport is chosen at bootstrap.
 
 use rustcraft_agent_api::{AgentIntent, Controller};
-use rustcraft_engine_core::{BlockPos, Vec3};
+use rustcraft_engine_core::{BlockPos, EntityId, Vec3};
 
-pub const BOT_API_VERSION: u32 = 2;
+pub const BOT_API_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StackObservation {
@@ -54,12 +54,15 @@ pub struct Observation {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemEntityObservation {
+    /// Authoritative durable identity; never an observation-list index.
+    /// Movement/column migration retains it. Merges retire the consumed ID.
+    pub id: EntityId,
     pub item_key: String,
     pub count: u16,
     pub position: Vec3,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct BotAction {
     pub intent: AgentIntent,
 }
@@ -82,7 +85,7 @@ impl ScriptedBot {
 
 impl Controller for ScriptedBot {
     fn next_intent(&mut self) -> AgentIntent {
-        let intent = self.intents.get(self.cursor).copied().unwrap_or_default();
+        let intent = self.intents.get(self.cursor).cloned().unwrap_or_default();
         self.cursor = self.cursor.saturating_add(1);
         intent
     }

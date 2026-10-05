@@ -240,6 +240,7 @@ fn migration_source_first_destination_failure_and_destination_before_cleanup() {
         let recovered = f.reopen(&order);
         assert_eq!(recovered.items.len(), 1);
         assert_eq!(recovered.items[0].id, id);
+        assert_eq!(recovered.observe(1).nearby_items[0].id, id);
         assert_eq!(recovered.items[0].column(), B);
     }
     f.sim.note_entity_column_persisted(&snapshot);

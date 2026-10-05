@@ -53,6 +53,9 @@ impl Player {
 #[derive(Debug)]
 pub struct Simulation {
     pub world: World,
+    /// Authoritative semantic profile; translation to retained local IDs is explicit.
+    content_profile: Option<rustcraft_game_api::CompiledGameProfile>,
+    pub last_action_error: Option<String>,
     pub registry: BlockRegistry,
     pub player: Player,
     pub time: u64,
@@ -167,6 +170,8 @@ impl Simulation {
         let mut recipes = RecipeRegistry::default();
         recipes.add_defaults(&registry);
         Self {
+            content_profile: None,
+            last_action_error: None,
             world,
             registry,
             player: Player {
@@ -200,6 +205,58 @@ impl Simulation {
             frozen_entity_columns: HashSet::new(),
         }
     }
+    /// Validate the local compatibility registry against an authoritative profile before admission.
+    /// Compiled numeric handles are never treated as historical runtime IDs.
+    pub fn bind_content_profile(
+        &mut self,
+        profile: rustcraft_game_api::CompiledGameProfile,
+    ) -> Result<(), String> {
+        for definition in self.registry.definitions() {
+            let key = rustcraft_game_api::BlockKey::parse(definition.name)
+                .map_err(|_| "invalid local block key")?;
+            if profile.block_id(&key).is_none() {
+                return Err(format!(
+                    "profile has no local content mapping: {}",
+                    definition.name
+                ));
+            }
+        }
+        self.content_profile = Some(profile);
+        Ok(())
+    }
+    /// Semantic request admission. Resolves once at the boundary, then uses existing dense checks.
+    pub fn place_semantic(
+        &mut self,
+        place: &rustcraft_agent_api::PlaceIntent,
+    ) -> Result<(), String> {
+        let profile = self
+            .content_profile
+            .as_ref()
+            .ok_or("authoritative profile unavailable")?;
+        let compiled_id = profile
+            .block_id(&place.block)
+            .ok_or_else(|| format!("unknown profile block: {}", place.block.as_str()))?;
+        let key = &profile
+            .block(compiled_id)
+            .ok_or("invalid compiled profile mapping")?
+            .key;
+        let block = self
+            .registry
+            .by_name(key.as_str())
+            .ok_or("local content mapping unavailable")?
+            .id;
+        if !self
+            .target()
+            .is_some_and(|hit| hit.normal != [0; 3] && hit.adjacent == place.position)
+        {
+            return Err("placement target/adjacency denied".into());
+        }
+        if !self.place_block(place.position, block) {
+            return Err("placement held-item/collision/quantity denied".into());
+        }
+        Ok(())
+    }
+
     pub fn set_mode(&mut self, mode: GameMode) {
         self.mode = mode;
         if mode == GameMode::Survival {
@@ -666,13 +723,10 @@ impl Simulation {
         {
             let _ = self.place_block(hit.adjacent, block);
         }
-        if let Some(place) = intent.place_block
-            && self
-                .target()
-                .is_some_and(|hit| hit.normal != [0; 3] && hit.adjacent == place.position)
-        {
-            let _ = self.place_block(place.position, place.block);
-        }
+        self.last_action_error = intent
+            .place_block
+            .as_ref()
+            .and_then(|place| self.place_semantic(place).err());
         if intent.craft {
             let _ = self.take_crafting_output();
         }
@@ -1419,6 +1473,7 @@ impl Simulation {
                 .items
                 .iter()
                 .map(|e| rustcraft_bot_api::ItemEntityObservation {
+                    id: e.id,
                     item_key: self
                         .registry
                         .item(e.stack.item)
@@ -1750,7 +1805,7 @@ mod tests {
         assert!(sim.player.position.z > 0.0);
         let _ = PlaceIntent {
             position: BlockPos { x: 0, y: 0, z: 0 },
-            block: STONE.id,
+            block: rustcraft_game_api::BlockKey::parse(STONE.name).unwrap(),
         };
     }
 }
@@ -1788,6 +1843,105 @@ mod interaction_tests {
         w.set(BlockPos { x: 15, y: 16, z: 3 }, BlockId(1));
         Simulation::new(w, r, Vec3::new(15.5, 15., 0.5))
     }
+    fn placement_profile(
+        reverse: bool,
+        omit_wood: bool,
+    ) -> rustcraft_game_api::CompiledGameProfile {
+        use rustcraft_content::{NamespacedId, PackageId};
+        use rustcraft_game_api::*;
+        let mut authored = GameRegistry::default();
+        let package = |n: &str| PackageId::parse(n).unwrap();
+        for (owner, keys) in [
+            ("mod:base", vec!["mod:air", "mod:stone", "mod:wood"]),
+            ("extra:base", vec!["extra:a", "extra:b"]),
+        ] {
+            authored.register_package(package(owner)).unwrap();
+            for name in keys {
+                if omit_wood && name == "mod:wood" {
+                    continue;
+                }
+                authored
+                    .register_block(VoxelDefinition {
+                        key: BlockKey::parse(name).unwrap(),
+                        collision: CollisionDescriptor::Empty,
+                        targetable: true,
+                        material: MaterialClass::Opaque,
+                        textures: FaceResources::All(TextureKey::parse("mod:texture").unwrap()),
+                        light: LightDescriptor::default(),
+                        base_rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+                        orientation: rustcraft_engine_core::orientation::OrientationProperty::None,
+                        face_tints: [[u16::MAX; 3]; 6],
+                        capabilities: vec![],
+                    })
+                    .unwrap();
+            }
+        }
+        let mut packages = vec![package("mod:base"), package("extra:base")];
+        if reverse {
+            packages.reverse();
+        }
+        authored
+            .compile(&GameProfile {
+                id: NamespacedId::parse("mod:profile").unwrap(),
+                packages,
+                resources: vec![],
+                systems: vec![],
+                manifest: Default::default(),
+                default_block: BlockKey::parse("mod:air").unwrap(),
+            })
+            .unwrap()
+    }
+    #[test]
+    fn a1_semantic_placement_resolves_reordered_profiles_and_rejects_invalid_mapping() {
+        use rustcraft_agent_api::PlaceIntent;
+        use rustcraft_game_api::BlockKey;
+        let key = BlockKey::parse("mod:wood").unwrap();
+        assert_ne!(
+            placement_profile(false, false).block_id(&key),
+            placement_profile(true, false).block_id(&key)
+        );
+        for reverse in [false, true] {
+            let mut s = scene();
+            let place = PlaceIntent {
+                position: s.target().unwrap().adjacent,
+                block: key.clone(),
+            };
+            assert!(
+                s.place_semantic(&place)
+                    .unwrap_err()
+                    .contains("profile unavailable")
+            );
+            assert!(
+                s.bind_content_profile(placement_profile(reverse, true))
+                    .is_err()
+            );
+            s.bind_content_profile(placement_profile(reverse, false))
+                .unwrap();
+            let unknown = PlaceIntent {
+                block: BlockKey::parse("mod:unknown").unwrap(),
+                ..place.clone()
+            };
+            assert!(
+                s.place_semantic(&unknown)
+                    .unwrap_err()
+                    .contains("unknown profile block")
+            );
+            s.inventory.insert(ItemId(2), 2, &s.registry);
+            s.step(
+                AgentIntent {
+                    place_block: Some(place.clone()),
+                    ..Default::default()
+                },
+                0.,
+            );
+            assert!(s.last_action_error.is_none());
+            assert_eq!(s.world.get(place.position), BlockId(2));
+            assert_eq!(s.inventory.held().unwrap().count, 1);
+            assert!(s.place_semantic(&place).is_err());
+            assert_eq!(s.inventory.held().unwrap().count, 1);
+        }
+    }
+
     #[test]
     fn rsm1_saved_entity_metadata_retires_with_owner() {
         let mut s = scene();
@@ -2019,5 +2173,83 @@ mod interaction_tests {
             s.take_persistence_dirty_chunks()
                 .contains(&ChunkPos { x: 0, z: 0 })
         );
+    }
+}
+
+#[cfg(test)]
+mod a1_observation_tests {
+    use super::*;
+    #[test]
+    fn bot_merge_retires_consumed_identity_without_reusing_list_indices() {
+        let mut registry = BlockRegistry::default();
+        registry
+            .register_item(rustcraft_mod_api::ItemDefinition {
+                id: rustcraft_engine_core::ItemId(1),
+                name: "fixture:stack",
+                max_stack: 64,
+                placeable: None,
+                capabilities: &[],
+                tool: None,
+            })
+            .unwrap();
+        let mut sim =
+            Simulation::new_with_entity_namespace(World::new(BlockId(0)), registry, Vec3::ZERO, 42);
+        for _ in 0..2 {
+            sim.spawn_item(rustcraft_engine_core::ItemId(1), 1, Vec3::new(5., 3., 5.));
+        }
+        let ids: Vec<_> = sim.observe(0).nearby_items.iter().map(|e| e.id).collect();
+        sim.merge_items();
+        let merged = sim.observe(0).nearby_items;
+        assert_eq!(merged.len(), 1);
+        assert!(ids.contains(&merged[0].id));
+        assert_eq!(merged[0].count, 2);
+        sim.items.clear();
+        assert!(sim.observe(0).nearby_items.is_empty());
+        sim.spawn_item(rustcraft_engine_core::ItemId(1), 1, Vec3::ZERO);
+        assert!(!ids.contains(&sim.observe(0).nearby_items[0].id));
+    }
+    #[test]
+    fn bot_entity_identity_survives_movement_reorder_and_column_reactivation() {
+        let mut registry = BlockRegistry::default();
+        registry
+            .register(rustcraft_mod_api::BlockDefinition::cube(
+                1,
+                "fixture:stone",
+                "fixture:texture",
+            ))
+            .unwrap();
+        registry
+            .register_item(rustcraft_mod_api::ItemDefinition {
+                id: rustcraft_engine_core::ItemId(1),
+                name: "fixture:stone",
+                max_stack: 64,
+                placeable: Some(BlockId(1)),
+                capabilities: &[],
+                tool: None,
+            })
+            .unwrap();
+        let mut sim =
+            Simulation::new_with_entity_namespace(World::new(BlockId(0)), registry, Vec3::ZERO, 42);
+        sim.spawn_item(rustcraft_engine_core::ItemId(1), 1, Vec3::new(0., 3., 0.));
+        sim.spawn_item(rustcraft_engine_core::ItemId(1), 1, Vec3::new(1., 3., 0.));
+        let first = sim.observe(2).nearby_items;
+        assert_ne!(first[0].id, first[1].id);
+        sim.items[0].position.x = 17.;
+        sim.items.reverse();
+        let moved = sim.observe(2).nearby_items;
+        assert_eq!(moved[1].id, first[0].id);
+        assert_eq!(moved[1].position.x, 17.);
+        let column = sim.items[1].column();
+        let snapshot = sim.entity_column_snapshot(column);
+        let mut reopened = Simulation::new_with_entity_namespace(
+            World::new(BlockId(0)),
+            sim.registry.clone(),
+            Vec3::ZERO,
+            42,
+        );
+        reopened
+            .activate_entity_column(column, snapshot.records, &snapshot.tombstones)
+            .unwrap();
+        assert_eq!(reopened.observe(2).nearby_items[0].id, first[0].id);
     }
 }

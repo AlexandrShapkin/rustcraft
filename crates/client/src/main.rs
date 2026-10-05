@@ -1821,6 +1821,7 @@ impl ClientApp {
         let player_restored = restored.is_some();
         let mut simulation =
             initialize_simulation(world, bootstrap.registry, restored, self.survival_start);
+        simulation.bind_content_profile(compiled_profile)?;
         simulation.time = self.restored_world_time;
         self.activate_pending_spatial_columns(&mut simulation)?;
         if player_restored {
@@ -2630,7 +2631,7 @@ impl ClientApp {
                 self.controller.next_intent()
             };
             let intent = if self.control_state.leased {
-                self.control_state.intent
+                self.control_state.intent.clone()
             } else if developer_focus {
                 Default::default()
             } else {
@@ -2638,16 +2639,14 @@ impl ClientApp {
             };
             self.presentation_timing.tick_start(Instant::now());
             let before = presentation::Transform::from_sim(simulation);
+            let had_look = intent.look_delta.x != 0. || intent.look_delta.y != 0.;
             simulation.step(intent, 0.05);
             self.view_state.tick(
                 before,
                 presentation::Transform::from_sim(simulation),
                 self.control_state.fixed.paused,
             );
-            self.presentation_timing.tick_end(
-                Instant::now(),
-                intent.look_delta.x != 0. || intent.look_delta.y != 0.,
-            );
+            self.presentation_timing.tick_end(Instant::now(), had_look);
             (
                 simulation.take_persistence_dirty_chunks(),
                 simulation.take_dirty_sections(),

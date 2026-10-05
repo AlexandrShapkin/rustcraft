@@ -1086,6 +1086,7 @@ fn run_world_stream_bench() {
         bootstrap.registry,
         Vec3::new(0.0, 100.0, 0.0),
     );
+    simulation.bind_content_profile(profile.clone()).unwrap();
     let light_work_start = simulation.lighting.work_counters();
     simulation.world.enforce_column_availability(true);
     let mut residency = WorldResidency::new(1, 1);
@@ -1820,7 +1821,7 @@ fn run_dx_scenario(path: &str) -> Result<(), String> {
                 },
             )?;
             state.sync_config();
-            simulation.step(state.intent, 0.05);
+            simulation.step(state.intent.clone(), 0.05);
         }
     }
 }

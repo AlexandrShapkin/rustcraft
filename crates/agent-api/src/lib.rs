@@ -1,6 +1,7 @@
 //! Semantic intent shared by humans, network players, bots, replays and tests.
 
-use rustcraft_engine_core::{BlockId, BlockPos, Vec3};
+use rustcraft_engine_core::{BlockPos, Vec3};
+use rustcraft_game_api::BlockKey;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MoveIntent {
@@ -8,10 +9,10 @@ pub struct MoveIntent {
     pub strafe: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaceIntent {
     pub position: BlockPos,
-    pub block: BlockId,
+    pub block: BlockKey,
 }
 
 impl Default for MoveIntent {
@@ -23,7 +24,7 @@ impl Default for MoveIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AgentIntent {
     pub movement: MoveIntent,
     pub look_delta: Vec3,

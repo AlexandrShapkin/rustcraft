@@ -11,3 +11,4 @@ workspace = true
 
 [dependencies]
 rustcraft-engine-core.workspace = true
+rustcraft-game-api.workspace = true

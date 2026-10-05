@@ -16,7 +16,7 @@ source_areas = ["crates/client", "crates/control", "crates/runtime", "crates/scr
 [[stage]]
 id = "A1"
 title = "external identity, policy boundary & trust preparation"
-state = "planned"
+state = "active"
 contract = "docs/stages/A1.md"
 issue_label = "stage:A1"
 relevant_docs = ["docs/ARCHITECTURE_AUDIT.md", "docs/AGENTS_AND_BOTS.md", "docs/GAMEPLAY_CONTRACT.md", "docs/SECURITY.md"]

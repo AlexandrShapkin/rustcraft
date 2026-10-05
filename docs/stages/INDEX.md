@@ -7,7 +7,7 @@ Current focus: **A1**. List order is authorized execution order; it does not aut
 | Stage | Title | State | Contract | Issue label |
 | --- | --- | --- | --- | --- |
 | F1 | unified client path & real-hardware field validation | closed | [F1](F1.md) | `stage:F1` |
-| A1 | external identity, policy boundary & trust preparation | planned | [A1](A1.md) | `stage:A1` |
+| A1 | external identity, policy boundary & trust preparation | active | [A1](A1.md) | `stage:A1` |
 | C2 | unified content definition & capability model | planned | [C2](C2.md) | `stage:C2` |
 | BG1 | generalized block geometry & model system | planned | [BG1](BG1.md) | `stage:BG1` |
 | DX2 | tooling equivalence, workflow convergence & retirement | planned | [DX2](DX2.md) | `stage:DX2` |
