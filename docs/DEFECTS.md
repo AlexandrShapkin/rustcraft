@@ -106,3 +106,11 @@ PM5-002 has measured current-generation/ready-queue and entity/lighting lifetime
 CI 37228702009. RSM1 is CLOSED. Clean-region render/GPU ownership growth was reproduced through stuck lighting cleanup.
 This does not establish the owner's hardware process-VRAM causality. Dirty/save and recovery pins
 remain mandatory. DUX1/C1/UX1 stay CLOSED; P1 and subsequent stages remain inactive.
+
+## P1 execution
+
+PM5-003 local repair measures and removes fixed-tick camera/position duplication without changing
+authoritative 20 TPS. Shared timing and discontinuity/input-once tests are documented in
+[P1_REPORT.md](P1_REPORT.md). Public acceptance is pending; PM5-003 is not yet marked resolved.
+Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
+S1 and subsequent stages are inactive.

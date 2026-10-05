@@ -10,6 +10,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Domain {
+    Presentation,
     Residency,
     World,
     Entities,
@@ -24,7 +25,8 @@ pub enum Domain {
     Overlays,
 }
 impl Domain {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
+        Self::Presentation,
         Self::Residency,
         Self::World,
         Self::Entities,
@@ -40,6 +42,7 @@ impl Domain {
     ];
     pub fn key(self) -> &'static str {
         match self {
+            Self::Presentation => "presentation",
             Self::Residency => "residency",
             Self::World => "world",
             Self::Entities => "entities",
@@ -56,6 +59,7 @@ impl Domain {
     }
     pub fn value(self, s: &Snapshot) -> &Value {
         match self {
+            Self::Presentation => &s.presentation,
             Self::Residency => &s.residency,
             Self::World => &s.world,
             Self::Entities => &s.entities,
@@ -72,6 +76,7 @@ impl Domain {
     }
     pub fn set(self, s: &mut Snapshot, v: Value) {
         match self {
+            Self::Presentation => s.presentation = v,
             Self::Residency => s.residency = v,
             Self::World => s.world = v,
             Self::Entities => s.entities = v,
@@ -172,6 +177,13 @@ impl ViewRegistry {
     pub fn engine() -> Self {
         let mut r = Self::default();
         for (name, title, description, cost, requirements) in [
+            (
+                "presentation",
+                "Presentation",
+                "Application timing, transform duplication and configured refresh. Physical scanout unavailable.",
+                Cost::Medium,
+                vec![Domain::Presentation],
+            ),
             (
                 "memory",
                 "Residency / Memory",
@@ -729,6 +741,45 @@ impl ControlState {
                         for (p, k) in blocks.iter().take(8) {
                             text.push_str(&format!("{p}: {k}\n"));
                         }
+                    }
+                } else if d == Domain::Presentation {
+                    if let Some(reason) = value["unavailable"].as_str() {
+                        text.push_str(&format!("UNAVAILABLE: {reason}\n"));
+                    } else {
+                        text.push_str(&format!("{} | {} | {}\nConfigured refresh {} mHz | target {} ms\nPhysical scanout / VRR: unavailable\n",value["backend"],value["adapter"],value["present_mode"],value["monitor"]["reported_refresh_millihertz"],value["target_ms"]));
+                        text.push_str(
+                            "Application timing: p50 / p95 / p99 / jitter(ms) / cadence misses\n",
+                        );
+                        for key in [
+                            "render_ms",
+                            "request_ms",
+                            "redraw_ms",
+                            "acquire_ms",
+                            "prepare_ms",
+                            "submit_ms",
+                            "present_call_ms",
+                            "state_age_ms",
+                            "input_event_to_camera_ms",
+                        ] {
+                            let s = &value[key];
+                            let n = |i: usize| {
+                                s[i].as_f64()
+                                    .map_or_else(|| "N/A".into(), |v| format!("{v:.3}"))
+                            };
+                            text.push_str(&format!(
+                                "{key}: {} / {} / {} / {} / {}\n",
+                                n(2),
+                                n(3),
+                                n(4),
+                                n(6),
+                                n(7)
+                            ));
+                        }
+                        let tps = value["tick_interval_ms"][1]
+                            .as_f64()
+                            .filter(|v| *v > 0.)
+                            .map_or_else(|| "N/A".into(), |ms| format!("{:.2}", 1000. / ms));
+                        text.push_str(&format!("Frames {} ticks {} | target 20 TPS, measured {tps} | alpha {}\nDuplicate authority positions {} / shown positions {} / cameras {}\nCadence threshold >1.5 configured-refresh intervals; not scanout\n",value["frames"],value["ticks"],value["accumulator_alpha"],value["authoritative_position_duplicates"],value["presentation_position_duplicates"],value["camera_duplicates"]));
                     }
                 } else if d == Domain::Residency {
                     if let Some(reason) = value["unavailable"].as_str() {

@@ -203,6 +203,8 @@ impl Action {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     #[serde(default)]
+    pub presentation: Value,
+    #[serde(default)]
     pub residency: Value,
     #[serde(default)]
     pub config: Value,
@@ -230,6 +232,7 @@ pub struct Snapshot {
 impl Default for Snapshot {
     fn default() -> Self {
         Self {
+            presentation: Value::Null,
             residency: Value::Null,
             config: Value::Null,
             version: CONTROL_API_VERSION,

@@ -738,3 +738,13 @@ RSM1 is CLOSED and PM5-002 resolved with local and Ubuntu/Windows implementation
 recorded in [RSM1_REPORT.md](RSM1_REPORT.md). The historical finding table and stage contract above remain audit history.
 DUX1/C1/UX1 remain CLOSED; P1 and every later stage remain inactive. Owner process VRAM is not
 measurable on the available llvmpipe surface; logical retention and allocator capacity are distinct.
+
+## P1 execution update
+
+Baseline `f8b1e9b4a4f2846860fb542eda7d20f4099a988e` was instrumented before the repair. The matched
+graphical fixture proves repeated fixed-tick camera/player transforms and tick-gated mouse updates.
+A transient client position clock and pending-look preview repair those defects; authority remains
+20 TPS. The measured callback experiment was removed, leaving FIFO/redraw policy unchanged.
+[Detailed results](P1_REPORT.md) distinguish application timing from unavailable physical scanout.
+P1 is ACTIVE pending public acceptance. No S1 or subsequent implementation is authorized by this
+update. The historical audit findings/contracts above remain the planning baseline.

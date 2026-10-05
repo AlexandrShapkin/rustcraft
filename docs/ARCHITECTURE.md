@@ -460,3 +460,11 @@ references permit it. Lighting rejects propagation into physically evicted colum
 cleanup on revisit. These mechanisms preserve game policy, Safe residency and save-before-evict.
 RustCraft-owned GPU payload/capacity differs from allocator/driver physical residency.
 See [RSM1_REPORT.md](RSM1_REPORT.md) and decision D-049.
+
+## Client presentation
+
+P1 keeps fixed 20 TPS authority and Control/Bot snapshots separate from transient client transforms.
+Two position samples interpolate using the fixed remainder; local orientation previews only pending
+human look and rebases when the tick consumes it. No visual write-back, persistence or server clock.
+Discontinuities snap. Shared Presentation diagnostics contain bounded scalars, not frame resources.
+See [P1_REPORT.md](P1_REPORT.md), decision D-050 and the conditional display/provider limitations.

@@ -741,3 +741,13 @@ section. Retain recovery references and dirty/save pins until acknowledged; stal
 must not recreate evicted storage, and obsolete cleanup must not erase revisited seeds. A shared
 scalar ledger distinguishes live ownership, unfinished retirement, reusable capacity, RSS and optional
 process VRAM. No forced allocator shrinking or driver-baseline requirement. See RSM1_REPORT.md.
+
+## D-050 — Fixed authority and transient local presentation
+
+Measured fixed-tick position/camera duplication warrants client-only translation interpolation and
+unconsumed local look preview. Authority stays 20 TPS and receives each input once; translation
+accepts one-tick visual delay while orientation uses latest local input. Pause/step/teleport/load/
+hitch/focus transitions rebase. Visual selection raycasts from the shown camera; actual gameplay
+remains authoritative. Keep FIFO/redraw/limiter policy: the measured Wayland notification experiment
+worsened software cadence and was removed. Shared bounded application timing is distinct from
+physical scanout. Owner display validation remains conditional. See P1_REPORT.md.

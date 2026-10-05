@@ -120,3 +120,8 @@ graphical-only availability. Native renderer caches the effective value. Control
 use the same registry; invalid requests preserve effective scale. Pixel sizes are rounded and
 positions snapped. Font-resource family replacement is startup/profile composition only, not a
 second live settings system. UX1 increases engine registration from 16 to 17 settings.
+
+P1 adds no presentation setting or second configuration owner. Existing
+`rustcraft:renderer/present_policy=PreferFifo` remains startup-only; selected surface mode/capabilities
+are reported explicitly. Timing uses effective diagnostic cadence and captures all effective C1
+workload settings. Interpolation is a transient client mechanism, not a mutable simulation policy.

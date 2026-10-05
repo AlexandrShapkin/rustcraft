@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const RHAI_VERSION: &str = "1.26.1";
-pub const API_HELP: &str = "console automation: console_open(BOOL), console_line(LINE); DUX1: debug(), chunk_inspection(), entity_inspection(), assert_debug(PATH, BOOL/STRING/INT); /debug ui open/close/next/previous/tab/activate/help/target/entity; /debug chunk X Z SECTION_Y; /debug entity HEX_ID; control_version(), tick(), player_position(), player(), world(), block_at(X,Y,Z), streaming(), entities(), entity(STABLE_ID), persistence(), renderer(), scripts(), lighting(), meshing(), has_capability(ID), command(LINE), pause(), resume(), step(N), teleport(X,Y,Z), set_block(X,Y,Z,SEMANTIC_KEY), capture(NAME), debug_page(NAME), overlay(NAME,BOOL); scenario: reload_script(PATH) requests and cooperatively waits for a compile job; checkpoint(), assert_tick_delta(N), wait_tick_delta(N,MS), assert_player_unchanged(), wait_ticks(N), wait_frames(N), wait_tick(T,MS), assert_tick(T), assert_block(X,Y,Z,KEY), move_player(FORWARD,STRAFE,TICKS); bounded assert_true(BOOL), assert_eq(INT,INT), fail(MESSAGE). No filesystem, network, process, sleep or imports.";
+pub const API_HELP: &str = "console automation: console_open(BOOL), console_line(LINE); DUX1: debug(), chunk_inspection(), entity_inspection(), assert_debug(PATH, BOOL/STRING/INT); /debug ui open/close/next/previous/tab/activate/help/target/entity; /debug chunk X Z SECTION_Y; /debug entity HEX_ID; control_version(), tick(), player_position(), player(), world(), residency(), presentation(), block_at(X,Y,Z), streaming(), entities(), entity(STABLE_ID), persistence(), renderer(), scripts(), lighting(), meshing(), has_capability(ID), command(LINE), pause(), resume(), step(N), teleport(X,Y,Z), set_block(X,Y,Z,SEMANTIC_KEY), capture(NAME), debug_page(NAME), overlay(NAME,BOOL); scenario: reload_script(PATH) requests and cooperatively waits for a compile job; checkpoint(), assert_tick_delta(N), wait_tick_delta(N,MS), assert_player_unchanged(), wait_ticks(N), wait_frames(N), wait_tick(T,MS), assert_tick(T), assert_block(X,Y,Z,KEY), move_player(FORWARD,STRAFE,TICKS); bounded assert_true(BOOL), assert_eq(INT,INT), fail(MESSAGE). No filesystem, network, process, sleep or imports.";
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
     pub session: String,
@@ -189,6 +189,7 @@ impl RhaiRuntime {
         for (name, domain, cap) in [
             ("player", "player", "player.read"),
             ("world", "world", "world.read"),
+            ("presentation", "presentation", "debug.inspect"),
             ("residency", "residency", "debug.inspect"),
             ("streaming", "streaming", "debug.inspect"),
             ("entities", "entities", "entity.read"),
@@ -209,6 +210,7 @@ impl RhaiRuntime {
                 let value = match domain {
                     "player" => &b.snapshot.player,
                     "world" => &b.snapshot.world,
+                    "presentation" => &b.snapshot.presentation,
                     "residency" => &b.snapshot.residency,
                     "streaming" => &b.snapshot.streaming,
                     "entities" => &b.snapshot.entities,
@@ -1595,6 +1597,7 @@ impl DevTools {
                 for (name, value) in [
                     ("player", &snapshot.player),
                     ("entities", &snapshot.entities),
+                    ("presentation", &snapshot.presentation),
                     ("residency", &snapshot.residency),
                     ("streaming", &snapshot.streaming),
                     ("lighting", &snapshot.lighting),

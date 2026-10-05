@@ -795,3 +795,13 @@ Logical counts and payload bytes are correctness evidence; retained buffer/conta
 RSS are separate high-water evidence. Driver/process VRAM is unavailable on the llvmpipe acceptance
 surface. Its frame time is not a representative GPU target. Frozen M4 hashes and existing correctness
 thresholds are unchanged. No P1 presentation change or M7 optimization is included.
+
+## P1 application presentation evidence
+
+The matched debug/software graphical fixture measured 44.13% repeated pan-camera and 36.10% repeated
+walking-position transitions before repair; both become zero. Pan mouse-to-camera extraction mean
+26.619 -> 5.279 ms; yaw-delta CV 0.960 -> 0.161. This improves visual transform uniformity and local
+response, **not a proven FPS or physical cadence gain**. FIFO/redraw/limiter remain unchanged after
+a rejected Wayland callback experiment. At reported 60 Hz, software frame intervals still frequently
+exceed the 25 ms opportunity threshold. Physical scanout, owner AMD/Vulkan and representative-display
+validation remain unavailable/conditional. See [P1_REPORT.md](P1_REPORT.md) and [P1_RESULTS.json](P1_RESULTS.json).

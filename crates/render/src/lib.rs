@@ -999,7 +999,18 @@ struct PendingCapture {
     path: std::path::PathBuf,
     started: std::time::Instant,
 }
+#[derive(Default, Clone, Copy)]
+pub struct ApplicationFrameTiming {
+    pub acquire_ms: f64,
+    pub prepare_ms: f64,
+    pub total_ms: f64,
+    pub submit_at: Option<std::time::Instant>,
+    pub present_at: Option<std::time::Instant>,
+}
 pub struct Renderer {
+    pub frame_timing_enabled: bool,
+    pub frame_timing: ApplicationFrameTiming,
+    pub supported_present_modes: Vec<wgpu::PresentMode>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -1449,6 +1460,9 @@ impl Renderer {
             adapter_info,
             timing,
             telemetry_enabled: false,
+            frame_timing_enabled: false,
+            frame_timing: ApplicationFrameTiming::default(),
+            supported_present_modes: caps.present_modes.clone(),
             camera_buffer,
             fog: None,
             _textures: textures,
@@ -2064,6 +2078,8 @@ impl Renderer {
         camera: Camera,
         capture: Option<&Path>,
     ) -> Result<(), wgpu::SurfaceError> {
+        self.frame_timing = ApplicationFrameTiming::default();
+        let frame_started = self.frame_timing_enabled.then(std::time::Instant::now);
         if !self.projection_logged {
             eprintln!(
                 "projection: window={}x{} aspect={} fov_radians={} near={} far={}",
@@ -2200,7 +2216,13 @@ impl Renderer {
             texture_page_bind_switches,
             pipeline_switches,
         };
+        let acquire_started = self.frame_timing_enabled.then(std::time::Instant::now);
         let output = self.surface.get_current_texture()?;
+        if let Some(start) = acquire_started {
+            self.frame_timing.acquire_ms = start.elapsed().as_secs_f64() * 1000.;
+            self.frame_timing.prepare_ms =
+                start.duration_since(frame_started.unwrap()).as_secs_f64() * 1000.;
+        }
         // Some GL surfaces cannot be copied. Use the same render passes/readback on a
         // copyable attachment for that capture, then present the identical state normally.
         let capture_attachment = (capture.is_some()
@@ -2541,6 +2563,9 @@ impl Renderer {
                 &config,
             )
         });
+        if self.frame_timing_enabled {
+            self.frame_timing.submit_at = Some(std::time::Instant::now());
+        }
         self.queue.submit(Some(encoder.finish()));
         if timed {
             self.timing.as_mut().unwrap().map();
@@ -2564,7 +2589,13 @@ impl Renderer {
                 diagnostic::save_capture(&self.device, buffer, &self.config, path);
             }
         }
+        if self.frame_timing_enabled {
+            self.frame_timing.present_at = Some(std::time::Instant::now());
+        }
         output.present();
+        if let Some(start) = frame_started {
+            self.frame_timing.total_ms = start.elapsed().as_secs_f64() * 1000.;
+        }
         if capture_attachment.is_some() {
             self.render_capture(camera, None)?;
         }

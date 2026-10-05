@@ -229,3 +229,7 @@ UX1 console: `/` enters COMMAND with a slash prefilled; Backquote enters empty R
 `/help <command>` reads registry metadata; Tab completes commands, subcommands and config keys.
 The console uses extended Unicode grapheme editing and IME commit/preedit where supported.
 These usability paths preserve existing Control capabilities and trusted-local Rhai boundaries.
+
+P1 adds capability-checked `presentation()` shared diagnostics. Its `statistics_columns` labels
+bounded numeric summary tuples; `authoritative_transform` and `presentation_transform` are explicitly
+different. Existing `player()` remains authoritative. No physical scanout or new mutation privilege.

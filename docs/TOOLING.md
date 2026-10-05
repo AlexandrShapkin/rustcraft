@@ -183,3 +183,10 @@ FONT_RESOURCES with all upstream font license texts. See [UX1_REPORT.md](UX1_REP
 These complement `world-stream-bench`, `world-travel-test` and `render-camera-motion`, whose gates
 remain intact. They are correctness/acceptance workflows; any DX2 retirement requires equivalent
 coverage. See [RSM1_REPORT.md](RSM1_REPORT.md).
+
+P1 workflows: `just p1-test` checks bounded clocks/visual state and shared diagnostics;
+`just p1-client` runs six matched 20-second phases on a real 640x360 surface in a disposable world,
+then exact pause/step/resume/teleport and capture acceptance. Set existing C1 overrides explicitly
+if changing workloads; compare identical settings. Bounded results live under ignored `target/p1/`,
+captures under `target/captures/`. This is a milestone acceptance alias for later DX2 review, not a
+physical input-to-photon/scanout profiler. `dx-overhead` includes Presentation active/inactive modes.

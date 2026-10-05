@@ -2,6 +2,8 @@ mod configuration;
 mod developer_input;
 mod devtools;
 mod lifetime;
+mod p1;
+mod presentation;
 mod render_tests;
 mod rsm1;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
@@ -333,6 +335,10 @@ impl Controller for LocalHumanController {
 }
 
 struct ClientApp {
+    p1_campaign: Option<p1::Campaign>,
+    p1_failure: Option<String>,
+    view_state: presentation::ViewState,
+    presentation_timing: presentation::Ledger,
     rsm1_campaign: Option<rsm1::Campaign>,
     rsm1_failure: Option<String>,
     f3_chord: developer_input::F3Chord,
@@ -1417,6 +1423,7 @@ impl ClientApp {
         match result {
             Ok(payload) => {
                 self.simulation = Some(payload.simulation);
+                self.rebase_presentation();
                 self.presentation = Some(payload.presentation);
                 if let Some(simulation) = self.simulation.as_mut() {
                     let resident = simulation.world.column_positions().collect::<Vec<_>>();
@@ -1526,6 +1533,10 @@ impl ClientApp {
         };
         control_state.sync_config();
         Self {
+            p1_campaign: None,
+            p1_failure: None,
+            view_state: presentation::ViewState::default(),
+            presentation_timing: presentation::Ledger::default(),
             rsm1_campaign: None,
             rsm1_failure: None,
             f3_chord: Default::default(),
@@ -2580,7 +2591,18 @@ impl ClientApp {
             } else {
                 intent
             };
+            self.presentation_timing.tick_start(Instant::now());
+            let before = presentation::Transform::from_sim(simulation);
             simulation.step(intent, 0.05);
+            self.view_state.tick(
+                before,
+                presentation::Transform::from_sim(simulation),
+                self.control_state.fixed.paused,
+            );
+            self.presentation_timing.tick_end(
+                Instant::now(),
+                intent.look_delta.x != 0. || intent.look_delta.y != 0.,
+            );
             (
                 simulation.take_persistence_dirty_chunks(),
                 simulation.take_dirty_sections(),
@@ -4202,6 +4224,28 @@ impl ClientApp {
         self.observe_stream_stage(4, upload_pending, completed_count > 0, true, false);
     }
     fn render(&mut self, event_loop: &ActiveEventLoop) {
+        let pending_look = if self.controller.captured
+            && !self.dev_focus()
+            && !self.inventory_open
+            && !self.control_state.leased
+        {
+            self.controller.look
+        } else {
+            Vec3::ZERO
+        };
+        let shown = self.simulation.as_ref().map(|s| {
+            self.presentation_timing.authoritative_tick_used = Some(s.time);
+            let authority = presentation::Transform::from_sim(s);
+            let shown = self.view_state.sample(
+                authority,
+                self.clock.alpha(),
+                pending_look,
+                self.control_state.fixed.paused,
+            );
+            self.presentation_timing
+                .frame(Instant::now(), authority, shown, self.clock.alpha());
+            shown
+        });
         let legacy_debug = self.legacy_debug_visible();
         if let Some(input_at) = self.responsiveness.input_consumed_at.take() {
             self.responsiveness
@@ -4243,7 +4287,13 @@ impl ClientApp {
         let mut camera = if let Some(stage) = self.diagnostic.filter(|s| !s.normal_world()) {
             stage.camera(aspect)
         } else if let Some(simulation) = self.simulation.as_ref() {
-            camera_for(simulation, aspect)
+            let mut c = camera_for(simulation, aspect);
+            if let Some(p) = shown {
+                c.position = p.position + Vec3::new(0., 1.62, 0.);
+                c.yaw = p.yaw;
+                c.pitch = p.pitch;
+            }
+            c
         } else {
             return;
         };
@@ -4628,7 +4678,18 @@ impl ClientApp {
                 &rustcraft_render::hud::HudSnapshot {
                     slots,
                     selected: sim.inventory.selected(),
-                    target: sim.target().map(|h| h.block),
+                    target: rustcraft_engine_core::raycast::cast(
+                        &sim.world,
+                        camera.position,
+                        camera.forward(),
+                        5.,
+                        |id| {
+                            sim.registry.get(id).is_some_and(|d| {
+                                d.targetable && d.material != rustcraft_mod_api::Material::Invisible
+                            })
+                        },
+                    )
+                    .map(|h| h.block),
                     text: if !self.dx_text.is_empty() {
                         &self.dx_text
                     } else if self.debug {
@@ -4693,6 +4754,7 @@ impl ClientApp {
         } else {
             None
         };
+        renderer.frame_timing_enabled = self.presentation_timing.enabled;
         let render_present_started = Instant::now();
         match if dx_capture_path.is_some() {
             renderer.render_capture_async(camera, capture)
@@ -4899,6 +4961,7 @@ impl ClientApp {
             Err(wgpu::SurfaceError::OutOfMemory) => std::process::exit(1),
             Err(_) => {}
         }
+        self.presentation_timing.gpu_frame(renderer.frame_timing);
         self.frame_phases.render_present_ms =
             render_present_started.elapsed().as_secs_f64() * 1000.0;
         self.frame_phase_samples
@@ -5135,7 +5198,9 @@ impl ApplicationHandler for ClientApp {
         }
         // Only explicit streaming diagnostics may override the normal player's window size.
         // This isolates software-GPU fill cost without changing simulation or acceptance rules.
-        let (width, height) = if self.stream_perf {
+        let (width, height) = if self.p1_campaign.is_some() {
+            (640, 360)
+        } else if self.stream_perf {
             let size = std::env::var("RUSTCRAFT_STREAM_WINDOW_SIZE").ok();
             match stream_window_size(size.as_deref()) {
                 Ok(size) => size,
@@ -5250,11 +5315,19 @@ impl ApplicationHandler for ClientApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
+                self.rebase_presentation();
+                if size.width == 0 || size.height == 0 {
+                    self.last_frame = Instant::now();
+                    self.clock = Default::default();
+                }
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size.width, size.height);
                 }
             }
-            WindowEvent::RedrawRequested => self.render(event_loop),
+            WindowEvent::RedrawRequested => {
+                self.presentation_timing.redraw(Instant::now());
+                self.render(event_loop)
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = [position.x as f32, position.y as f32];
             }
@@ -5264,6 +5337,7 @@ impl ApplicationHandler for ClientApp {
                 }
             }
             WindowEvent::Focused(false) => {
+                self.rebase_presentation();
                 self.f3_chord.clear();
                 window.set_ime_allowed(false);
                 if let Some(tools) = self.devtools.as_mut() {
@@ -5280,6 +5354,9 @@ impl ApplicationHandler for ClientApp {
                 }
             }
             WindowEvent::Focused(true) => {
+                self.last_frame = Instant::now();
+                self.clock = Default::default();
+                self.rebase_presentation();
                 window.set_ime_allowed(self.devtools.as_ref().is_some_and(|d| d.console_open))
             }
             WindowEvent::Ime(ime) if self.dev_focus() => {
@@ -5389,12 +5466,8 @@ impl ApplicationHandler for ClientApp {
                 .pending_input_at
                 .get_or_insert(event_started);
         }
-        if self.controller.captured
-            && !self.dev_focus()
-            && let DeviceEvent::MouseMotion { delta } = event
-        {
-            self.controller.look.x += delta.0 as f32;
-            self.controller.look.y += delta.1 as f32;
+        if let DeviceEvent::MouseMotion { delta } = event {
+            self.ingest_mouse(delta, event_started);
         }
         if is_input {
             let elapsed = event_started.elapsed();
@@ -5433,6 +5506,7 @@ impl ApplicationHandler for ClientApp {
         self.metrics.catch_up = budget.catch_up;
         self.service_devtools_measured(_event_loop);
         self.service_rsm1_campaign();
+        self.service_p1_campaign();
         if self.dx_exit_pending
             && self.dx_capture.is_none()
             && !self.renderer.as_ref().is_some_and(|r| r.capture_pending())
@@ -5472,8 +5546,12 @@ impl ApplicationHandler for ClientApp {
         for _ in 0..ticks {
             self.fixed_step();
         }
+        if budget.dropped_seconds > 0. {
+            self.rebase_presentation();
+        }
         self.service_streaming_turn();
         if let Some(window) = self.window.as_ref() {
+            self.presentation_timing.request(Instant::now());
             window.request_redraw();
         }
     }
@@ -6165,7 +6243,7 @@ fn main() {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--devtools" | "--dx-overhead" | "--dux-acceptance" | "--c1-acceptance"
-            | "--ux1-acceptance" | "--rsm1-acceptance" => {}
+            | "--ux1-acceptance" | "--rsm1-acceptance" | "--p1-acceptance" => {}
             "--set-config" | "--config-file" => {
                 args.next().expect("configuration option requires value");
             }
@@ -6252,6 +6330,7 @@ fn main() {
             || a == "--c1-acceptance"
             || a == "--ux1-acceptance"
             || a == "--rsm1-acceptance"
+            || a == "--p1-acceptance"
     }) {
         app.dux_fixture = true;
         app.devtools = Some(
@@ -6278,6 +6357,10 @@ fn main() {
         app.scenario_path = None;
         app.rsm1_campaign = Some(rsm1::Campaign::new());
     }
+    if std::env::args().any(|a| a == "--p1-acceptance") {
+        app.scenario_path = None;
+        app.p1_campaign = Some(p1::Campaign::new());
+    }
     app.world_name = if app.dux_fixture {
         format!(
             "dux1-acceptance-{}-{}",
@@ -6290,6 +6373,7 @@ fn main() {
     } else {
         world_name
     };
+    app.presentation_timing.enabled = app.devtools.is_some();
     app.survival_start = std::env::args().any(|a| a == "--survival");
     app.stream_perf = std::env::args().any(|a| a == "--stream-perf");
     if app.stream_perf {
@@ -6299,6 +6383,10 @@ fn main() {
     app.camera_motion = std::env::args().any(|a| a == "--camera-motion");
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("client event loop failed: {error}");
+        std::process::exit(1);
+    }
+    if app.p1_failure.is_some() || app.p1_campaign.is_some() {
+        eprintln!("P1 incomplete: {:?}", app.p1_failure);
         std::process::exit(1);
     }
     if app.rsm1_campaign.is_some()

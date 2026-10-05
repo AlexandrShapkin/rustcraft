@@ -447,6 +447,7 @@ impl ClientApp {
                 .iter()
                 .map(|(d, s)| (*d, s.collections))
                 .collect();
+            self.presentation_timing.enabled = probe.phase != 0;
             match probe.phase {
                 0 => probe.parked = self.devtools.take(),
                 1 => {
@@ -481,6 +482,7 @@ impl ClientApp {
                     self.devtools.as_mut().unwrap().scenario = None;
                     self.control_state.page = "memory".into();
                 }
+                7 => self.control_state.page = "presentation".into(),
                 _ => unreachable!(),
             }
         }
@@ -503,7 +505,7 @@ impl ClientApp {
                 "high_page",
                 "overlay",
                 "scenario",
-                "residency_page"][probe.phase]),
+                "residency_page","presentation_page"][probe.phase]),
                 "event_turns":probe.turns,
                 "samples":probe.samples.len(),
                 "mean_us":mean,
@@ -520,7 +522,7 @@ impl ClientApp {
             probe.samples.clear();
             probe.turns = 0;
             probe.phase += 1;
-            if probe.phase == 7 {
+            if probe.phase == 8 {
                 if let Some(tools) = self.devtools.as_mut() {
                     tools.scenario = None;
                 }
@@ -618,6 +620,7 @@ impl rustcraft_control::Host for ClientHost<'_> {
             let started = Instant::now();
             let a = &mut self.app;
             let v = match d {
+                Domain::Presentation => a.presentation_observation(),
                 Domain::Residency => a.lifetime_ledger(),
                 Domain::World | Domain::Entities | Domain::Entity => {
                     if let Some(simulation) = a.simulation.as_mut() {
@@ -828,6 +831,16 @@ impl rustcraft_control::Host for ClientHost<'_> {
             state: &mut self.app.control_state,
         }
         .apply(action);
+        if result.is_ok()
+            && matches!(
+                action,
+                rustcraft_control::Action::Teleport(_)
+                    | rustcraft_control::Action::Pause
+                    | rustcraft_control::Action::Resume
+            )
+        {
+            self.app.rebase_presentation();
+        }
         if config_action {
             self.app.dx_text.clear();
         }
@@ -925,6 +938,67 @@ mod tests {
         Action, Host,
         diagnostics::{DebugInput, Domain},
     };
+    #[test]
+    fn p1_shared_sample_reuse_and_inactive_provider_cost() {
+        let mut a = app();
+        a.presentation_timing.enabled = true;
+        let pose = crate::presentation::Transform::from_sim(a.simulation.as_ref().unwrap());
+        a.presentation_timing.frame(Instant::now(), pose, pose, 0.5);
+        let mut host = ClientHost { app: &mut a };
+        for (label, active) in [("inactive", false), ("active", true)] {
+            let mut samples = vec![];
+            for _ in 0..1000 {
+                if active {
+                    host.app
+                        .control_state
+                        .diagnostics
+                        .invalidate(Domain::Presentation);
+                }
+                let t = Instant::now();
+                host.prepare_diagnostics(if active { &[Domain::Presentation] } else { &[] });
+                samples.push(t.elapsed().as_nanos());
+            }
+            samples.sort_unstable();
+            println!(
+                "P1_PROVIDER_COST {label} mean_ns={} p50_ns={} p95_ns={} p99_ns={} max_ns={}",
+                samples.iter().sum::<u128>() / 1000,
+                samples[500],
+                samples[950],
+                samples[990],
+                samples[999]
+            );
+            if !active {
+                assert!(
+                    !host
+                        .app
+                        .control_state
+                        .diagnostics
+                        .samples
+                        .contains_key(&Domain::Presentation)
+                );
+            }
+        }
+        assert_eq!(host.snapshot().presentation["frames"], 1);
+        host.app.control_state.page = "presentation".into();
+        assert!(
+            host.app
+                .control_state
+                .diagnostic_text()
+                .contains("Frames 1")
+        );
+        let mut tools = rustcraft_scripting_rhai::DevTools::new(
+            std::path::Path::new("../../scripts"),
+            rustcraft_control::engine_registry(),
+        )
+        .unwrap();
+        tools
+            .evaluate("assert_eq(presentation().frames,1)", &mut host, false)
+            .unwrap();
+        assert_eq!(
+            host.app.control_state.diagnostics.samples[&Domain::Presentation].collections,
+            1000
+        );
+    }
     fn app() -> ClientApp {
         use rustcraft_mod_api::GameplayModule;
         let mut registry = rustcraft_mod_api::BlockRegistry::default();

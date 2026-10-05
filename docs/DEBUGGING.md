@@ -114,3 +114,14 @@ Current generation entries should track current render sections, not all visited
 result window includes submitted-unconsumed plus ready results. Device-wide GPU counters are labelled
 as such; process VRAM may be unavailable. Fixed UX1 text capacity is global, not travel growth.
 See [RSM1_REPORT.md](RSM1_REPORT.md) for bounds, workloads and telemetry limitations.
+
+## Presentation timing
+
+F4 -> Presentation, `/debug page presentation`, or Rhai `presentation()` reads the same cached
+`Snapshot.presentation`. It exposes configured refresh, actual backend/mode, render/request/redraw/
+submit/present-call distributions, acquisition wait, alpha/state age, authoritative and shown
+transforms, duplicate counts and application mouse-to-camera extraction latency. Physical scanout
+and VRR are explicitly unavailable. Medium-cost summaries sample at C1 diagnostic cadence; inactive
+views do not call the provider. Devtools opt-in retains bounded scalar recent timing, not resources.
+The viewport rounds timing values; JSON tuples identify columns in `statistics_columns`.
+Stationary/paused duplicate transforms are normal. See [P1_REPORT.md](P1_REPORT.md).

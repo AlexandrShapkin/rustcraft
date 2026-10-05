@@ -306,3 +306,12 @@ rsm1-test:
 # Real surface, disposable world, shared C1 policy and scalar lifetime receipts.
 rsm1-client:
     cargo run --release -p rustcraft-client -- --rsm1-acceptance --set-config rustcraft:streaming/load_radius=3 --set-config rustcraft:streaming/retain_radius=4 --set-config rustcraft:lighting/work_budget=256 --set-config rustcraft:streaming/main_budget_ms=8 --set-config rustcraft:meshing/upload_sections=64
+
+# Bounded application clocks and transient presentation correctness; no world ownership changes.
+p1-test:
+    cargo test -p rustcraft-client presentation::
+    cargo test -p rustcraft-client p1_ -- --test-threads=1
+
+# Matched six 20-second motion phases, disposable world, timing summary and actual surface capture.
+p1-client:
+    cargo run -p rustcraft-client -- --p1-acceptance

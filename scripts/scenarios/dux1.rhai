@@ -4,7 +4,7 @@ pause();
 checkpoint();
 command("/debug ui open");
 assert_debug("selector_open",true);
-assert_debug("registered_views",19);
+assert_debug("registered_views",20);
 assert_debug("selector_input_focus",true);
 command("/debug ui next");
 command("/debug ui activate");
@@ -27,7 +27,7 @@ for cycle in 0..4 {
     command("/debug ui close");
     assert_debug("selector_open",false);
     assert_debug("geometry_count",0);
-    assert_debug("registered_views",19);
+    assert_debug("registered_views",20);
 }
 assert_tick_delta(0);
 assert_player_unchanged();
