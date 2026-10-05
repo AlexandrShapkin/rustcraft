@@ -60,8 +60,10 @@ present/submit/cpu/acquire distributions, authoritative/shown transforms, duplic
 input-to-camera/authority distributions and fixed-step counts. timeline.json records bounded frame
 intervals, checkpoint worker publication envelopes, main persistence service spans and fixed budgets
 on one monotonic clock. Long-frame overlap is correlated separately with workers and main services;
-worker overlap alone cannot establish main-thread blocking. At least twenty successful player
-checkpoints are required. Publication metrics are envelopes, not isolated fsync counters.
+worker overlap alone cannot establish main-thread blocking. Each phase summary also includes
+long-frame counts overlapping workers/main services and distributions of main persistence service
+cost/time inside long-frame intervals, so the top-level returned summary supports initial review.
+At least twenty successful player checkpoints are required. Publication metrics are envelopes, not isolated fsync counters.
 
 ## Measurements
 
@@ -112,12 +114,15 @@ pending requirement, not a waiver. No new issue is needed for the inaccessible r
 
 ## Implementation SHA
 
-Implementation commit(s) recorded in Git history with Refs #18; this progress report is included
-in the implementation batch. No self-referential commit SHA is fabricated.
+Core implementation: `ed33bd7a26789f583597d0cc448e08b3a3e4a5ff` (Refs #18).
+A follow-up adds concise per-phase checkpoint/frame overlap and main-service cost summaries;
+its identity is discoverable through Git history. Hardware acceptance is still pending.
 
 ## CI
 
-Pending implementation publication. Both Ubuntu and Windows are required.
+Core implementation [CI 37358378714](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37358378714):
+Ubuntu success; Windows success. The field-summary follow-up also requires both platform jobs;
+its final public run is discoverable from that commit. This is implementation CI, not F1 hardware acceptance.
 
 ## Closeout SHA
 

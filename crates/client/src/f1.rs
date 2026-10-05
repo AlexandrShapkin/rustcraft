@@ -156,6 +156,43 @@ impl Trace {
             self.dropped += 1;
         }
     }
+    fn correlation(&self, start: f64, end: f64, long_ms: f64) -> Value {
+        let overlaps = |a: f64, b: f64, e: &Value| {
+            a < e["end_ms"].as_f64().unwrap() && b > e["start_ms"].as_f64().unwrap()
+        };
+        let long: Vec<_> = self
+            .frames
+            .iter()
+            .filter(|(a, b, _)| *a < end && *b > start && b - a > long_ms)
+            .collect();
+        let main_cost: Vec<f64> = self
+            .main
+            .iter()
+            .filter(|e| overlaps(start, end, e))
+            .map(|e| e["end_ms"].as_f64().unwrap() - e["start_ms"].as_f64().unwrap())
+            .collect();
+        let main_in_long: Vec<f64> = long
+            .iter()
+            .map(|&&(a, b, _)| {
+                self.main
+                    .iter()
+                    .filter(|e| overlaps(a, b, e))
+                    .map(|e| {
+                        b.min(e["end_ms"].as_f64().unwrap())
+                            - a.max(e["start_ms"].as_f64().unwrap())
+                    })
+                    .sum()
+            })
+            .collect();
+        json!({"long_frame_threshold_ms":long_ms,"long_frame_count":long.len(),
+            "long_frames_overlapping_workers":long.iter().filter(|&&(a,b,_)|
+                self.workers.iter().any(|e|overlaps(*a,*b,e))).count(),
+            "long_frames_overlapping_main_persistence":long.iter().filter(|&&(a,b,_)|
+                self.main.iter().any(|e|overlaps(*a,*b,e))).count(),
+            "main_persistence_service_ms":distribution(main_cost),
+            "main_persistence_time_inside_long_frames_ms":distribution(main_in_long),
+            "interpretation":"worker overlap is not evidence of main-thread blocking; main service cost is measured separately"})
+    }
     fn summary(&self, long_ms: f64) -> Value {
         let long: Vec<_> = self
             .frames
@@ -327,6 +364,13 @@ impl Campaign {
             .presentation_timing
             .target_ms
             .map_or(33.333, |ms| ms * 2.5);
+        for sample in &mut self.samples {
+            sample["checkpoint_frame_correlation"] = app.f1_trace.correlation(
+                sample["start_ms"].as_f64().unwrap(),
+                sample["end_ms"].as_f64().unwrap(),
+                threshold,
+            );
+        }
         let trace = app.f1_trace.summary(threshold);
         write("timeline.json", &trace)?;
         if app.f1_trace.dropped != 0 {
@@ -415,6 +459,13 @@ mod tests {
         );
         assert_eq!(v["player_publication_ms"]["p99"], 30.);
         assert_eq!(v["dropped_trace_events"], 0);
+        let correlation = t.correlation(0., 40., 33.);
+        assert_eq!(correlation["long_frames_overlapping_workers"], 1);
+        assert_eq!(correlation["main_persistence_service_ms"]["max"], 1.);
+        assert_eq!(
+            correlation["main_persistence_time_inside_long_frames_ms"]["max"],
+            1.
+        );
     }
     #[test]
     fn percentiles_and_empty_observations_are_explicit() {
