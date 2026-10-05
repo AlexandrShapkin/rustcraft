@@ -172,7 +172,7 @@ frame budget; streaming/CPU/driver long frames remain visible. No broad renderer
 remote prediction/reconciliation, entity-wide interpolation, surface-policy framework, persistence
 redesign or next-stage work is included. RSM1/C1/UX1/DUX1 remain CLOSED. No version/tag/release.
 
-PM5-003 can close after final local/public acceptance because the measured fixed-state duplication
+PM5-003 is resolved after local and Ubuntu/Windows implementation acceptance because the measured fixed-state duplication
 and tick-gated local camera are repaired, input is consumed exactly once, authority and deterministic
 stepping remain unchanged, discontinuities are explicit and timing/physical-provider limitations
 are recorded. Closure does not claim physical refresh synchronization or a throughput speedup.
@@ -218,3 +218,16 @@ unmaintained warnings: paste RUSTSEC-2024-0436, smartstring RUSTSEC-2026-0249, t
 RUSTSEC-2026-0192. No dependency/lockfile changes. `cargo tree -p rustcraft-server --edges normal`
 contains no render/client/winit/wgpu dependencies. No frozen hashes, fonts/licenses, version,
 release, tag, M5 protocol or later-stage files were altered.
+
+## Public acceptance — P1 CLOSED
+
+Implementation **`524a2a6dc7edab72453f31ad7eda02b8dcd9d58a`**, **Smooth fixed-tick presentation**.
+[CI run 37256205733](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37256205733):
+Ubuntu **success**, Windows **success**, including formatter, workspace check/tests and strict Clippy.
+The documentation closeout records P1 CLOSED and PM5-003 resolved. Final closeout Ubuntu/Windows
+checks are monitored separately before the final user report; no next-stage work starts while waiting.
+
+RSM1/UX1/C1/DUX1 and M0–M4 remain closed. S1/R2/A1/DX2/READY1 and M5/M6/M7 remain inactive.
+The conditional representative-display evidence is retained; closure proves the measured
+application transform/input defect and explicit timing model, not physical refresh synchronization.
+No version bump, tag or release was created.

@@ -68,7 +68,7 @@ Counts here cover unique audit findings, not every historical defect: **1 BLOCKE
 | --- | --- | --- | --- |
 | PM5-001 | BLOCKER / A | `agent-api::PlaceIntent.block: BlockId`, `BotAction.intent`, and public runtime state cannot become durable/remote contracts unchanged. Bot nearby-item observations lack EntityId. Profile-local numbers or list positions would lock replication to one process registry. | A1.1 identity/consumer contracts |
 | PM5-002 | HIGH / A | `MeshScheduler.generations` keeps removed section keys; its result channel is unbounded by channel capacity; GPU removal exists but no repeated-route lifetime ledger proves all ownership converges. Multiple client interests would magnify retention/backpressure mistakes. | RSM1; resolved (see execution update) |
-| PM5-003 | HIGH / A | `camera_for` reads fixed-tick player position/yaw/pitch; `Simulation::step` applies look. FIFO rendering alone cannot smooth duplicate authoritative visual states. Prediction would otherwise be layered onto an undefined presentation clock. | P1 |
+| PM5-003 | HIGH / A | `camera_for` reads fixed-tick player position/yaw/pitch; `Simulation::step` applies look. FIFO rendering alone cannot smooth duplicate authoritative visual states. Prediction would otherwise be layered onto an undefined presentation clock. | P1; resolved (see execution update) |
 | PM5-004 | HIGH / A | Whole `.rcc` compressed-column replacement includes entities; movement/pickup recovery spans files; workers accept concrete WorldStorage despite WorldStore. Frequent server updates could multiply write amplification and physical coupling. Not evidence of broken M4 saves. | S1 evaluation/decision |
 | PM5-005 | HIGH / A | runtime survival/inventory/recipes and mod-api hardness/tool/drop definitions remain Minecraft policy; sample-game bypasses mixed runtime. Replicating those universal-looking fields would cement the wrong game boundary. | A1.2 affected policy migration |
 | PM5-006 | HIGH / A | `render::hud::gui_rect` divides historical GUI coordinates by 256; whole HUD/inventory/player sheets remain named roles with internal layout assumptions. Current block crops are already semantic. Content resolution must not equate sheet geometry with resource identity. | R2 active resource roles |
@@ -746,5 +746,5 @@ graphical fixture proves repeated fixed-tick camera/player transforms and tick-g
 A transient client position clock and pending-look preview repair those defects; authority remains
 20 TPS. The measured callback experiment was removed, leaving FIFO/redraw policy unchanged.
 [Detailed results](P1_REPORT.md) distinguish application timing from unavailable physical scanout.
-P1 is ACTIVE pending public acceptance. No S1 or subsequent implementation is authorized by this
+P1 is CLOSED; PM5-003 is resolved after local acceptance and Ubuntu/Windows implementation CI 37256205733. No S1 or subsequent implementation is authorized by this
 update. The historical audit findings/contracts above remain the planning baseline.
