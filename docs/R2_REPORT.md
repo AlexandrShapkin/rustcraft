@@ -1,6 +1,9 @@
 # R2 autonomous acceptance
 
-Implementation is locally accepted; public Ubuntu/Windows CI is the publication gate.
+Implementation `f3909b7b94aa8c86eae2c98588384976ea296225` is accepted.
+[Implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37325633913)
+passed Ubuntu and Windows format, check, tests and strict Clippy.
+The documentation closeout receives a separate final CI run.
 
 ## Recovery
 
@@ -49,3 +52,10 @@ Sequential local acceptance, two Cargo jobs with debug information disabled:
 No storage backend, generic checkpoint envelope, entity codec or frozen world generator changed.
 The Minecraft receipt component necessarily writes v2 quantity/revision information and reads legacy v1.
 No F1/A1/C2/BG1/DX2/RF1/READY1/M5 implementation was started.
+
+## ROADMAP closeout
+
+Only R2 status changed from planned/not started to accepted, with implementation/repair identities,
+CI link and acceptance evidence added to that section. Its goals remain. The suffix beginning
+`## F1` is byte-for-byte identical to the protected user backup. Future order remains
+F1, A1, C2, BG1, DX2, RF1, READY1, M5.

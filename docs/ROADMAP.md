@@ -286,7 +286,13 @@ See `S1_REPORT.md` and `S1_PERSISTENCE_DECISION.md`.
 
 ## R2 — semantic resource normalization
 
-Status: next planned stage; not started.
+Status: accepted; implementation and Ubuntu/Windows CI green.
+
+Evidence: implementation `f3909b7b94aa8c86eae2c98588384976ea296225`; independent persistence
+repair `a3a1b4dcc136bafe558cc49729e2662352e76260`. See [R2 acceptance report](R2_REPORT.md)
+and [implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37325633913).
+Semantic layout/page, cache, sandbox and release-policy acceptance passed; ARCH-002 is narrowed
+to the remaining destination-layout/game-policy boundary.
 
 Owner: PM5-006 and remaining active historical source-sheet layout coupling.
 
