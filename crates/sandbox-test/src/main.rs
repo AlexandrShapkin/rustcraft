@@ -182,8 +182,8 @@ fn observer_system(context: &mut SandboxContext, _commands: &mut CommandBuffer) 
 }
 
 fn pulse_system(context: &mut SandboxContext, commands: &mut CommandBuffer) {
-    if context.intent.primary_action {
-        context.pulse_on = !context.pulse_on;
+    if context.intent.primary_action || context.intent.secondary_action {
+        context.pulse_on = !context.intent.secondary_action && !context.pulse_on;
         commands.set_block(
             TARGET,
             BlockState::new(if context.pulse_on {
@@ -380,7 +380,7 @@ fn main() {
             Default::default(),
         )
         .expect("game-neutral scripting");
-    assert_eq!(result.0, "1");
+    assert_eq!(result.0, rustcraft_control::CONTROL_API_VERSION.to_string());
 
     // Independent native game registration and shared observation proof, without runtime/Minecraft.
     use rustcraft_control::diagnostics::{Cost, DebugView, Domain, ViewKind};
@@ -538,6 +538,48 @@ mod tests {
         schedule.run(ScheduleStage::FixedUpdate, &mut context, &mut commands);
         assert_eq!(commands.apply(&mut world), 1);
         assert_eq!(world.get(TARGET), ids.pulse);
+        context.intent = AgentIntent {
+            secondary_action: true,
+            ..Default::default()
+        };
+        schedule.run(ScheduleStage::FixedUpdate, &mut context, &mut commands);
+        assert_eq!(commands.apply(&mut world), 1);
+        assert_eq!(world.get(TARGET), ids.crystal);
+    }
+
+    #[test]
+    fn a1_independent_game_uses_public_work_and_recipe_mechanisms() {
+        use rustcraft_game_api::{RecipeDefinition, WorkDefinition, WorkProgress, recipe_matches};
+        let crystal = ResourceId::parse("sandbox_test:crystal").unwrap();
+        let charge = ResourceId::parse("sandbox_test:charge").unwrap();
+        let work = WorkDefinition {
+            target: BlockKey::parse("sandbox_test:pulse").unwrap(),
+            duration_seconds: 0.1,
+            item_multipliers: vec![(crystal.clone(), 2.)],
+            reward: Some((charge.clone(), 1)),
+        };
+        let mut progress = WorkProgress::default();
+        assert!(progress.advance(0.05, work.duration_seconds, work.item_multipliers[0].1));
+        let recipe = RecipeDefinition {
+            key: ResourceId::parse("sandbox_test:recipe/charge").unwrap(),
+            local_alias: None,
+            shaped: false,
+            width: 1,
+            inputs: vec![Some(crystal.clone())],
+            output: charge,
+            count: 1,
+        };
+        assert!(recipe_matches(
+            recipe.shaped,
+            &[None, Some(crystal)],
+            &recipe.inputs
+        ));
+        assert!(!recipe_matches(
+            recipe.shaped,
+            &[] as &[Option<ResourceId>],
+            &recipe.inputs
+        ));
+        assert!(!WorkProgress::default().advance(f32::NAN, 1., 1.));
     }
 
     #[test]

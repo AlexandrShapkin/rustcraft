@@ -27,3 +27,14 @@ A1 defines provenance/grant adapters; M5 authenticates principals and lets the h
 and capabilities. Gameplay survival/creative/spectator never confers server.admin or script.local.
 Downloaded code remains sandboxed and quota-limited; no source label, CLI flag or Rhai context can
 manufacture authenticated remote grants. See [NETWORKING](NETWORKING.md) and [MODDING](MODDING.md).
+
+## A1 admitted local provenance
+
+Control API 2 Context carries a validated NamespacedId-based PrincipalId, explanatory grant source
+and explicit capabilities. Context is host-composed and intentionally not deserializable from
+untrusted data. LocalSession uses that same principal, not a second authority identity. LocalOwner
+means explicit native local composition, never remote authentication. ServerAdmin/FutureChat source
+labels cannot obtain developer grants by selecting a label. Relabeling a granted script/scenario
+preserves principal and capabilities; no privilege is minted. Mechanisms still check capabilities,
+not role/source/provenance labels. Gameplay mode never supplies host grants. M5 must authenticate
+remote principals and compose admitted grants; A1 provides no authentication or transport.

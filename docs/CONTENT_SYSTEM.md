@@ -235,3 +235,15 @@ materials, generalized non-full models, items/entities, useful medium/liquid, UI
 and particles where supported. This tests engine mechanisms without Minecraft or proprietary assets;
 it is not engine-core hardcoded admin blocks or gameplay policy. Unsupported categories wait for their
 own contracts rather than being faked. No separate texture milestone or package implementation here.
+
+## A1 bounded native policy registration
+
+Public Game API WorkDefinition and RecipeDefinition carry existing semantic BlockKey/ResourceId
+identities. Games choose effort, tool/item multipliers, reward and recipe content; shared WorkProgress
+and recipe matching are mechanisms without Minecraft tool taxonomy. Minecraft registers its values
+from minecraft-b173::policy through public native registration, then resolves them once to local
+dense handles. Retained mod-api::legacy definitions are explicit local compatibility for worldgen,
+renderer, slot transactions, tool-damage codec validation and persistence adapters; their hardness,
+tool/drop/placeable fields are not universal external definitions. VoxelDefinition remains the generic
+numeric-ID-free voxel contract. This bounded migration does not implement C2 composed content,
+handler dispatch or a new save format.

@@ -996,10 +996,7 @@ impl DevTools {
                     self.request_compile(
                         path,
                         Purpose::Script {
-                            context: Context {
-                                source: rustcraft_control::Source::Script,
-                                capabilities: context.capabilities.clone(),
-                            },
+                            context: context.for_source(rustcraft_control::Source::Script),
                         },
                         &owner,
                     )?;
@@ -1013,10 +1010,7 @@ impl DevTools {
                     let path = args.get(1).ok_or("usage: /scenario PATH | abort")?;
                     return self.start_with_context(
                         path,
-                        Context {
-                            source: rustcraft_control::Source::Scenario,
-                            capabilities: context.capabilities.clone(),
-                        },
+                        context.for_source(rustcraft_control::Source::Scenario),
                         host,
                     );
                 }

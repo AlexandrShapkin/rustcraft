@@ -3,16 +3,18 @@
 use rustcraft_control::{Context, Source};
 
 pub(super) struct LocalSession {
-    pub principal: &'static str,
     pub role: &'static str,
     pub context: Context,
 }
 impl LocalSession {
+    pub fn principal(&self) -> &str {
+        self.context.provenance.principal.as_str()
+    }
     pub fn normal() -> Self {
-        let mut context = Context::read_only(Source::DeveloperConsole);
+        let mut context = Context::read_only(Source::DeveloperConsole)
+            .with_local_principal(rustcraft_control::PrincipalId::parse("local:player").unwrap());
         context.capabilities.insert("debug.configure".into());
         Self {
-            principal: "local-player",
             role: "local-diagnostics",
             context,
         }
@@ -34,15 +36,17 @@ impl LocalSession {
         });
         if trusted {
             Self {
-                principal: "local-player",
                 role: "trusted-developer",
-                context: Context::developer(Source::DeveloperConsole),
+                context: Context::developer(Source::DeveloperConsole).with_local_principal(
+                    rustcraft_control::PrincipalId::parse("local:player").unwrap(),
+                ),
             }
         } else if args.iter().any(|a| a == "--player") {
             Self {
-                principal: "local-player",
                 role: "player",
-                context: Context::read_only(Source::DeveloperConsole),
+                context: Context::read_only(Source::DeveloperConsole).with_local_principal(
+                    rustcraft_control::PrincipalId::parse("local:player").unwrap(),
+                ),
             }
         } else {
             Self::normal()
@@ -66,6 +70,6 @@ mod tests {
         assert!(player.context.require("debug.configure").is_err());
         let developer = LocalSession::from_args(&["--survival".into(), "--devtools".into()]);
         assert!(developer.context.require("script.load").is_ok());
-        assert_eq!(player.principal, developer.principal);
+        assert_eq!(player.principal(), developer.principal());
     }
 }

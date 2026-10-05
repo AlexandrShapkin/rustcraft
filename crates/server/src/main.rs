@@ -1,4 +1,4 @@
-use rustcraft_agent_api::{AgentIntent, MoveIntent};
+use rustcraft_agent_api::MoveIntent;
 use rustcraft_bot_api::ScriptedBot;
 use rustcraft_content::{
     ContentHash, ContentManifest, PackageDescriptor, PackageId, PackageKind, PackageTarget,
@@ -6,6 +6,7 @@ use rustcraft_content::{
 };
 use rustcraft_engine_core::{BlockId, BlockPos, ChunkPos, Vec3, World};
 use rustcraft_minecraft_b173::blocks::{BlocksModule, GRASS, STONE};
+use rustcraft_mod_api::legacy_actions::{MinecraftActions, PlayerIntent as AgentIntent};
 use rustcraft_runtime::survival::GameMode;
 use rustcraft_runtime::{RuntimeBootstrap, Simulation, run_controller};
 
@@ -1698,11 +1699,17 @@ fn run_smoke() {
         AgentIntent::default(),
         AgentIntent {
             movement: MoveIntent::default(),
-            break_block: Some(target),
+            game: MinecraftActions {
+                break_block: Some(target),
+                ..Default::default()
+            },
             ..Default::default()
         },
         AgentIntent {
-            use_action: true,
+            game: MinecraftActions {
+                use_action: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
     ];
@@ -1718,7 +1725,10 @@ fn run_smoke() {
     assert_eq!(simulation.world.get(adjacent), STONE.id);
     assert_eq!(simulation.inventory.held().unwrap().count, 63);
     assert_eq!(
-        simulation.observe(1).inventory[0].as_ref().unwrap().count,
+        simulation.observe(1).game.inventory[0]
+            .as_ref()
+            .unwrap()
+            .count,
         63
     );
     println!(
@@ -1858,7 +1868,7 @@ fn run_config_smoke(arguments: &[String]) -> Result<(), String> {
         base as i32,
         state.config.effective(keys::RETAIN_RADIUS).integer() as i32 - base as i32,
     );
-    let context = Context::developer(Source::ServerAdmin);
+    let context = Context::developer(Source::DeveloperConsole).for_source(Source::ServerAdmin);
     for (load, retain) in [(6, 7), (3, 4), (12, 16), (3, 3)] {
         let mut host = rustcraft_minecraft_b173::control::MinecraftHost {
             simulation: &mut simulation,

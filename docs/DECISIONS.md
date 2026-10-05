@@ -886,3 +886,22 @@ Supersedes: AGENTS' mandatory full-document reading model and ROADMAP's duplicat
 no prior architectural invariant or historical decision rationale is superseded.
 Superseded by: none.
 References: [INDEX](INDEX.md), [registry](stages.toml), [DOCINFRA1 report](DOCINFRA1_REPORT.md).
+
+## D-061 — Typed game intent, semantic rule admission and local grant provenance
+
+A1 preserves distinct Game, Control, Agent and Bot contracts. AgentIntent and Bot observation/action
+support typed game payloads with unit as the generic default; explicit local Minecraft adapters own
+legacy hotbar/mining/crafting conveniences. Semantic BlockKey placement resolves through an
+admitted compiled profile before local dense translation. Bot API 4 exposes existing durable EntityId;
+collection order is never entity identity. No wholesale struct serialization defines M5.
+
+Native Game API work/reward and recipe descriptors are bounded demonstrated mechanisms, not C2
+composition. minecraft-b173 registers policy through public APIs; setup resolves semantic IDs once
+into local tables. Public progress/matching mechanisms have an independent sandbox consumer.
+mod-api::legacy and unaffected local inventory/worldgen/render/storage adapters remain explicit;
+formats, frozen worldgen and durable-transfer ordering remain unchanged.
+
+Control API 2 stores validated principal and local grant provenance; Context has no untrusted
+Deserialize admission. Source labels and local enum variants are not authentication. Mechanisms
+check explicit capabilities; game mode and role names cannot grant remote/admin authority. M5
+owns remote authentication/session admission and any wire representation.

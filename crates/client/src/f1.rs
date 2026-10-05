@@ -431,7 +431,7 @@ impl Campaign {
             &json!({"schema_version":1,"status":"measured","acceptance":"pending review of hardware evidence; not physical-display acceptance",
             "mode":if self.interactive {"interactive"} else {"automated"},
             "adapter":adapter(&r.adapter_info),"build_profile":if cfg!(debug_assertions){"dev"}else{"release"},
-            "build_identity":rustcraft_build_info::identity(),"world_seed":app.world_seed,"generator_version":app.stream_generator.as_ref().map(|g|g.version()),"principal":app.session.principal,"role":app.session.role,
+            "build_identity":rustcraft_build_info::identity(),"world_seed":app.world_seed,"generator_version":app.stream_generator.as_ref().map(|g|g.version()),"principal":app.session.principal(),"role":app.session.role,
             "input":if self.interactive {"owner-controlled normal DeviceEvent mouse and WindowEvent keyboard; subjective acceptance requires owner observation"} else {"harness drives normal LocalHumanController and native mouse ingestion; production winit payload router tested separately without desktop injection"},
             "phases":self.samples,"timeline":"timeline.json","player_publication_ms":trace["player_publication_ms"],
             "long_frame_count":trace["long_frames"].as_array().unwrap().len(),

@@ -12,8 +12,9 @@ mod render_tests;
 mod resource_tests;
 mod rsm1;
 mod session;
-use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
+use rustcraft_agent_api::{Controller, MoveIntent};
 use rustcraft_engine_core::{BlockId, Vec3};
+use rustcraft_mod_api::legacy_actions::{MinecraftActions, PlayerIntent as AgentIntent};
 mod bench;
 mod debug;
 mod gpu_metrics;
@@ -324,7 +325,7 @@ impl LocalHumanController {
         self.look = Vec3::ZERO;
     }
 }
-impl Controller for LocalHumanController {
+impl Controller<MinecraftActions> for LocalHumanController {
     fn next_intent(&mut self) -> AgentIntent {
         let intent = AgentIntent {
             movement: MoveIntent {
@@ -335,10 +336,13 @@ impl Controller for LocalHumanController {
             jump: self.jump,
             primary_action: self.break_held,
             secondary_action: self.place_pressed,
-            attack: self.break_held,
-            use_action: self.place_pressed,
-            select_hotbar: self.selection.take(),
-            scroll_hotbar: std::mem::take(&mut self.scroll),
+            game: MinecraftActions {
+                attack: self.break_held,
+                use_action: self.place_pressed,
+                select_hotbar: self.selection.take(),
+                scroll_hotbar: std::mem::take(&mut self.scroll),
+                ..Default::default()
+            },
             ..Default::default()
         };
         self.look = Vec3::ZERO;
@@ -440,6 +444,7 @@ struct ClientApp {
     load_results_applied: u64,
     generation_results_applied: u64,
     controller: LocalHumanController,
+    leased_hotbar: Option<u8>,
     clock: rustcraft_runtime::metrics::FixedStepClock,
     last_frame: Instant,
     resources: Result<RendererResources, String>,
@@ -1656,6 +1661,7 @@ impl ClientApp {
             load_results_applied: 0,
             generation_results_applied: 0,
             controller: LocalHumanController::default(),
+            leased_hotbar: None,
             clock: Default::default(),
             last_frame: Instant::now(),
             resources: minecraft_renderer_resources(),
@@ -2626,12 +2632,18 @@ impl ClientApp {
                     ..Default::default()
                 }
             } else if stream_perf_enabled || self.inventory_open {
-                rustcraft_agent_api::AgentIntent::default()
+                AgentIntent::default()
             } else {
                 self.controller.next_intent()
             };
             let intent = if self.control_state.leased {
-                self.control_state.intent.clone()
+                self.control_state
+                    .intent
+                    .clone()
+                    .map_game(|_| MinecraftActions {
+                        select_hotbar: self.leased_hotbar.take(),
+                        ..Default::default()
+                    })
             } else if developer_focus {
                 Default::default()
             } else {
@@ -6563,7 +6575,7 @@ mod tests {
             let mut simulation =
                 initialize_simulation(world, bootstrap.registry.clone(), None, true);
             for _ in 0..40 {
-                simulation.step(Default::default(), 0.05);
+                simulation.step::<()>(Default::default(), 0.05);
             }
             assert!(simulation.player.position.y >= 1.0);
         }
@@ -7378,10 +7390,10 @@ mod m2_input_tests {
             break_held: true,
             ..Default::default()
         };
-        assert!(c.next_intent().attack);
-        assert!(c.next_intent().attack);
+        assert!(c.next_intent().game.attack);
+        assert!(c.next_intent().game.attack);
         c.break_held = false;
-        assert!(!c.next_intent().attack);
+        assert!(!c.next_intent().game.attack);
     }
     #[test]
     fn digits_and_wheel_are_semantic_one_shot_selection() {
@@ -7401,20 +7413,20 @@ mod m2_input_tests {
         .enumerate()
         {
             c.key(key, ElementState::Pressed);
-            assert_eq!(c.next_intent().select_hotbar, Some(i as u8));
-            assert_eq!(c.next_intent().select_hotbar, None);
+            assert_eq!(c.next_intent().game.select_hotbar, Some(i as u8));
+            assert_eq!(c.next_intent().game.select_hotbar, None);
         }
         c.wheel(winit::event::MouseScrollDelta::LineDelta(0., 0.));
-        assert_eq!(c.next_intent().scroll_hotbar, 0);
+        assert_eq!(c.next_intent().game.scroll_hotbar, 0);
         c.wheel(winit::event::MouseScrollDelta::LineDelta(0., 2.));
-        assert_eq!(c.next_intent().scroll_hotbar, -2);
+        assert_eq!(c.next_intent().game.scroll_hotbar, -2);
         for _ in 0..4 {
             c.wheel(winit::event::MouseScrollDelta::PixelDelta(
                 winit::dpi::PhysicalPosition::new(0., 10.),
             ));
         }
-        assert_eq!(c.next_intent().scroll_hotbar, -1);
-        assert_eq!(c.next_intent().scroll_hotbar, 0);
+        assert_eq!(c.next_intent().game.scroll_hotbar, -1);
+        assert_eq!(c.next_intent().game.scroll_hotbar, 0);
     }
     #[test]
     fn f3_is_client_state_and_toggles_on_bare_release() {

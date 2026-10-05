@@ -168,8 +168,7 @@ impl ClientApp {
         if !self.developer_shortcut(code, state, repeat) && !self.dev_focus() {
             self.controller.key(code, state);
             if self.control_state.leased {
-                self.control_state.intent.select_hotbar =
-                    self.controller.next_intent().select_hotbar;
+                self.leased_hotbar = self.controller.next_intent().game.select_hotbar;
             }
         }
         Ok(())
@@ -204,14 +203,14 @@ mod tests {
         {
             assert!(!a.developer_shortcut(k, ElementState::Pressed, false));
             a.controller.key(k, ElementState::Pressed);
-            assert_eq!(a.controller.next_intent().select_hotbar, Some(i as u8));
+            assert_eq!(a.controller.next_intent().game.select_hotbar, Some(i as u8));
             a.developer_shortcut(KeyCode::F3, ElementState::Pressed, false);
             assert!(a.developer_shortcut(k, ElementState::Pressed, false));
             let page = a.control_state.page.clone();
             a.developer_shortcut(KeyCode::F3, ElementState::Pressed, true);
             a.developer_shortcut(k, ElementState::Pressed, true);
             assert_eq!(a.control_state.page, page);
-            assert_eq!(a.controller.next_intent().select_hotbar, None);
+            assert_eq!(a.controller.next_intent().game.select_hotbar, None);
             a.developer_shortcut(KeyCode::F3, ElementState::Released, false);
             assert_eq!(a.control_state.page, page);
         }
@@ -283,6 +282,7 @@ impl ClientApp {
                         ));
                     }
                     self.controller = LocalHumanController::default();
+                    self.leased_hotbar = None;
                 } else {
                     self.last_frame = Instant::now();
                     self.clock = Default::default();
@@ -384,7 +384,10 @@ mod window_route_tests {
             a.debug = false;
             for (slot, code) in DIGITS.into_iter().enumerate() {
                 tap(&mut a, code);
-                assert_eq!(a.controller.next_intent().select_hotbar, Some(slot as u8));
+                assert_eq!(
+                    a.controller.next_intent().game.select_hotbar,
+                    Some(slot as u8)
+                );
                 let old_page = a.control_state.page.clone();
                 key(&mut a, KeyCode::F3, ElementState::Pressed, false);
                 key(&mut a, code, ElementState::Pressed, false);
@@ -392,7 +395,7 @@ mod window_route_tests {
                 key(&mut a, code, ElementState::Pressed, true);
                 key(&mut a, code, ElementState::Released, false);
                 key(&mut a, KeyCode::F3, ElementState::Released, false);
-                assert_eq!(a.controller.next_intent().select_hotbar, None);
+                assert_eq!(a.controller.next_intent().game.select_hotbar, None);
                 if granted {
                     let expected = a
                         .control_state
@@ -442,7 +445,7 @@ mod window_route_tests {
         assert_eq!(a.controller.next_intent(), AgentIntent::default());
         a.route_window_input(&WindowEvent::Focused(true));
         tap(&mut a, KeyCode::Digit4);
-        assert_eq!(a.controller.next_intent().select_hotbar, Some(3));
+        assert_eq!(a.controller.next_intent().game.select_hotbar, Some(3));
         a.debug = false;
         key(&mut a, KeyCode::F3, ElementState::Released, false);
         assert!(!a.debug);

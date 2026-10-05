@@ -545,3 +545,15 @@ its transient snapshot; failed saves do not advance ownership and remain dirty/r
 See D-052 and [ENTITY_TRANSFER_REPAIR](ENTITY_TRANSFER_REPAIR.md). This is ordered recovery, not
 multi-file atomicity. Future cross-space transfer must preserve the same invariant, with explicit
 versioned compatibility rather than assuming today's column identity suffices.
+
+## A1 identity and bounded policy boundary
+
+External placement uses existing BlockKey; authoritative CompiledGameProfile resolution precedes
+explicit legacy local mapping and shared admission checks. Bot entity observations expose persisted
+EntityId. Agent/Bot typed game payloads isolate Minecraft convenience fields; Control intent remains
+generic. Minecraft native package registration supplies recipe/work/reward rules; runtime compiles
+semantic rules to dense local tables and applies progress, matching, mutation and durable transfer.
+No engine crate depends on minecraft-b173. Legacy numeric worldgen/storage/render and inventory slot
+adapters remain local, with frozen hashes/formats preserved. Replication must not serialize this
+compatibility Simulation or AgentIntent wholesale. Control principal/provenance records admitted
+local grants without claiming authentication; see SECURITY and D-061.

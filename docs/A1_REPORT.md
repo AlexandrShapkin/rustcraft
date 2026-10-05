@@ -41,3 +41,29 @@ Bot API version 3 exposes existing durable EntityId. Tests cover movement/reorde
 merge/removal semantics, and observations after actual persisted migration/reopen in either order.
 Local intent owners now clone retained requests or extract timing flags before moving owned intent.
 No whole-AgentIntent wire serialization or persistent format change.
+
+## Policy and trust slice
+
+Generic AgentIntent<G=()> and typed Bot payloads now isolate explicit MinecraftActions and
+MinecraftObservation adapters; Control stays generic. Bot version 4 records the payload change;
+Control version 2 records admitted local provenance. Minecraft recipe selection, hardness/tool
+multipliers and drop rewards moved to minecraft-b173::policy public registration. Runtime uses
+shared WorkProgress/recipe matching and pre-resolved local handles. mod-api policy-rich definitions
+are now explicitly legacy; unaffected slot transactions/tool-damage/persistence/worldgen/render
+adapters remain local compatibility. No C2 general handler/component model or protocol is added.
+
+Reordered/renumbered Minecraft registry proof preserves recipe output, mining speed, drop identity,
+tool durability and semantic player decode into the original profile. Independent sandbox uses both
+generic actions and new public work/recipe mechanisms without runtime/Minecraft dependencies.
+Control validates principal labels, preserves provenance/grants across script relabeling, rejects
+implicit ServerAdmin/FutureChat developer admission and cannot Deserialize untrusted Context.
+First identity batch public CI 37375463910: Ubuntu success, Windows success.
+
+## Policy/trust local validation
+
+`just ci` passed: 340 nextest tests passed, two existing skips; workspace formatting,
+documentation checks and strict all-target/all-feature Clippy passed. `just smoke`,
+`just survival-scenario` and `just sample-game` passed. The sample-game offscreen
+GL/llvmpipe image proves independent composition only, not representative hardware performance.
+Focused production WindowEvent routing, provenance denial/relabeling, reordered semantic placement,
+renumbered policy/save roundtrip and existing persistence/transfer tests passed.

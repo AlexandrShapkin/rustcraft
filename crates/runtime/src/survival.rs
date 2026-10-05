@@ -1,6 +1,6 @@
 use crate::inventory::ItemStack;
-use rustcraft_engine_core::{Aabb, BlockId, EntityId, ItemId, Vec3, World};
-use rustcraft_mod_api::{BlockRegistry, ToolCategory, ToolTier};
+use rustcraft_engine_core::{Aabb, EntityId, ItemId, Vec3, World};
+use rustcraft_mod_api::BlockRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
@@ -74,7 +74,7 @@ pub enum RecipeKind {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipe {
-    pub id: &'static str,
+    pub id: String,
     pub kind: RecipeKind,
     pub width: u8,
     pub inputs: Vec<Option<ItemId>>,
@@ -82,22 +82,8 @@ pub struct Recipe {
 }
 impl Recipe {
     pub fn matches(&self, grid: &[Option<ItemStack>]) -> bool {
-        match self.kind {
-            RecipeKind::Shapeless => {
-                let mut a = grid.iter().flatten().map(|s| s.item).collect::<Vec<_>>();
-                let mut b = self.inputs.iter().flatten().copied().collect::<Vec<_>>();
-                a.sort();
-                b.sort();
-                a == b
-            }
-            RecipeKind::Shaped => {
-                grid.len() == self.inputs.len()
-                    && grid
-                        .iter()
-                        .zip(&self.inputs)
-                        .all(|(a, b)| a.map(|s| s.item) == *b)
-            }
-        }
+        let items: Vec<_> = grid.iter().map(|stack| stack.map(|s| s.item)).collect();
+        rustcraft_game_api::recipe_matches(self.kind == RecipeKind::Shaped, &items, &self.inputs)
     }
 }
 
@@ -109,111 +95,42 @@ impl RecipeRegistry {
     pub fn find(&self, grid: &[Option<ItemStack>]) -> Option<Recipe> {
         self.recipes.iter().find(|r| r.matches(grid)).cloned()
     }
-    pub fn add_defaults(&mut self, r: &BlockRegistry) {
-        let id = |n: &str| {
-            r.item(
-                r.by_name(n)
-                    .and_then(|b| b.item)
-                    .unwrap_or(ItemId(u32::MAX)),
-            )
-            .map(|_| r.by_name(n).unwrap().item.unwrap())
+    pub fn from_definitions(r: &BlockRegistry) -> Self {
+        let item = |key: &rustcraft_content::ResourceId| {
+            r.resolve_item_key(key).expect("validated recipe item")
         };
-        let Some(log) = id("minecraft_b173:log") else {
-            return;
-        };
-        let Some(planks) = id("minecraft_b173:planks") else {
-            return;
-        };
-        let Some(stone) = id("minecraft_b173:cobblestone") else {
-            return;
-        };
-        let stick = ItemId(100);
-        let wp = ItemId(101);
-        let wa = ItemId(102);
-        let ws = ItemId(103);
-        let sp = ItemId(104);
-        let sa = ItemId(105);
-        let ss = ItemId(106);
-        let out = |item, count| ItemStack {
-            item,
-            count,
-            damage: 0,
-        };
-        self.recipes.push(Recipe {
-            id: "log_to_planks",
-            kind: RecipeKind::Shapeless,
-            width: 2,
-            inputs: vec![Some(log)],
-            output: out(planks, 4),
-        });
-        self.recipes.push(Recipe {
-            id: "planks_to_sticks",
-            kind: RecipeKind::Shaped,
-            width: 2,
-            inputs: vec![Some(planks), None, Some(planks), None],
-            output: out(stick, 4),
-        });
-        for (id, cat) in [
-            (wp, ToolCategory::Pickaxe),
-            (wa, ToolCategory::Axe),
-            (ws, ToolCategory::Shovel),
-            (sp, ToolCategory::Pickaxe),
-            (sa, ToolCategory::Axe),
-            (ss, ToolCategory::Shovel),
-        ] {
-            let material = if id >= sp { stone } else { planks };
-            let output = out(id, 1);
-            let inputs = match cat {
-                ToolCategory::Pickaxe => {
-                    vec![Some(material), Some(material), Some(stick), Some(stick)]
-                }
-                ToolCategory::Axe => {
-                    vec![Some(material), Some(material), Some(material), Some(stick)]
-                }
-                ToolCategory::Shovel => vec![Some(material), None, Some(stick), None],
-            };
-            self.recipes.push(Recipe {
-                id: "tool",
-                kind: RecipeKind::Shaped,
-                width: 2,
-                inputs,
-                output,
-            });
+        Self {
+            recipes: r
+                .recipes()
+                .iter()
+                .map(|recipe| Recipe {
+                    id: recipe.local_alias.unwrap_or(recipe.key.as_str()).to_owned(),
+                    kind: if recipe.shaped {
+                        RecipeKind::Shaped
+                    } else {
+                        RecipeKind::Shapeless
+                    },
+                    width: recipe.width,
+                    inputs: recipe
+                        .inputs
+                        .iter()
+                        .map(|key| key.as_ref().map(item))
+                        .collect(),
+                    output: ItemStack {
+                        item: item(&recipe.output),
+                        count: recipe.count,
+                        damage: 0,
+                    },
+                })
+                .collect(),
         }
     }
-}
-
-pub fn tool_speed(registry: &BlockRegistry, held: Option<ItemStack>, block: BlockId) -> f32 {
-    let Some(def) = registry.get(block) else {
-        return 1.;
-    };
-    let Some(stack) = held else { return 1. };
-    let Some(tool) = registry.item(stack.item).and_then(|i| i.tool) else {
-        return 1.;
-    };
-    if def.preferred_tool == Some(tool.category) {
-        tool.speed
-    } else {
-        1.
-    }
-}
-pub fn tier_ok(registry: &BlockRegistry, held: Option<ItemStack>, block: BlockId) -> bool {
-    let Some(def) = registry.get(block) else {
-        return false;
-    };
-    let Some(min) = def.preferred_tool else {
-        return true;
-    };
-    let Some(stack) = held else { return false };
-    registry
-        .item(stack.item)
-        .and_then(|i| i.tool)
-        .is_some_and(|t| t.category == min && t.tier >= ToolTier::Wood)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustcraft_engine_core::BlockId;
     use rustcraft_mod_api::{BlockDefinition, ItemDefinition};
     #[test]
     fn item_entity_falls_and_recipe_matches() {
@@ -258,7 +175,7 @@ mod tests {
         );
         let mut rr = RecipeRegistry::default();
         rr.recipes.push(Recipe {
-            id: "x",
+            id: "x".into(),
             kind: RecipeKind::Shapeless,
             width: 2,
             inputs: vec![Some(ItemId(1))],

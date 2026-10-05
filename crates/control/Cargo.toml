@@ -14,3 +14,4 @@ rustcraft-config.workspace = true
 rustcraft-agent-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rustcraft-content.workspace = true

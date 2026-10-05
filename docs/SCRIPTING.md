@@ -1,7 +1,7 @@
 # Developer scripting (DX1)
 
 DX1 is engine tooling ahead of inactive M5. It does not replace native simulation or authorize
-third-party native code. The public Control API version is 1; `control_version()` reports it.
+third-party native code. The public Control API version is 2; `control_version()` reports it.
 
 `rustcraft-control` owns immutable snapshots, semantic actions, command registry/parser, sources,
 capabilities, fixed-step gate, event ring and explicit scenario program. It depends on Engine/Agent

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
-pub const CONTROL_API_VERSION: u32 = 1;
+pub const CONTROL_API_VERSION: u32 = 2;
 pub type ControlResult<T> = Result<T, String>;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,15 +20,52 @@ pub enum Source {
     ServerAdmin,
     FutureChat,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Validated principal label composed by the local host. This label is not authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrincipalId(rustcraft_content::NamespacedId);
+impl PrincipalId {
+    pub fn parse(value: &str) -> ControlResult<Self> {
+        rustcraft_content::NamespacedId::parse(value)
+            .map(Self)
+            .map_err(|_| "invalid principal identity".into())
+    }
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl Serialize for PrincipalId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.as_str().serialize(serializer)
+    }
+}
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum GrantOrigin {
+    Untrusted,
+    LocalOwner,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct Provenance {
+    pub principal: PrincipalId,
+    pub grant_origin: GrantOrigin,
+    /// Explanatory grant source only; mechanisms never authorize by this label.
+    pub grant_label: String,
+}
+// Context intentionally has no Deserialize: external data cannot mint admitted grants.
+#[derive(Debug, Clone, Serialize)]
 pub struct Context {
     pub source: Source,
+    pub provenance: Provenance,
     pub capabilities: BTreeSet<String>,
 }
 impl Context {
     pub fn read_only(source: Source) -> Self {
         Self {
             source,
+            provenance: Provenance {
+                principal: PrincipalId::parse("local:untrusted").unwrap(),
+                grant_origin: GrantOrigin::Untrusted,
+                grant_label: "read-only".into(),
+            },
             capabilities: [
                 "world.read",
                 "player.read",
@@ -41,10 +78,15 @@ impl Context {
         }
     }
     pub fn developer(source: Source) -> Self {
-        if source == Source::FutureChat {
+        if matches!(source, Source::FutureChat | Source::ServerAdmin) {
             return Self::read_only(source);
         }
         let mut ctx = Self::read_only(source);
+        ctx.provenance = Provenance {
+            principal: PrincipalId::parse("local:owner").unwrap(),
+            grant_origin: GrantOrigin::LocalOwner,
+            grant_label: "explicit-local-developer".into(),
+        };
         ctx.capabilities.extend(
             [
                 "world.write",
@@ -59,6 +101,19 @@ impl Context {
             .map(str::to_owned),
         );
         ctx
+    }
+    /// Host-supplied local identity; cannot create remote authenticated authority.
+    pub fn with_local_principal(mut self, principal: PrincipalId) -> Self {
+        self.provenance.principal = principal;
+        self
+    }
+    /// Relabel execution origin while preserving the admitted principal and grants.
+    pub fn for_source(&self, source: Source) -> Self {
+        Self {
+            source,
+            provenance: self.provenance.clone(),
+            capabilities: self.capabilities.clone(),
+        }
     }
     pub fn require(&self, capability: &str) -> ControlResult<()> {
         if self.capabilities.contains(capability) {
@@ -1520,5 +1575,33 @@ mod tests {
         ] {
             assert!(c.require(cap).unwrap_err().contains(cap));
         }
+    }
+}
+
+#[cfg(test)]
+mod a1_provenance_tests {
+    use super::*;
+    #[test]
+    fn source_labels_cannot_grant_remote_authority() {
+        for source in [Source::ServerAdmin, Source::FutureChat] {
+            let c = Context::developer(source);
+            assert_eq!(c.provenance.grant_origin, GrantOrigin::Untrusted);
+            assert!(c.require("world.write").is_err());
+            assert!(c.require("script.load").is_err());
+            assert!(c.require("server.admin").is_err());
+        }
+        assert!(PrincipalId::parse("not namespaced").is_err());
+    }
+    #[test]
+    fn script_relabel_preserves_principal_and_grants_without_elevation() {
+        let c = Context::developer(Source::DeveloperConsole)
+            .with_local_principal(PrincipalId::parse("local:owner-session").unwrap());
+        let script = c.for_source(Source::Script);
+        assert_eq!(script.provenance.principal.as_str(), "local:owner-session");
+        assert_eq!(script.capabilities, c.capabilities);
+        assert!(script.require("script.load").is_ok());
+        assert!(script.require("server.admin").is_err());
+        let denied = Context::read_only(Source::FutureChat).for_source(Source::ServerAdmin);
+        assert!(denied.require("world.write").is_err());
     }
 }

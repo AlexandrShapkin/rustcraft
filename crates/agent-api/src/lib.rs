@@ -25,7 +25,7 @@ impl Default for MoveIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct AgentIntent {
+pub struct AgentIntent<G = ()> {
     pub movement: MoveIntent,
     pub look_delta: Vec3,
     pub jump: bool,
@@ -34,17 +34,24 @@ pub struct AgentIntent {
     pub primary_action: bool,
     /// Generic held/pressed secondary action. The active game decides what it means.
     pub secondary_action: bool,
-    /// Legacy M0-M3 Minecraft action aliases retained during incremental migration.
-    pub attack: bool,
-    pub use_action: bool,
-    pub select_hotbar: Option<u8>,
-    pub scroll_hotbar: i8,
-    pub break_block: Option<BlockPos>,
-    pub place_block: Option<PlaceIntent>,
-    pub craft: bool,
-    pub inventory_click: Option<(u8, u8)>,
+    /// Typed game-specific adapter payload; generic controllers use ().
+    pub game: G,
 }
 
-pub trait Controller {
-    fn next_intent(&mut self) -> AgentIntent;
+pub trait Controller<G = ()> {
+    fn next_intent(&mut self) -> AgentIntent<G>;
+}
+
+impl<G> AgentIntent<G> {
+    pub fn map_game<H>(self, map: impl FnOnce(G) -> H) -> AgentIntent<H> {
+        AgentIntent {
+            movement: self.movement,
+            look_delta: self.look_delta,
+            jump: self.jump,
+            crouch: self.crouch,
+            primary_action: self.primary_action,
+            secondary_action: self.secondary_action,
+            game: map(self.game),
+        }
+    }
 }

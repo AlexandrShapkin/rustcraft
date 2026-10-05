@@ -1761,6 +1761,7 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "rustcraft-agent-api",
  "rustcraft-config",
+ "rustcraft-content",
  "serde",
  "serde_json",
 ]
@@ -1818,7 +1819,10 @@ dependencies = [
 name = "rustcraft-mod-api"
 version = "0.1.0-alpha.2"
 dependencies = [
+ "rustcraft-agent-api",
+ "rustcraft-content",
  "rustcraft-engine-core",
+ "rustcraft-game-api",
 ]
 
 [[package]]

@@ -15,7 +15,27 @@ use rustcraft_game_api::{
 use rustcraft_mod_api::{FaceTextures, Material};
 use std::{collections::BTreeSet, path::Path};
 
-pub use rustcraft_gameplay_blocks as blocks;
+pub mod blocks {
+    pub use rustcraft_gameplay_blocks::*;
+    pub struct BlocksModule;
+    impl rustcraft_mod_api::GameplayModule for BlocksModule {
+        fn id(&self) -> rustcraft_mod_api::ModuleId {
+            rustcraft_mod_api::ModuleId("minecraft_b173:blocks")
+        }
+        fn register(
+            &self,
+            registry: &mut rustcraft_mod_api::BlockRegistry,
+        ) -> Result<(), rustcraft_mod_api::RegistrationError> {
+            rustcraft_gameplay_blocks::BlocksModule.register(registry)?;
+            registry.bind_profile(
+                super::compile_profile()
+                    .map_err(|_| rustcraft_mod_api::RegistrationError::InvalidDefinition)?,
+            )?;
+            super::policy::register(registry)
+        }
+    }
+}
+pub mod policy;
 pub use rustcraft_gameplay_flat_world as flat_world;
 pub mod player_persistence;
 pub mod world_persistence;

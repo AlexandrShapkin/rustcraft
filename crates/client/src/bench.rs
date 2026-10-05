@@ -418,7 +418,7 @@ pub fn run_m3() {
         }
         let t = Instant::now();
         for _ in 0..100 {
-            sim.step(rustcraft_agent_api::AgentIntent::default(), 0.05);
+            sim.step::<()>(rustcraft_agent_api::AgentIntent::default(), 0.05);
         }
         println!(
             "M3 items={} tick_ms={:.4} pickup_remaining={}",

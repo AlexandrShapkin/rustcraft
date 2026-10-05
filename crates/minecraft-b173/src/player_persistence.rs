@@ -808,7 +808,7 @@ mod tests {
         picked.spawn_item(ItemId(1), 3, Vec3::new(0.5, 3.0, 0.5));
         picked.items[0].pickup_delay = 0.0;
         let stale_source = picked.items[0];
-        picked.step(Default::default(), 0.0);
+        picked.step::<()>(Default::default(), 0.0);
         assert!(picked.items.is_empty());
         let receipt_record = encode_revision(&picked, 4, &[]).unwrap();
 

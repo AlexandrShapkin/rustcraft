@@ -165,7 +165,7 @@ fn quantity(sim: &Simulation) -> u32 {
 #[test]
 fn full_pickup_source_before_player_and_failed_player_checkpoint() {
     let mut f = Fixture::new(false);
-    f.sim.step(Default::default(), 0.);
+    f.sim.step::<()>(Default::default(), 0.);
     assert!(f.sim.items.is_empty());
     f.save_column(A);
     assert_eq!(f.reopen(&[A]).items[0].stack.count, 30);
@@ -183,7 +183,7 @@ fn full_pickup_source_before_player_and_failed_player_checkpoint() {
 fn partial_pickup_both_save_orders_and_repeated_recovery() {
     for source_first in [false, true] {
         let mut f = Fixture::new(true);
-        f.sim.step(Default::default(), 0.);
+        f.sim.step::<()>(Default::default(), 0.);
         assert_eq!(f.sim.items[0].stack.count, 18);
         let receipt = f.sim.pickup_receipts()[0];
         assert_eq!(
@@ -269,12 +269,12 @@ fn late_source_ack_keeps_migration_marker_until_actual_cleanup() {
 #[test]
 fn old_player_ack_cannot_authorize_another_partial_transition() {
     let mut f = Fixture::new(true);
-    f.sim.step(Default::default(), 0.);
+    f.sim.step::<()>(Default::default(), 0.);
     let old = f.sim.pickup_receipts()[0];
     f.player_durable();
     f.save_column(A);
     f.sim.inventory.remove(0, 12);
-    f.sim.step(Default::default(), 0.);
+    f.sim.step::<()>(Default::default(), 0.);
     assert_eq!(f.sim.items[0].stack.count, 6);
     f.sim.commit_pickup_receipts(&[old]);
     f.save_column(A);
@@ -307,7 +307,7 @@ fn migration_return_to_source_retires_superseded_marker() {
 #[test]
 fn restored_full_receipt_schedules_loaded_source_cleanup_and_prunes() {
     let mut f = Fixture::new(false);
-    f.sim.step(Default::default(), 0.);
+    f.sim.step::<()>(Default::default(), 0.);
     f.player_durable();
     let mut recovered = f.reopen(&[A]);
     assert!(recovered.items.is_empty());

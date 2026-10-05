@@ -16,8 +16,10 @@ A controllable player/entity receives semantic intent from a controller. Candida
 
 The universal boundary consumes movement, look direction, jump, crouch and generic primary or
 secondary actions. A game package decides whether those actions mean mine, place, interact or
-something else. Legacy M0-M3 break/place/inventory/crafting fields remain temporarily for
-compatibility and are game conveniences, not permanent universal semantics. The simulation must
+something else. `AgentIntent<G=()>` carries only generic movement/look/jump/crouch/primary/secondary fields and a
+typed game payload. Explicit mod-api legacy_actions::MinecraftActions holds retained local
+attack/use, hotbar, break/place, crafting and inventory conveniences. Generic Control scenarios
+use the unit payload; normal Minecraft controllers use PlayerIntent. This is not a wire protocol. The simulation must
 not depend directly on window-system events or device key codes.
 
 ## Bot model
@@ -63,7 +65,8 @@ action. The shared FixedControl gate aligns headless and graphical pause/step be
 ## Current gaps and target A1/VS1 contracts
 
 A1 migrates `PlaceIntent.block` to existing BlockKey and nearby dropped items to durable EntityId.
-BotAction still embeds transitional AgentIntent while its game-convenience adapter migration is active.
+BotAction and ScriptedBot accept a typed game payload; Observation uses the same separation.
+Minecraft inventory/selection/mining observation is explicit bot-api::legacy::MinecraftObservation.
 Current positions have no space context.
 A1 owns semantic external placement and durable-entity references, preserving distinct Game extension,
 Control administration, Agent intent and Bot observe/act responsibilities rather than one giant API.
@@ -76,7 +79,7 @@ imply permanent ownership. No Bot API version bump or new types are implemented 
 
 ## A1 durable item observation identity
 
-Bot API version 3 exposes existing authoritative EntityId in each ItemEntityObservation. Movement,
+Bot API version 4 exposes existing authoritative EntityId in each ItemEntityObservation. Movement,
 observation reordering and column transfer/reopen do not assign new IDs. Identical stacks remain
 distinguishable. Merge retains the recipient ID and retires consumed IDs; removal/pickup retires an
 entity rather than reusing a list position. Current nearby_items reports the active loaded item list,
@@ -92,3 +95,7 @@ rejected intent admission in last_action_error, and direct place_semantic return
 adjacency, held-item, collision and quantity checks remain shared with local controller placement.
 AgentIntent is not a serialized network protocol. Retained historical world/storage consumers still
 use an explicit local compatibility registry; their active migration is tracked separately in A1.
+
+Version history during A1: version 3 introduced durable EntityId; version 4 separates typed game
+observation/action payloads from generic Bot contracts. A server must negotiate/validate a future
+external codec deliberately; Rust AgentIntent/Simulation structs are not that codec.

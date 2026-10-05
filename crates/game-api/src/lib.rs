@@ -778,3 +778,57 @@ mod tests {
         assert_eq!(world.get(BlockPos { x: 1, y: 2, z: 3 }), BlockId(7));
     }
 }
+
+/// Bounded native work/reward rule. Games choose costs, multipliers and rewards;
+/// the engine only advances progress and executes admitted mutations.
+#[derive(Debug, Clone)]
+pub struct WorkDefinition {
+    pub target: BlockKey,
+    pub duration_seconds: f32,
+    pub item_multipliers: Vec<(ResourceId, f32)>,
+    pub reward: Option<(ResourceId, u16)>,
+}
+#[derive(Debug, Clone)]
+pub struct RecipeDefinition {
+    pub key: ResourceId,
+    /// Explicit retained local recipe naming; not external identity.
+    pub local_alias: Option<&'static str>,
+    pub shaped: bool,
+    pub width: u8,
+    pub inputs: Vec<Option<ResourceId>>,
+    pub output: ResourceId,
+    pub count: u16,
+}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WorkProgress(pub f32);
+impl WorkProgress {
+    pub fn advance(&mut self, dt: f32, duration_seconds: f32, multiplier: f32) -> bool {
+        if !dt.is_finite()
+            || dt < 0.
+            || !duration_seconds.is_finite()
+            || duration_seconds <= 0.
+            || !multiplier.is_finite()
+            || multiplier <= 0.
+        {
+            return false;
+        }
+        self.0 += dt * multiplier / duration_seconds;
+        self.0 >= 1.
+    }
+}
+
+/// Container matching mechanism; games supply the authored recipe, layout and resulting effect.
+pub fn recipe_matches<T: Clone + Ord>(
+    shaped: bool,
+    grid: &[Option<T>],
+    inputs: &[Option<T>],
+) -> bool {
+    if shaped {
+        return grid == inputs;
+    }
+    let mut actual: Vec<_> = grid.iter().flatten().cloned().collect();
+    let mut wanted: Vec<_> = inputs.iter().flatten().cloned().collect();
+    actual.sort();
+    wanted.sort();
+    actual == wanted
+}

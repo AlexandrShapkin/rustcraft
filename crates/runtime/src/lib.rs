@@ -1,11 +1,14 @@
 //! Headless simulation orchestration shared by the server, tests and future clients.
 
-use rustcraft_agent_api::{AgentIntent, Controller};
+use rustcraft_agent_api::Controller;
 use rustcraft_bot_api::{BOT_API_VERSION, NearbyBlockObservation, Observation, SelfObservation};
 use rustcraft_content::ContentManifest;
 use rustcraft_engine_core::{
     Aabb, BlockId, BlockPos, ChunkPos, EntityId, Vec3, World, split_block,
 };
+use rustcraft_mod_api::legacy_actions::MinecraftActions;
+#[cfg(test)]
+use rustcraft_mod_api::legacy_actions::PlayerIntent as AgentIntent;
 use rustcraft_mod_api::{BlockRegistry, GameplayModule, ModuleId, RegistrationError};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -19,7 +22,7 @@ pub mod survival;
 use inventory::Inventory;
 use inventory::ItemStack;
 use lighting::{InitialLightingResult, Lighting, dirty_neighbors};
-use survival::{GameMode, ItemEntity, RecipeRegistry, tool_speed};
+use survival::{GameMode, ItemEntity, RecipeRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Player {
@@ -69,6 +72,7 @@ pub struct Simulation {
     pub mode: GameMode,
     pub items: Vec<ItemEntity>,
     pub recipes: RecipeRegistry,
+    work_rules: HashMap<BlockId, ResolvedWork>,
     pub crafting_grid: [Option<ItemStack>; 4],
     /// Authoritative inventory transaction stack held by the UI cursor.
     pub inventory_cursor: Option<ItemStack>,
@@ -81,6 +85,12 @@ pub struct Simulation {
     frozen_entity_columns: HashSet<ChunkPos>,
 }
 
+#[derive(Debug)]
+struct ResolvedWork {
+    duration: f32,
+    multipliers: HashMap<rustcraft_engine_core::ItemId, f32>,
+    reward: Option<(rustcraft_engine_core::ItemId, u16)>,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DurableEntityState {
     owner: ChunkPos,
@@ -167,10 +177,33 @@ impl Simulation {
         let dirty_chunks = world.chunk_positions().collect();
         let dirty_sections = world.section_positions().collect();
         let lighting = Lighting::initialize(&mut world, &registry);
-        let mut recipes = RecipeRegistry::default();
-        recipes.add_defaults(&registry);
+        let recipes = RecipeRegistry::from_definitions(&registry);
+        let item = |key: &rustcraft_content::ResourceId| {
+            registry.resolve_item_key(key).expect("validated rule item")
+        };
+        let work_rules = registry
+            .work()
+            .iter()
+            .map(|rule| {
+                let block = registry
+                    .resolve_block_key(&rule.target)
+                    .expect("validated rule block");
+                (
+                    block,
+                    ResolvedWork {
+                        duration: rule.duration_seconds,
+                        multipliers: rule
+                            .item_multipliers
+                            .iter()
+                            .map(|(key, rate)| (item(key), *rate))
+                            .collect(),
+                        reward: rule.reward.as_ref().map(|(key, count)| (item(key), *count)),
+                    },
+                )
+            })
+            .collect();
         Self {
-            content_profile: None,
+            content_profile: registry.profile().cloned(),
             last_action_error: None,
             world,
             registry,
@@ -194,6 +227,7 @@ impl Simulation {
             mode: GameMode::Development,
             items: Vec::new(),
             recipes,
+            work_rules,
             crafting_grid: [None; 4],
             inventory_cursor: None,
             mining: None,
@@ -579,15 +613,20 @@ impl Simulation {
         }
     }
 
-    pub fn step(&mut self, intent: AgentIntent, dt: f32) {
+    pub fn step<G: Into<MinecraftActions>>(
+        &mut self,
+        intent: rustcraft_agent_api::AgentIntent<G>,
+        dt: f32,
+    ) {
+        let intent = intent.map_game(Into::into);
         // Transitional M0-M3 adapter. Platform/controller input is generic; this legacy
         // simulation still owns the Minecraft mapping until its systems move to the game package.
-        let primary_action = intent.primary_action || intent.attack;
-        let secondary_action = intent.secondary_action || intent.use_action;
-        if let Some(slot) = intent.select_hotbar {
+        let primary_action = intent.primary_action || intent.game.attack;
+        let secondary_action = intent.secondary_action || intent.game.use_action;
+        if let Some(slot) = intent.game.select_hotbar {
             self.inventory.select(slot as usize);
         }
-        self.inventory.scroll(i32::from(intent.scroll_hotbar));
+        self.inventory.scroll(i32::from(intent.game.scroll_hotbar));
         // Positive look deltas turn right/down. With +Y up and yaw=0 facing
         // +Z, screen-right is -X for a right-handed camera.
         self.player.yaw -= intent.look_delta.x * 0.002;
@@ -704,7 +743,7 @@ impl Simulation {
         } else if self.mode == GameMode::Survival {
             self.mining = None;
         }
-        if let Some(position) = intent.break_block
+        if let Some(position) = intent.game.break_block
             && self.target().is_some_and(|hit| hit.block == position)
         {
             let _ = self.break_block(position);
@@ -724,10 +763,11 @@ impl Simulation {
             let _ = self.place_block(hit.adjacent, block);
         }
         self.last_action_error = intent
+            .game
             .place_block
             .as_ref()
             .and_then(|place| self.place_semantic(place).err());
-        if intent.craft {
+        if intent.game.craft {
             let _ = self.take_crafting_output();
         }
         self.time = self.time.saturating_add(1);
@@ -751,17 +791,17 @@ impl Simulation {
             false
         } else {
             let drop = self
-                .registry
-                .get(self.world.get(position))
-                .and_then(|b| b.drop);
+                .work_rules
+                .get(&self.world.get(position))
+                .and_then(|rule| rule.reward);
             self.world.set(position, self.world.empty_block());
             self.mark_dirty(position);
             if self.mode == GameMode::Survival
-                && let Some(item) = drop
+                && let Some((item, count)) = drop
             {
                 self.spawn_item(
                     item,
-                    1,
+                    count,
                     Vec3::new(
                         position.x as f32 + 0.5,
                         position.y as f32 + 0.7,
@@ -1298,7 +1338,16 @@ impl Simulation {
             self.mining = None;
             return;
         }
-        let speed = tool_speed(&self.registry, self.inventory.held(), block_id);
+        let Some(rule) = self.work_rules.get(&block_id) else {
+            self.mining = None;
+            return;
+        };
+        let speed = self
+            .inventory
+            .held()
+            .and_then(|held| rule.multipliers.get(&held.item))
+            .copied()
+            .unwrap_or(1.);
         let same = self.mining.is_some_and(|m| m.target == hit.block);
         let mut state = self.mining.unwrap_or(MiningState {
             target: hit.block,
@@ -1309,7 +1358,9 @@ impl Simulation {
             state.progress = 0.;
             state.target = hit.block;
         }
-        state.progress += dt * speed / b.hardness.max(0.05);
+        let mut progress = rustcraft_game_api::WorkProgress(state.progress);
+        progress.advance(dt, rule.duration, speed);
+        state.progress = progress.0;
         if state.progress >= 1. {
             let _ = self.break_block(hit.block);
             self.inventory.damage_selected(1, &self.registry);
@@ -1396,7 +1447,10 @@ impl Simulation {
             == 0
     }
     #[must_use]
-    pub fn observe(&self, radius: i32) -> Observation {
+    pub fn observe(
+        &self,
+        radius: i32,
+    ) -> Observation<rustcraft_bot_api::legacy::MinecraftObservation> {
         let center = BlockPos {
             x: self.player.position.x.floor() as i32,
             y: self.player.position.y.floor() as i32,
@@ -1421,27 +1475,12 @@ impl Simulation {
         }
         Observation {
             api_version: BOT_API_VERSION,
+            last_action_error: self.last_action_error.clone(),
             self_state: SelfObservation {
                 position: self.player.position,
                 velocity: self.player.velocity,
             },
             nearby_blocks: nearby,
-            inventory: self
-                .inventory
-                .slots()
-                .iter()
-                .map(|slot| {
-                    slot.and_then(|s| {
-                        self.registry
-                            .item(s.item)
-                            .map(|d| rustcraft_bot_api::StackObservation {
-                                item_key: d.name.into(),
-                                count: s.count,
-                            })
-                    })
-                })
-                .collect(),
-            selected_hotbar: self.inventory.selected() as u8,
             items: self
                 .registry
                 .items()
@@ -1482,7 +1521,25 @@ impl Simulation {
                     position: e.position,
                 })
                 .collect(),
-            mining_progress: self.mining.map(|m| m.progress),
+            game: rustcraft_bot_api::legacy::MinecraftObservation {
+                inventory: self
+                    .inventory
+                    .slots()
+                    .iter()
+                    .map(|slot| {
+                        slot.and_then(|s| {
+                            self.registry.item(s.item).map(|d| {
+                                rustcraft_bot_api::StackObservation {
+                                    item_key: d.name.into(),
+                                    count: s.count,
+                                }
+                            })
+                        })
+                    })
+                    .collect(),
+                selected_hotbar: self.inventory.selected() as u8,
+                mining_progress: self.mining.map(|m| m.progress),
+            },
         }
     }
 }
@@ -1521,7 +1578,7 @@ impl RuntimeBootstrap {
     }
 }
 
-pub fn run_controller<C: Controller>(
+pub fn run_controller<G: Into<MinecraftActions>, C: Controller<G>>(
     simulation: &mut Simulation,
     controller: &mut C,
     ticks: usize,
@@ -1926,10 +1983,29 @@ mod interaction_tests {
                     .unwrap_err()
                     .contains("unknown profile block")
             );
+            s.step(
+                AgentIntent {
+                    game: MinecraftActions {
+                        place_block: Some(unknown),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                0.,
+            );
+            assert!(
+                s.observe(1)
+                    .last_action_error
+                    .unwrap()
+                    .contains("unknown profile block")
+            );
             s.inventory.insert(ItemId(2), 2, &s.registry);
             s.step(
                 AgentIntent {
-                    place_block: Some(place.clone()),
+                    game: MinecraftActions {
+                        place_block: Some(place.clone()),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 0.,
@@ -1996,8 +2072,11 @@ mod interaction_tests {
         assert_eq!(hit.normal, [0, 0, -1]);
         s.step(
             AgentIntent {
-                select_hotbar: Some(1),
-                use_action: true,
+                game: MinecraftActions {
+                    select_hotbar: Some(1),
+                    use_action: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0.,
@@ -2009,8 +2088,8 @@ mod interaction_tests {
         assert!(dirty.contains(&(ChunkPos { x: 1, z: 0 }, 1)));
         assert!(dirty.contains(&(ChunkPos { x: 0, z: 0 }, 0)));
         let o = s.observe(4);
-        assert_eq!(o.selected_hotbar, 1);
-        assert_eq!(o.inventory[1].as_ref().unwrap().item_key, "mod:wood");
+        assert_eq!(o.game.selected_hotbar, 1);
+        assert_eq!(o.game.inventory[1].as_ref().unwrap().item_key, "mod:wood");
         assert!(
             o.items
                 .iter()
@@ -2019,7 +2098,10 @@ mod interaction_tests {
         assert!(o.blocks.iter().any(|b| b.key == "mod:wood"));
         s.step(
             AgentIntent {
-                attack: true,
+                game: MinecraftActions {
+                    attack: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0.,
@@ -2039,8 +2121,11 @@ mod interaction_tests {
         s.inventory.insert(ItemId(3), 1, &s.registry);
         s.step(
             AgentIntent {
-                select_hotbar: Some(1),
-                use_action: true,
+                game: MinecraftActions {
+                    select_hotbar: Some(1),
+                    use_action: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0.,
@@ -2049,8 +2134,11 @@ mod interaction_tests {
         assert_eq!(s.inventory.held().unwrap().count, 1);
         s.step(
             AgentIntent {
-                select_hotbar: Some(8),
-                use_action: true,
+                game: MinecraftActions {
+                    select_hotbar: Some(8),
+                    use_action: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             0.,
