@@ -4,6 +4,18 @@ Product release versions use pre-1.0 SemVer and are independent of milestone lab
 imply product version `0.4.0`; a milestone may span prereleases, and a release may contain work that
 does not complete a milestone. See `docs/RELEASE.md` for the version source and tag policy.
 
+The project is no longer organized as a strict Beta 1.7.3 clone. `minecraft-b173` is the first-party
+game package and compatibility/reference client of a generic voxel runtime. The architecture rule is:
+
+> Engine mechanism; game policy.
+
+The current pre-M5 sequence is:
+
+`R2 -> F1 -> A1 -> C2 -> BG1 -> DX2 -> RF1 -> READY1 -> M5`
+
+Closed stages are not reopened without a reproducible regression. Later stages may update shared
+infrastructure, but must preserve the acceptance evidence and contracts of earlier stages.
+
 ## M0 — foundation / first headless vertical slice
 
 Status: complete.
@@ -68,7 +80,7 @@ and input/cursor transitions.
 
 ### Architecture alignment gate before M4
 
-Status: complete. M3 and R1.2 are accepted; M4 is functionally complete (hardware evidence conditional).
+Status: complete.
 
 - public game-package registry, schedules, controlled mutation commands and `GameProfile` added;
 - `minecraft-b173` established as the first-party Game API client and composition boundary;
@@ -81,7 +93,7 @@ Status: complete. M3 and R1.2 are accepted; M4 is functionally complete (hardwar
 
 ### R1.0 — runtime identity and profile compilation foundation
 
-Status: complete; R1.1 and R1.2 are complete; M4 is functionally complete (hardware evidence conditional).
+Status: complete.
 
 - owned validated semantic IDs with typed block/texture/package/resource keys;
 - deterministic `GameProfile` compilation by profile package order plus lexical block-key order
@@ -93,13 +105,12 @@ Status: complete; R1.1 and R1.2 are complete; M4 is functionally complete (hardw
 - `minecraft-b173` registration without authored numeric IDs and updated independent
   `sandbox-test` compilation path.
 
-Runtime handles are profile-local and are not persistence/network identities. The legacy M0-M3
-runtime registry remains an explicit semantic-to-legacy compatibility adapter until affected gameplay policy slices
-migrate.
+Runtime handles are profile-local and are not persistence/network identities. Historical runtime
+registry compatibility remains a migration concern only where an active subsystem still depends on it.
 
 ### R1.1 — resource loading and atlas compilation
 
-Status: complete. Full validation passed on 2026-10-02. R1.2 is complete; M4 is functionally complete (hardware evidence conditional).
+Status: complete.
 
 - generic package discovery and deterministic later-package texture overrides;
 - semantic texture registry and direct indexed voxel render registry;
@@ -116,11 +127,11 @@ Status: complete. Full validation passed on 2026-10-02. R1.2 is complete; M4 is 
 Atlas-safe mip chains, anisotropic filtering, texture compression, a stronger packer,
 bindless/texture arrays, further draw-call reduction, greedy meshing, Hi-Z, indirect/GPU-driven
 rendering and LOD are profile-triggered backlog items, not an active R1.3 milestone. Reopen only if
-M4 discovers a concrete measured renderer blocker.
+representative profiling identifies a concrete blocker.
 
 ### R1.2 — structural renderer scalability
 
-Status: complete. Full validation passed; measurements are recorded in `PERFORMANCE.md`.
+Status: complete. Measurements are recorded in `PERFORMANCE.md`.
 
 - contiguous 18³ section snapshots with dense interior copies and world-looked-up one-cell halo;
 - indexed voxel/light meshing and conservative frustum culling at submission;
@@ -133,22 +144,9 @@ work in this milestone.
 
 ## M4 — world generation & persistence foundation
 
-Status: functionally complete. Generic storage, generator contracts, first-party generation, headless round-trip,
-and the first local-player residency/streaming slice are implemented. M4-001's synchronous startup
-barrier is closed. Autonomous production-controller and actual-client travel now close M4-002 and
-M4-010: a normal-speed route crosses straight, turn, diagonal, reverse and negative-coordinate
-frontiers with nonzero Safe/Visible margin, bounded residency, persistence/revisit, continuous view
-intent and no streaming-induced dropped ticks. M4-011 remains closed. M4-009 scheduler/correctness
-acceptance is closed with sub-second warm p95 request-to-visible; hardware frame-performance remains
-conditional because this pass exposed only llvmpipe/GL, not AMD/Vulkan. M4-003 is closed by
-versioned dropped-item and world-global persistence, ordered recovery tests, entity save/evict/
-reload travel coverage and two-slot clock checkpoints. M4-004 is closed by versioned overworld v2,
-autonomous v1/v2 fresh/reused travel, two actual-client seed routes, full local validation and
-[Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37135831666).
-Only representative-hardware quantitative evidence remains conditional under M4-009. The older
-manual water-presentation walkthrough is not claimed; the functional repair is covered by liquid
-geometry/culling, compiled-medium boundary and distance-fog tests. That optional qualitative
-follow-up is not a new functional blocker. M5 and later milestones remain inactive.
+Status: complete. Representative-hardware quantitative evidence remains conditional where the
+available acceptance machine cannot expose the owner's exact GPU/display stack, but no functional
+M4 blocker remains.
 
 - generic chunk/section lifecycle and deterministic generation contracts;
 - game-owned generation policy, with Beta-like terrain policy confined to `minecraft-b173`;
@@ -161,117 +159,525 @@ follow-up is not a new functional blocker. M5 and later milestones remain inacti
 - ordered pickup and cross-column entity recovery with bounded receipts/tombstones;
 - bounded asynchronous generation/load/save with explicit dirty/save generations;
 - client and headless create/generate/edit/save/reopen workflows;
-- deterministic, order/worker-count-independent generation and persistence benchmarks.
+- deterministic, order/worker-count-independent generation and persistence benchmarks;
+- dynamic residency with explicit Desired/Retained/Safe/Visible semantics and save-before-evict;
+- bounded worker-based bulk initial lighting plus incremental/boundary reconciliation;
+- unavailable-column movement/raycast/place/break guards;
+- deterministic v1 compatibility and v2 semantic world generation.
 
-Current baseline: `rustcraft-world` has versioned/checksummed semantic chunk and player-record files,
-bounded load/generation/save worker pools, stale request/result and save rejection, compression
-metrics, and a portable filesystem backend. Frozen Minecraft generation version 1 plus new-world
-default version 2, semantic local-player
-persistence and named client create/open are integrated. Static liquid presentation includes
-compiled-medium underwater fog. Client startup now assembles its minimum safe neighborhood on a
-cancellable background worker while the window remains responsive; the ready neighborhood is
-centered on the restored player. Runtime residency uses a generic interest controller (diagnostic
-default load radius 4, retain radius 5; configurable with `RUSTCRAFT_STREAM_RADIUS=3..12`), async disk load/generation, staged per-turn result application and resumable boundary lighting, an unavailable-column movement/raycast guard, save-before-evict, and renderer/mesh
-removal on eviction. Newly arrived columns now use a bounded worker-based bulk initial-lighting
-stage and publish voxel/light arrays atomically; only neighbor-boundary reconciliation and
-incremental edits remain on the lighting path. Boundary reconciliation advances in repeated
-32-unit slices. Critical apply, boundary, snapshot and mesh submission now receive ordered reserved
-windows within the 2 ms default budget; near REQUIRED/VISIBLE sections precede PREFETCH sections,
-and completed meshes are uploaded nearest-camera first. The canonical fixed-
-region worldgen hash remains unchanged. Headless streaming stress and edited-column revisit tests
-pass. Desired/Retained use predictable Chebyshev squares; a connected complete 3x3 Safe+Visible core
-gates control, `SAFE => VISIBLE`, and eventual boundary-light work cannot redefine that frontier.
-Hardware-specific M4-009 performance evidence remains conditional. Dropped-entity/world-time
-persistence is accepted by `world-state-roundtrip`, codec/corruption/recovery tests and the
-entity-bearing long-travel route. M4-004 now adds smooth climate, six meaningful derived biomes,
-continental/rolling/hill terrain, contextual coasts and surfaces, curved caves, depth-bounded ores,
-biome-aware trees and deterministic static water lakes. Exact version resolution keeps v1 worlds
-v1, including missing-column expansion; no automatic upgrade or Java seed parity is promised.
-First-time version-specific safe spawn handles ocean origins; saved players are never relocated.
-Lava, springs and dungeons remain explicit later first-party content scope, not placeholder
-features. M4-004's final autonomous acceptance and public CI are recorded in `docs/PERFORMANCE.md`.
+Frozen generation identities/hashes and accepted save-format behavior remain compatibility contracts.
+Network chunk streaming, Java save/protocol compatibility and broad renderer optimization are not M4
+scope.
 
-The older multiplayer/content-resolution scope is moved to an inactive later roadmap item. Network
-chunk streaming, procedural features in engine storage code, raw persisted `BlockId` values and
-advanced renderer optimization are out of M4 scope.
+## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting
 
-## DX1 — Developer Control Plane, Debug/Test Tooling & Rhai Scripting (CLOSED)
+Status: complete and closed.
 
-Status: CLOSED.
+- shared `RustCraft Control API` for Queries, Commands, Events, Assertions, Jobs, Captures,
+  Capabilities and Diagnostics;
+- trusted local Rhai runtime/session model with bounded execution and no raw filesystem/network/process access;
+- shared command registry for developer console, scenarios, automation and future administration;
+- same-source headless and graphical scenarios;
+- pause/step/resume, captures and bounded failure bundles;
+- explicit developer tools without auto-executing scripts during ordinary startup.
 
-Generic control and bounded Rhai sessions/scenarios now have shared headless/graphical composition.
-Same-source smoke, actual console, cooperative reload/jobs/cancellation, automatic failure capture,
-bounded lifecycle/overhead and the full regression matrix pass. [Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37156846278)
-is green; see DX1_REPORT.md for canonical evidence. M4 remains complete with M4-009 conditional.
+See `DX1_REPORT.md` for canonical evidence.
 
-## Pre-M5 technical consolidation
+# Pre-M5 hardening programme
 
-Accepted planning baseline: public main `16c6823a739e83f830b6676bbe0390be769ca17e`,
-2026-10-04; [closeout Ubuntu/Windows CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37157185442)
-passed. M0–M4 and DX1 remain closed; M4-009 representative-hardware quantitative evidence remains
-conditional. The audit remains the accepted historical plan. DUX1 is CLOSED with local and Ubuntu/Windows acceptance recorded in [DUX1_REPORT.md](DUX1_REPORT.md); C1 is CLOSED; UX1 is CLOSED; RSM1 is CLOSED with PM5-002 resolved and acceptance recorded in [RSM1_REPORT.md](RSM1_REPORT.md); P1 is CLOSED with PM5-003 resolved and acceptance recorded in [P1_REPORT.md](P1_REPORT.md); S1 is CLOSED; R2 and later stages remain inactive.
+These stages exist to remove known architectural and operational risks before networking makes them
+expensive compatibility constraints.
 
-The canonical [PRE_M5_AUDIT.md](PRE_M5_AUDIT.md) contains source evidence, severity/disposition,
-ownership map, dependencies and executable stage contracts (goal, scope, invariants, measurements,
-acceptance, deferrals and regression gates). Activate one named bounded sub-slice per future pass;
-do not treat the sequence as authorization to implement everything automatically.
+## DUX1 — in-game developer diagnostics
 
-| Order | Stage | Bounded result / closure evidence |
-| --- | --- | --- |
-| 1 | DUX1 — In-game developer diagnostics (CLOSED) | Metadata/selector and demand-driven shared DX1 snapshots, then targeted chunk/EntityId inspection; graphical selection/toggle/cost proof. Existing console pages/overlays stay usable. |
-| 2 | C1 — Runtime configuration plane (CLOSED) | Shared typed registry, source/validation/change policy and safe existing operational controls; Control/Rhai/developer UI share effective readback. Structural settings remain immutable/restart-bound. |
-| 2a | UX1 — Developer controls & Unicode text (CLOSED) | Held F3 chords, discoverable console and bundled semantic Unicode text; bounded cache, grapheme/IME editing. |
-| 3 | RSM1 — Residency and memory lifetime (CLOSED) | Ownership ledger and repeated A→B→C→D→A/unique-exploration/stale-revisit tests; logical counts/bytes plateau, safe metadata retirement and bounded pressure. Driver VRAM need not return to startup. |
-| 4 | P1 — Frame pacing and presentation (CLOSED) | Separate authoritative/render/request/present-call cadence, refresh/provider evidence and distributions; bounded scheduling/interpolation/input change only after diagnosis. High average FPS is not acceptance. |
-| 5 | S1 — Persistence architecture evaluation and scalability — CLOSED | Measured current backend retained within caller/workload limits; PM5-004 resolved. No S1.3; see S1_REPORT and storage ADR. |
-| 6 | R2 — Semantic resource normalization | Active HUD/inventory/player subresources lose source-sheet dependence; retain game-owned Beta importer and generic compiler; synthetic rearranged/multipage proof. Block crops already normalized. |
-| 7 | A1 — Network-facing ownership and API consolidation | A1.1 semantic/stable external references and trusted-source adapter contract; A1.2 behavior-preserving migration of replication-touched game policy through public Game API. No all-API merger or ECS rewrite. |
-| 8 | DX2 — Repository and legacy workflow retirement | Inventory/equivalence before deleting drivers/aliases; stable just/test tiers/output paths/release policy coherent; preserve specialist correctness coverage. |
-| 9 | READY1 — Pre-M5 readiness review | Linked closure/baseline evidence, explicit medium-risk waivers, functional regression and Ubuntu/Windows CI; activate M5 only in a separate pass. |
+Status: complete and closed.
 
-Dependency reasoning: DUX1 exposes existing diagnostic leverage without waiting for a settings UI;
-C1 prevents later experiments from proliferating flags. RSM1 stabilizes workload ownership before
-P1 timing; P1 separates presentation from the clock future prediction will consume. S1 decides
-storage/recovery/component limits before network commitments. R2 removes active layout coupling
-before A1 settles future-facing references; those two investigations can otherwise proceed
-independently. DX2 retirement follows proven replacement equivalence. A1.1 semantic/provenance
-rules apply to all new contracts immediately, even before its consolidation gate.
+- semantic diagnostic page/overlay registry with owner/help/availability/cost metadata;
+- shared demand-driven providers for DUX, Control, Rhai, scenarios and captures;
+- selected chunk/entity inspection with stable semantic identity and persistence/ownership state;
+- bounded F3/F4 diagnostic UI and overlays;
+- inactive providers perform no collection work.
 
-M5 entry requires closure of the audit's PM5-001–006 mandatory findings, completion or explicit
-rationale/trigger for MEDIUM items, generic/game direction and headless server intact, stable semantic
-external identities, consciously accepted persistence backend, bounded residency, understood pacing,
-normalized active resources, controlled configuration, shared automatic/in-game diagnostics with
-bounded cost, host-owned admin capability provenance, coherent regression/tooling/docs and green
-platform CI. See the audit's exact checklist. This does not require speculative perfection or claim
-M4-009 representative-hardware evidence has been obtained.
+See `DUX1_REPORT.md`.
 
-Deferred: general ECS/renderer rewrites, exotic M7 optimization, distributed storage, full WASM/mod
-UI, polished production GUI/settings, full scripting debugger, unlimited commands, inactive legacy
-asset classes and mechanical dependency updates. Milestone history and frozen M4 hashes stay intact.
+## C1 — runtime configuration plane
+
+Status: complete and closed.
+
+- one typed configuration registry and deterministic source precedence;
+- requested/effective values and atomic batches;
+- runtime policy classes such as NextTick, NextFrame, Reconfigure and RestartRequired;
+- native streaming, meshing, lighting, autosave and presentation-related configuration readback;
+- persisted configuration remains separate from world saves;
+- Control, console, Rhai and Settings share one configuration authority.
+
+See `C1_REPORT.md` and `CONFIGURATION.md`.
+
+## UX1 — developer controls & Unicode text
+
+Status: complete and closed.
+
+- held F3 chord model and semantic debug-page shortcuts;
+- command/Rhai console modes, discoverable help and completion;
+- grapheme-aware UTF-8 editing and IME event path;
+- generic Unicode shaping/layout through bundled resources;
+- semantic font roles and deterministic bundled fallback without required system-font discovery;
+- bounded glyph/text caches;
+- old hard-coded 5×7 text renderer removed.
+
+Known field gap: the normal human startup path has not yet been proven to expose the same developer
+input route as the UX1 acceptance harness. This is owned by F1 rather than reopening UX1.
+
+See `UX1_REPORT.md`.
+
+## RSM1 — residency & memory lifetime
+
+Status: complete and closed. PM5-002 resolved.
+
+- shared world -> simulation -> render -> meshing -> GPU lifetime ledger;
+- repeated-route, unique-exploration, stalled-consumer and remove/revisit acceptance;
+- mesh generation metadata no longer scales with all historically visited sections;
+- submitted/completed/ready mesh pressure has explicit bounded ownership;
+- stale asynchronous results cannot resurrect revisited render state;
+- entity and lighting lifetime leaks found by the campaign were repaired;
+- logical GPU ownership/capacity is distinguished from allocator/driver high-water and process RSS.
+
+The owner's historical AMD VRAM growth was not attributable from the software-renderer provider; it
+remains a field-validation question, not an open RSM1 correctness blocker.
+
+See `RSM1_REPORT.md`.
+
+## P1 — frame pacing & presentation
+
+Status: complete and closed. PM5-003 resolved.
+
+- explicit authoritative and presentation clocks;
+- fixed 20 TPS simulation preserved;
+- client-only previous/current translation interpolation;
+- pending local mouse look preview with exact authority rebase and no double application;
+- teleport/load, pause/step/resume, focus, resize and catch-up rebasing;
+- shared bounded Presentation diagnostics;
+- frame interval, duplicate-transform, state-age and application input-to-camera evidence.
+
+P1 proved that the major visible low-Hz effect came from repeated 20 Hz camera/player transforms and
+mouse look waiting for fixed-tick consumption. It improved visual transform smoothness and
+input-camera responsiveness, but did not establish an average-FPS or physical scanout-cadence
+improvement. Owner AMD/Vulkan/display validation remains an F1 field task.
+
+See `P1_REPORT.md`.
+
+## S1 — persistence architecture evaluation & scalability
+
+Status: complete and closed. PM5-004 resolved. No S1.3 migration is required for bounded initial M5.
+
+- current checksummed whole-column `.rcc` backend benchmarked at 10k and supplemental 50k scale;
+- small voxel and entity-only write amplification measured explicitly;
+- queue sustainability, file-count scaling, read/reopen, churn and durability envelope measured;
+- crash/recovery ordering, checkpoint fallback and cross-column entity recovery retained;
+- split terrain/entity physical layout evaluated as an isolated candidate and rejected for initial M5;
+- future durable extension state defined as required game core plus bounded optional namespaced/versioned components;
+- backend paths remain host-owned and replaceable behind a durability-aware capability boundary.
+
+Current backend acceptance is bounded, not an unlimited-player guarantee. Reconsideration is triggered
+by measured backlog/dirty-age growth, operationally unacceptable entity amplification, or file/read/
+backup/shutdown costs outside the benchmarked M5 envelope.
+
+See `S1_REPORT.md` and `S1_PERSISTENCE_DECISION.md`.
+
+## R2 — semantic resource normalization
+
+Status: next planned stage; not started.
+
+Owner: PM5-006 and remaining active historical source-sheet layout coupling.
+
+Goals:
+
+- active HUD, inventory and player presentation consume semantic subresources instead of historical
+  whole-sheet runtime contracts;
+- Beta sheet dimensions/crop coordinates are confined to `minecraft-b173` legacy import mapping and
+  historical/reference tests;
+- generic renderer consumes resolved semantic `AtlasRegion`/presentation descriptors and remains
+  independent of `gui.png`, `inventory.png`, `char.png`, source coordinates and original atlas layout;
+- semantic resources render identically when imported from rearranged sheets, individual files,
+  package overrides or different compiled atlas pages;
+- accepted M3 hotbar/inventory/player-preview behavior remains visually and interactively unchanged;
+- public tests and release artifacts require no proprietary historical pixels;
+- ARCH-002 is closed or narrowed to an explicit remaining game-policy boundary.
+
+R2 must not become a general GUI framework, a full resource-pack UX, or a renderer optimization
+campaign.
+
+## F1 — unified client path & real-hardware field validation
+
+Status: planned; starts only after R2 closes.
+
+Purpose: close gaps that synthetic/milestone acceptance paths can miss by validating the exact human
+workflow and converging ordinary client startup onto one runtime path.
+
+Principles:
+
+- one `rustcraft-client` executable and one normal client runtime path;
+- gameplay modes such as Survival/Creative are game-owned player/session state, not different client
+  executables or fundamentally different startup paths;
+- roles grant capabilities; capabilities authorize developer/admin actions;
+- F3/F4 input routing exists in the normal client path and capability checks decide whether actions are
+  available;
+- `--devtools`-style trusted tooling must not create a separate gameplay/input implementation;
+- specialist acceptance modes are automation harnesses around the same runtime, not alternate games;
+- `rustcraft-server` remains a genuinely separate headless authority process.
+
+Required field work:
+
+- reproduce and repair the normal `just client-survival` F3+digit regression through the real
+  `WindowEvent` path, not only direct shortcut-unit calls;
+- converge normal developer gameplay onto a canonical `just client` workflow; keep compatibility
+  aliases only temporarily until DX2 retirement;
+- compare dev and release builds on the owner's available AMD Radeon Vega 8 / RADV / Vulkan path;
+- rerun stationary/pan/walk presentation evidence on real hardware and diagnose remaining perceived
+  camera/frame smoothness without reopening P1 unless a reproducible defect is found;
+- correlate long frames with player/world checkpoint durability events;
+- investigate high player-checkpoint `sync_ms` tails and remove only proven redundant durability work
+  while preserving S1 crash/recovery guarantees;
+- explicitly separate application frame timing, filesystem durability latency and physical display
+  behavior.
+
+F1 is corrective integration/field validation, not networking, remote authorization or a persistence
+backend migration.
+
+## A1 — external identity, policy boundary & trust preparation
+
+Status: planned; starts only after F1 closes.
+
+Owner: PM5-001, PM5-005 and PM5-011.
+
+Goals:
+
+- remove process-local numeric identities from future external Bot/Agent/network-facing contracts;
+- use stable semantic IDs and stable entity identity at process boundaries;
+- ensure observations/actions that need entity identity expose durable `EntityId` rather than transient
+  collection/local indices;
+- finish incremental migration of Minecraft gameplay policy out of generic runtime/mod-api surfaces;
+- establish generic trust/provenance context for future server administration and remote commands;
+- keep capability checks explicit and shared with Control;
+- preserve headless/bot determinism and avoid designing the full M5 wire protocol prematurely.
+
+A1 defines the boundary M5 will rely on; it is not M5 networking implementation.
+
+## C2 — unified content definition & capability model
+
+Status: planned; starts only after A1 closes.
+
+Purpose: establish the common content-definition contract that later blocks, items, entities, fluids and
+other content categories specialize instead of growing independent class hierarchies and engine switches.
+Conceptually this is the shared content “superclass”; in Rust it should be expressed through typed
+composition and profile compilation rather than inheritance.
+
+Core model:
+
+- every authored content object has stable semantic identity;
+- common metadata is expressed through typed properties, tags, capabilities, handlers/components and
+  semantic resource references;
+- category-specific definitions add only the contracts that are truly category-specific;
+- mutable per-instance state remains distinct from type-level properties and behavior;
+- authored flexibility is compiled into validated/indexed runtime definitions with dense local handles
+  and fast capability lookup;
+- the hot path must not perform repeated string-key/property-map lookups for common behavior.
+
+The semantic distinction is explicit:
+
+- tags classify what a definition belongs to or can be queried as;
+- properties provide typed definition data/parameters;
+- capabilities declare which generic contracts the definition implements;
+- handlers react to bounded semantic lifecycle/game events;
+- state records compact mutable instance state such as orientation, shape, powered state or damage;
+- resources reference semantic presentation/model/shape data and never runtime atlas/GPU handles.
+
+Handler contract:
+
+- use a bounded set of semantic events such as place, break, use, tick, neighbor change, contact and
+  other events justified by active gameplay;
+- handlers/systems/rules receive controlled context/capabilities and produce Commands/CommandBuffer
+  effects instead of unrestricted `&mut World` access;
+- first-party handlers may be native Rust; the same semantic boundary must remain compatible with
+  future sandboxed WASM handlers without implementing M6 here;
+- avoid a giant universal callback DSL or an untyped `HashMap<String, Value>` runtime architecture.
+
+Required proof:
+
+- migrate only enough existing block/item/entity/content definitions to prove the common contract across
+  more than one category;
+- preserve existing gameplay semantics and stable semantic IDs;
+- demonstrate that a new ordinary content definition can be added primarily through definition data,
+  properties/tags/capabilities/resources and optional handlers rather than switches across unrelated
+  engine systems;
+- keep persistence, rendering and future network identity independent from runtime-local dense handles;
+- keep `minecraft-b173` policy in the game package and the common mechanism in generic crates;
+- preserve headless operation and current public Game API direction.
+
+C2 is architectural foundation, not a full mod SDK, full ECS rewrite, scripting language or broad
+content migration campaign. It should create the smallest stable common contract needed by BG1 and
+later M6 work.
+
+## BG1 — generalized block geometry & model system
+
+Status: planned; starts only after C2 closes.
+
+Purpose: make the voxel cell a placement/addressing unit rather than an assumption that every block is
+a full axis-aligned cube. Cube rendering remains the optimized fast path; non-full and complex static
+block shapes become first-class generic content through C2 capabilities and semantic model/shape
+resources.
+
+Required geometry model:
+
+- `BlockState` resolves through semantic model/shape roles rather than hard-coded block classes;
+- support an efficient full-cube fast path;
+- support composed box/prismatic primitives for common shapes;
+- support wedge/sloped geometry, including at least a 45-degree slope proof;
+- support general bounded static mesh geometry for decorative/building shapes that cannot be expressed
+  cleanly as boxes;
+- allow state-dependent model selection/transform such as facing, top/bottom half, straight/inner/outer
+  corner or other game-defined variants without introducing engine classes such as `StairBlock` or
+  `WedgeBlock`;
+- authored `ModelKey`/shape identities compile to runtime-local validated handles, analogous to the
+  existing semantic-resource/profile compilation model.
+
+Geometry semantics must keep separate contracts for:
+
+- render geometry;
+- collision shape;
+- selection/raycast shape;
+- face/volume occlusion and neighbor culling;
+- light/coverage behavior;
+- state/transform rules.
+
+Visual geometry and collision do not have to be identical. Complex visual meshes may use a simpler
+validated collision/selection representation when game policy chooses it.
+
+Meshing/culling requirements:
+
+- remove active generic assumptions that a block always contributes six full square faces;
+- retain the optimized cube path for ordinary terrain;
+- introduce a compact occlusion/coverage contract so partial neighbors can cull safely without requiring
+  expensive arbitrary polygon clipping in the normal hot path;
+- keep room for a more precise fallback where a model genuinely needs it;
+- ensure lighting can distinguish full occluders, partial/transparent coverage and non-occluding models
+  without requiring physically exact arbitrary-mesh light transport in BG1;
+- chunk meshing remains generic and does not learn concepts such as stairs, slabs, fences or Minecraft
+  connection policy.
+
+Content/game policy:
+
+- `minecraft-b173` and later games/mods may define slabs, stairs, columns, panels, beams, quarter blocks,
+  inner/outer corners, 45-degree wedges/slopes, frames, arches, decorative trims and other shapes using
+  the same mechanism;
+- BG1 does NOT require shipping a large decorative catalog; infrastructure plus a compact proof set is
+  sufficient;
+- the minimum proof set should include a full cube, slab, stair-like composed shape, 45-degree wedge,
+  multipart/static-mesh shape and an independent `sandbox-test` example;
+- adding a new decorative shape should not require edits to renderer/collision/raycast/persistence
+  switches across the engine; only genuinely new generic capability semantics justify engine changes.
+
+Persistence and future networking:
+
+- durable/network-facing identity remains semantic block/state/model identity, never runtime mesh/GPU
+  handles;
+- existing semantic BlockState persistence remains compatible unless an explicit versioned extension is
+  required;
+- model resources are presentation/content resources and must not be serialized as process-local handles;
+- BG1 must not design the M5 wire protocol or M6 mod transport.
+
+Acceptance must prove:
+
+- non-full geometry renders correctly across chunk boundaries;
+- collision, raycast/selection and placement remain coherent for partial/sloped shapes;
+- occlusion/culling does not create missing faces or obvious internal overdraw regressions in the proof
+  set;
+- state rotation/variant selection is deterministic;
+- cube-heavy terrain keeps its specialized fast path and does not regress materially;
+- independent game content can define complex shapes through the same generic mechanism;
+- no generic engine code needs named special cases for slab/stair/wedge classes;
+- all normal workspace/headless/render/public CI gates remain green.
+
+Create `docs/BG1_REPORT.md` with the model/shape contract, fast-path design, proof shapes, performance
+comparison and known deferred geometry limitations.
+
+## DX2 — tooling equivalence, workflow convergence & retirement
+
+Status: planned; starts only after BG1 closes.
+
+Owner: PM5-009 and obsolete developer workflow debt.
+
+Goals:
+
+- prove canonical `just` workflows exercise the same real runtime paths used by humans and CI;
+- retire redundant milestone-only aliases and alternate launch paths after equivalence is demonstrated;
+- converge client scenarios/acceptance onto Control/scenario orchestration rather than bespoke client
+  variants where practical;
+- retain specialist low-level diagnostics only where they test a unique contract;
+- update tooling/docs so a contributor does not need historical milestone knowledge to run, debug or
+  validate the project;
+- keep public CI deterministic, bounded and free of private assets.
+
+DX2 is cleanup and equivalence proof, not a feature milestone.
+
+## RF1 — structural codebase refactor & code-graph optimization
+
+Status: planned; mandatory before READY1.
+
+Purpose: perform a comprehensive behavior-preserving structural refactor after the pre-M5 contracts
+have stabilized, so code-graph search, ownership reasoning, future edits and automated maintenance are
+materially cheaper before networking multiplies cross-cutting complexity.
+
+RF1 is deliberately late in the pre-M5 sequence: R2/F1/A1/C2/BG1/DX2 may still change boundaries. The
+refactor happens after those contracts settle and before READY1 freezes readiness.
+
+### RF1.1 — architecture/code-graph inventory
+
+Before moving code, produce an evidence-based inventory of:
+
+- crate dependency graph and public dependency direction;
+- largest/most-connected modules, files, types and functions;
+- modules with excessive fan-in/fan-out or unrelated responsibilities;
+- repeated orchestration/state-machine code;
+- transitional adapters and compatibility layers that no longer have active consumers;
+- duplicate semantic concepts with different names/types;
+- cross-crate accesses that bypass the intended owner/service boundary;
+- test-only/public APIs that inflate the normal code graph;
+- compilation hot spots where structural changes can reduce incremental rebuild scope without
+  distorting architecture.
+
+Do not use arbitrary line-count limits as the only criterion. Prioritize ownership clarity, dependency
+shape and change locality.
+
+### RF1.2 — behavior-preserving structural refactor
+
+Refactor the complete active codebase in bounded slices. Expected work includes, where evidence
+supports it:
+
+- decompose oversized orchestration modules and "god" state holders into subsystem-owned state and
+  services with explicit lifecycle boundaries;
+- give major client concerns clear homes, e.g. startup/session, input, fixed simulation, presentation,
+  streaming/residency, persistence coordination, rendering, diagnostics and automation;
+- narrow crate/module visibility and make public APIs intentional;
+- replace cross-module field poking with small semantic operations where it improves ownership;
+- remove dead transitional adapters after all real consumers have migrated;
+- consolidate duplicate helpers/state machines and vocabulary;
+- move tests next to the contract they verify and keep expensive integration tests at explicit
+  composition boundaries;
+- normalize naming so semantic search produces one canonical concept instead of historical aliases;
+- preserve generic engine/game ownership and prevent `minecraft-b173` policy from leaking back into
+  generic crates;
+- keep generated/runtime-local handles out of external or durable identities;
+- reduce unnecessary rebuild coupling where crate/module boundaries can do so without creating tiny
+  artificial crates.
+
+Do NOT:
+
+- rewrite working subsystems solely for style;
+- introduce a general ECS because modules are large;
+- split every file to satisfy a numerical LOC target;
+- add macro/reflection frameworks that make navigation harder;
+- change gameplay/render/storage/network semantics under the label "refactor";
+- combine RF1 with new features or optimization campaigns.
+
+### RF1.3 — code-map and maintenance surface
+
+Produce/update a concise canonical code map, preferably `docs/CODE_MAP.md`, that lets a human or
+code-graph agent answer quickly:
+
+- where a client input event enters and becomes semantic intent;
+- where fixed simulation authority lives;
+- where presentation interpolation lives;
+- where world streaming/residency is coordinated;
+- where persistence requests and durability acknowledgements flow;
+- where semantic resources compile and reach the renderer;
+- where Control/Diagnostics/Config are owned;
+- where `minecraft-b173` game policy begins;
+- where headless server composition differs from graphical client composition;
+- which APIs are stable contracts versus runtime-local implementation details.
+
+Documentation must describe actual post-refactor ownership, not an aspirational diagram.
+
+### RF1.4 — refactor acceptance
+
+RF1 closes only when:
+
+- pre/post code-graph/dependency evidence is recorded;
+- major ownership hotspots identified in RF1.1 are resolved or explicitly justified;
+- no new cyclic crate dependency is introduced;
+- generic dependency direction remains valid;
+- normal `rustcraft-client` and `rustcraft-server` composition paths remain clear;
+- canonical external/durable semantic identities are unchanged unless a previously approved A1
+  migration explicitly required them;
+- persistence formats and frozen generation hashes remain unchanged;
+- R2 semantic resource contracts remain unchanged;
+- F1 unified client workflow remains unchanged;
+- A1 capability/identity/trust contracts remain unchanged;
+- C2 common content-definition/capability/handler contracts remain unchanged;
+- BG1 semantic model/shape and cube-fast-path contracts remain unchanged;
+- DX2 canonical tooling remains valid;
+- behavior-equivalence tests pass after each bounded refactor slice and in the final workspace;
+- incremental compile/search/change locality is measured or qualitatively demonstrated with concrete
+  before/after hotspots rather than claimed from reduced line counts;
+- `cargo fmt`, workspace check/tests, strict Clippy, dependency hygiene, headless/server checks and
+  public Ubuntu/Windows CI are green;
+- no version bump, tag or release is created.
+
+Create `docs/RF1_REPORT.md` with the inventory, refactor map, before/after dependency/code-graph
+summary, deliberately retained complexity and regression evidence.
+
+## READY1 — final pre-M5 readiness gate
+
+Status: planned; starts only after RF1 closes.
+
+READY1 is a verification/freeze gate, not another implementation campaign.
+
+Goals:
+
+- run a fresh whole-repository architecture and risk audit against the post-RF1 tree;
+- confirm no pre-M5 BLOCKER/HIGH risk remains without an explicit accepted deferral;
+- verify the canonical client/server/tooling workflows from a clean checkout;
+- verify public Ubuntu/Windows CI and representative local graphical/headless smoke;
+- recheck stable semantic external identities, capability/provenance boundaries, resource identities,
+  unified C2 content-definition contracts, BG1 model/shape identities, persistence compatibility and
+  generator identities;
+- verify no historical private/proprietary assets are required by public build/test/release paths;
+- confirm M5 can add transport/replication without first restructuring client startup, code ownership,
+  content-definition/model boundaries, persistence or resource identity again;
+- produce a concise `READY1_REPORT.md` and exact M5 entry contract.
+
+READY1 must not hide unfinished architecture work by renaming it "M5 follow-up". If the audit finds a
+real blocker, create a bounded repair stage before M5 rather than starting networking around it.
 
 ## M5 — multiplayer + server content resolution (future, inactive)
 
+Starts only after READY1 closes.
+
 - authoritative server;
 - QUIC evaluation/transport;
+- connection/session identity and authenticated capability context;
 - snapshots/deltas/interest management;
-- prediction/reconciliation;
-- manifest handshake;
+- local-player prediction/reconciliation;
+- semantic manifest handshake;
 - content cache/fetch/integrity;
-- headless remote bot transport.
+- headless remote bot transport;
+- bounded initial multiplayer scale consistent with the accepted S1 storage envelope.
+
+M5 does not require Java protocol compatibility.
 
 ## M6 — third-party modding (future, inactive)
 
-- WASM runtime;
-- capability API;
+- WASM runtime for downloaded/untrusted executable mods;
+- capability API built on the common C2 content/handler contracts;
 - stable versioning;
 - example mod;
-- target-specific content;
-- quotas/profiling.
+- target-specific content and semantic block/item/entity/model extensions;
+- quotas/profiling;
+- namespaced/versioned durable component use through the host persistence contract rather than raw
+  filesystem access.
 
 ## M7 — evidence-driven optimization campaign (future, inactive)
 
 Evaluate data layouts, storage engines, SIMD, io_uring, allocators, PGO/BOLT and high-player-count
-partitioning only against representative benchmarks. R1 resource/render workloads should supply
-reusable evidence for this later campaign.
-
-S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required; R2 and subsequent stages remain inactive. Final closeout CI must pass before publication acceptance is reported.
+partitioning only against representative benchmarks. R1/RSM1/P1/S1 workloads should supply reusable
+evidence for this later campaign.

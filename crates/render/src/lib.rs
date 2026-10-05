@@ -881,8 +881,8 @@ pub struct RendererResources {
     pub fonts: rustcraft_content::fonts::FontResources,
     pub atlas_pages: Vec<RgbaTexture>,
     pub container_background: AtlasRegion,
-    pub hud: AtlasRegion,
-    pub player_skin: AtlasRegion,
+    pub hud: [AtlasRegion; 2],
+    pub player_preview: [AtlasRegion; 6],
     pub occupancy: f32,
     pub cache_hit: bool,
 }
@@ -1030,8 +1030,10 @@ pub struct Renderer {
     debug_boxes: Vec<(rustcraft_engine_core::Aabb, [f32; 3])>,
     page_binds: Vec<wgpu::BindGroup>,
     container_background: AtlasRegion,
-    hud_texture: AtlasRegion,
-    player_skin: AtlasRegion,
+    hud_regions: [AtlasRegion; 2],
+    player_regions: [AtlasRegion; 6],
+    hotbar_ranges: Vec<(TextureHandle, std::ops::Range<u32>)>,
+    player_ranges: Vec<(TextureHandle, std::ops::Range<u32>)>,
     item_buffer: wgpu::Buffer,
     item_vertices: usize,
     item_page_ranges: Vec<(TextureHandle, std::ops::Range<u32>)>,
@@ -1449,8 +1451,10 @@ impl Renderer {
             debug_boxes: Vec::new(),
             page_binds,
             container_background: resources.container_background,
-            hud_texture: resources.hud,
-            player_skin: resources.player_skin,
+            hud_regions: resources.hud,
+            player_regions: resources.player_preview,
+            hotbar_ranges: Vec::new(),
+            player_ranges: Vec::new(),
             item_buffer,
             item_vertices: 0,
             item_page_ranges: Vec::new(),
@@ -1580,9 +1584,10 @@ impl Renderer {
                 }
             }
         }
-        for vertex in &mut self.hud_geometry.player_vertices {
-            vertex.uv = region_uv(self.player_skin, vertex.uv);
-        }
+        self.player_ranges = resolve_presentation_quads(
+            &mut self.hud_geometry.player_vertices,
+            &self.player_regions,
+        );
         self.hud_geometry.build_gui_background(
             self.width(),
             self.height(),
@@ -1592,9 +1597,8 @@ impl Renderer {
         for vertex in &mut self.hud_geometry.gui_vertices {
             vertex.uv = region_uv(self.container_background, vertex.uv);
         }
-        for vertex in &mut self.hud_geometry.hotbar_vertices {
-            vertex.uv = region_uv(self.hud_texture, vertex.uv);
-        }
+        self.hotbar_ranges =
+            resolve_presentation_quads(&mut self.hud_geometry.hotbar_vertices, &self.hud_regions);
         let gui_bytes = bytemuck::cast_slice(&self.hud_geometry.gui_vertices);
         assert!(
             gui_bytes.len() <= 256 * 1024,
@@ -1738,8 +1742,8 @@ impl Renderer {
             + usize::from(!self.hud_geometry.selection_vertices.is_empty())
             + usize::from(self.crack_vertices > 0)
             + usize::from(!self.hud_geometry.gui_vertices.is_empty())
-            + usize::from(!self.hud_geometry.hotbar_vertices.is_empty())
-            + usize::from(!self.hud_geometry.player_vertices.is_empty())
+            + self.hotbar_ranges.len()
+            + self.player_ranges.len()
             + self.hud_geometry.item_pages.len()
             + usize::from(!self.hud_geometry.vertices.is_empty())
             + usize::from(!self.hud_geometry.debug_vertices.is_empty())
@@ -2426,13 +2430,11 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_pipeline);
-            pass.set_bind_group(
-                0,
-                &self.page_binds[self.hud_texture.texture.0 as usize],
-                &[],
-            );
             pass.set_vertex_buffer(0, self.hud_buffer.slice(768 * 1024..));
-            pass.draw(0..self.hud_geometry.hotbar_vertices.len() as u32, 0..1);
+            for (texture, range) in &self.hotbar_ranges {
+                pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
+                pass.draw(range.clone(), 0..1);
+            }
         }
         if !self.hud_geometry.player_vertices.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2451,13 +2453,11 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.gui_pipeline);
-            pass.set_bind_group(
-                0,
-                &self.page_binds[self.player_skin.texture.0 as usize],
-                &[],
-            );
             pass.set_vertex_buffer(0, self.hud_buffer.slice(896 * 1024..));
-            pass.draw(0..self.hud_geometry.player_vertices.len() as u32, 0..1);
+            for (texture, range) in &self.player_ranges {
+                pass.set_bind_group(0, &self.page_binds[texture.0 as usize], &[]);
+                pass.draw(range.clone(), 0..1);
+            }
         }
         if !self.hud_geometry.item_vertices.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -3816,4 +3816,21 @@ impl TextSurface {
         });
         queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
     }
+}
+
+/// Resolve whole-resource quads while preserving blend order across arbitrary physical pages.
+pub fn resolve_presentation_quads(
+    vertices: &mut [Vertex],
+    regions: &[AtlasRegion],
+) -> Vec<(TextureHandle, std::ops::Range<u32>)> {
+    assert!(vertices.is_empty() || vertices.len() == regions.len() * 6);
+    let mut ranges = Vec::new();
+    for (index, quad) in vertices.as_chunks_mut::<6>().0.iter_mut().enumerate() {
+        let region = regions[index];
+        for vertex in quad {
+            vertex.uv = region_uv(region, vertex.uv);
+        }
+        ranges.push((region.texture, index as u32 * 6..(index as u32 + 1) * 6));
+    }
+    ranges
 }

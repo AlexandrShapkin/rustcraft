@@ -28,7 +28,7 @@ gameplay and presentation behavior is preserved.
 | First-party blocks/flat world | `gameplay-*` | `minecraft-b173` | Partial/fixed boundary | Aggregated and re-exported only through `minecraft-b173`; clients no longer depend on gameplay crates directly. |
 | Semantic input/controller | `agent-api`, client, runtime | platform/Agent API + game systems | Partial | Added `primary_action`/`secondary_action`; legacy Minecraft aliases remain for behavior-preserving migration. |
 | Bot observations/actions | `bot-api`, runtime | generic Agent/Bot API + game-specific convenience layer | Partial | Semantic IDs/capabilities exist; crafting/mining/inventory convenience fields remain an explicit compatibility exception. |
-| Beta HUD/inventory presentation | `render::hud` and client | generic UI renderer + `minecraft-b173` UI construction | Organizational debt | Preserve accepted M3 fidelity; move Beta layout/policy when UI is next extended. |
+| Beta HUD/inventory presentation | `render::hud` and client | generic UI renderer + `minecraft-b173` UI construction | Narrowed by R2 | Semantic subresources remove physical sheet coupling; destination layout and slot policy remain organizational debt. |
 | F3/process/GPU telemetry | client/render tooling | client/tooling | OK | No gameplay authority or headless dependency. |
 | Headless server | server + runtime | platform composition root | Partial | Remains GPU/window independent; currently composes legacy runtime behind validated Minecraft profile. |
 | Non-Minecraft integration | absent before this pass | architectural test game | Fixed | Added `sandbox-test` and `just sample-game`; dependency guard rejects Minecraft/runtime crates. |

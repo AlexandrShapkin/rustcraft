@@ -7,6 +7,8 @@ mod p1;
 mod persistence_tests;
 mod presentation;
 mod render_tests;
+#[cfg(test)]
+mod resource_tests;
 mod rsm1;
 use rustcraft_agent_api::{AgentIntent, Controller, MoveIntent};
 use rustcraft_engine_core::{BlockId, Vec3};
@@ -172,8 +174,15 @@ fn compile_first_party_resources_from(
                 })
                 .collect(),
             container_background: region(rustcraft_minecraft_b173::resource_keys::inventory())?,
-            hud: region(rustcraft_minecraft_b173::resource_keys::hud())?,
-            player_skin: region(rustcraft_minecraft_b173::resource_keys::player())?,
+            hud: [
+                region(rustcraft_minecraft_b173::resource_keys::hotbar())?,
+                region(rustcraft_minecraft_b173::resource_keys::selector())?,
+            ],
+            player_preview: (0..6)
+                .map(|index| region(rustcraft_minecraft_b173::resource_keys::player_part(index)))
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .expect("six preview regions"),
             occupancy: compiled.metrics.occupancy,
             cache_hit: compiled.metrics.cache_hit,
         },
@@ -6193,8 +6202,8 @@ fn main() {
                 "minecraft resources: pages={} container_page={} hud_page={} player_page={}",
                 compiled.resources.atlas_pages.len(),
                 compiled.resources.container_background.texture.0,
-                compiled.resources.hud.texture.0,
-                compiled.resources.player_skin.texture.0,
+                compiled.resources.hud[0].texture.0,
+                compiled.resources.player_preview[0].texture.0,
             ),
             Err(error) => {
                 eprintln!("resource report failed: {error}");

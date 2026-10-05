@@ -79,7 +79,10 @@ Symlinks, traversal and malformed semantic paths remain rejected.
 PNG headers are inspected before parallel decode. Dimensions and checked `width * height * 4` are
 validated, and predicted bytes are summed once per unique physical source against the global decode
 budget before any worker allocates output. Decode uses at most eight workers. The Beta package's
-virtual importer exposes terrain crops and UI/player sheets through the same generic compiler.
+virtual importer exposes terrain, inventory-panel, hotbar, selector and preview-part crops through
+the same generic compiler. Active HUD/player contracts refer to semantic subresources rather than
+whole sheets. Individual semantic files, rearranged crops and later-package overrides resolve
+through the same compiled regions/cache.
 
 Packing is deterministic height/width/semantic-ID ordered shelf placement with two-pixel padding
 and edge extrusion by default. Page dimensions are selected adaptively from 128, 256, 512 and

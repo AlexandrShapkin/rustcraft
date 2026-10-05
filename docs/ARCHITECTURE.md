@@ -134,8 +134,8 @@ and compiles padded/extruded deterministic shelf atlases into a BLAKE3-addressed
 `minecraft_b173` owns the legacy sheet coordinates; generic content and renderer crates do not.
 
 Physical atlas pages are first-class. Chunk meshes, dropped block models and GUI block models are
-grouped by `TextureHandle`, so one model may reference several pages. Crack, container, HUD-sheet
-and player-skin passes bind their resolved page explicitly. The sole production page-zero bind is
+grouped by `TextureHandle`, so one model may reference several pages. Crack, container, HUD and player-preview quads bind their resolved pages explicitly;
+background and selector or adjacent preview parts may use different pages. The sole production page-zero bind is
 the procedural HUD color pass, whose shader branch never samples the bound texture. The offscreen
 contract uses project-owned three-page resources to exercise chunk, dropped and GUI submission.
 
@@ -154,8 +154,11 @@ confirmed occlusion/near-plane behavior; the line opacity was raised slightly af
 clearer visibility.
 
 `RendererResources` now carries compiled physical pages plus resolved semantic presentation roles
-for the inventory background, HUD sheet and player skin. Those role names remain transitional M3
-UI ownership debt, but paths and Beta atlas coordinates no longer enter the generic renderer.
+for the cropped inventory panel, separate hotbar/selector and six preview regions. Each quad
+uses full local UVs, and ordered page ranges preserve painter order across arbitrary pages.
+Historical physical crop coordinates live only in the Minecraft importer and historical tests.
+The purpose-built inventory/hotbar layout and preview destination roles remain explicit ARCH-002
+game-policy debt; R2 does not add a GUI framework or move gameplay authority.
 
 Simulation owns authoritative state. Presentation extraction produces read-only generic render
 data. Renderer and UI drawing never mutate gameplay. Beta reference work defines the observable

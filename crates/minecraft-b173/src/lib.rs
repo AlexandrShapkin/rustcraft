@@ -60,11 +60,22 @@ pub mod resource_keys {
     pub fn inventory() -> ResourceId {
         key("minecraft_b173:textures/gui/inventory")
     }
-    pub fn hud() -> ResourceId {
-        key("minecraft_b173:textures/gui/hud")
+    pub fn hotbar() -> ResourceId {
+        key("minecraft_b173:textures/gui/hotbar")
     }
-    pub fn player() -> ResourceId {
-        key("minecraft_b173:textures/entity/player")
+    pub fn selector() -> ResourceId {
+        key("minecraft_b173:textures/gui/selector")
+    }
+    pub fn player_part(index: usize) -> ResourceId {
+        let role = [
+            "head",
+            "torso",
+            "arm_left",
+            "arm_right",
+            "leg_left",
+            "leg_right",
+        ][index];
+        key(&format!("minecraft_b173:textures/entity/player/{role}"))
     }
     pub fn destroy_stage(stage: u8) -> ResourceId {
         key(&format!(
@@ -120,12 +131,53 @@ pub fn legacy_resource_package(terrain_path: &Path) -> Result<ResourcePackage, R
             SamplerPolicy::Nearest,
         )?;
     }
-    for (id, path) in [
-        (resource_keys::inventory(), Path::new("gui/inventory.png")),
-        (resource_keys::hud(), Path::new("gui/gui.png")),
-        (resource_keys::player(), Path::new("mob/char.png")),
-    ] {
-        package.add_texture(id, path, None, SamplerPolicy::Nearest)?;
+    let imports = [
+        (
+            resource_keys::inventory(),
+            "gui/inventory.png",
+            [0, 0, 176, 166],
+        ),
+        (resource_keys::hotbar(), "gui/gui.png", [0, 0, 182, 22]),
+        (resource_keys::selector(), "gui/gui.png", [0, 22, 24, 22]),
+        (resource_keys::player_part(0), "mob/char.png", [8, 8, 8, 8]),
+        (
+            resource_keys::player_part(1),
+            "mob/char.png",
+            [20, 20, 8, 12],
+        ),
+        (
+            resource_keys::player_part(2),
+            "mob/char.png",
+            [44, 20, 4, 12],
+        ),
+        (
+            resource_keys::player_part(3),
+            "mob/char.png",
+            [36, 20, 4, 12],
+        ),
+        (
+            resource_keys::player_part(4),
+            "mob/char.png",
+            [4, 20, 4, 12],
+        ),
+        (
+            resource_keys::player_part(5),
+            "mob/char.png",
+            [4, 20, 4, 12],
+        ),
+    ];
+    for (id, path, [x, y, width, height]) in imports {
+        package.add_texture(
+            id,
+            Path::new(path),
+            Some(PixelRect {
+                x,
+                y,
+                width,
+                height,
+            }),
+            SamplerPolicy::Nearest,
+        )?;
     }
     Ok(package)
 }

@@ -210,10 +210,9 @@ impl HudGeometry {
     pub fn build_gui_background(&mut self, width: u32, height: u32, open: bool, selected: usize) {
         self.gui_vertices.clear();
         self.hotbar_vertices.clear();
-        self.player_vertices.clear();
         let scale = beta_gui_scale(width, height);
         if !open {
-            // Beta 1.7.3 GuiIngame: gui.png (0,0,182,22), centered at scaled height - 22.
+            // Center the resolved hotbar at the bottom of the scaled viewport.
             let sw = width as f32 / scale;
             let sh = height as f32 / scale;
             let x = sw / 2. - 91.;
@@ -223,25 +222,17 @@ impl HudGeometry {
                 y * scale,
                 182. * scale,
                 22. * scale,
-                0.,
-                0.,
-                182.,
-                22.,
                 width,
                 height,
                 &mut self.hotbar_vertices,
             );
-            // Beta selector: gui.png (0,22,24,22), one pixel above/left of the slot origin.
+            // Selector overlaps the slot origin by one logical pixel.
             let sx = (x - 1. + selected.min(8) as f32 * 20.) * scale;
             Self::gui_rect(
                 sx,
                 (y - 1.) * scale,
                 24. * scale,
                 22. * scale,
-                0.,
-                22.,
-                24.,
-                22.,
                 width,
                 height,
                 &mut self.hotbar_vertices,
@@ -254,9 +245,9 @@ impl HudGeometry {
         let y = (height as f32 - h) / 2.;
         for (px, py, u, v) in [
             (x, y, 0., 0.),
-            (x + w, y, 176. / 256., 0.),
-            (x + w, y + h, 176. / 256., 166. / 256.),
-            (x, y + h, 0., 166. / 256.),
+            (x + w, y, 1., 0.),
+            (x + w, y + h, 1., 1.),
+            (x, y + h, 0., 1.),
         ] {
             self.gui_vertices.push(Vertex {
                 position: [
@@ -275,25 +266,8 @@ impl HudGeometry {
         self.gui_vertices.drain(0..4);
     }
     #[allow(clippy::too_many_arguments)]
-    fn gui_rect(
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        u: f32,
-        v: f32,
-        uw: f32,
-        vh: f32,
-        width: u32,
-        height: u32,
-        out: &mut Vec<Vertex>,
-    ) {
-        let uv = [
-            [u / 256., v / 256.],
-            [(u + uw) / 256., v / 256.],
-            [(u + uw) / 256., (v + vh) / 256.],
-            [u / 256., (v + vh) / 256.],
-        ];
+    fn gui_rect(x: f32, y: f32, w: f32, h: f32, width: u32, height: u32, out: &mut Vec<Vertex>) {
+        let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
         for i in [0, 1, 2, 0, 2, 3] {
             out.push(Vertex {
                 position: [
@@ -308,13 +282,8 @@ impl HudGeometry {
         }
     }
     #[allow(clippy::too_many_arguments)]
-    fn skin_rect(&mut self, x: f32, y: f32, w: f32, h: f32, u: f32, v: f32, uw: f32, vh: f32) {
-        let uv = [
-            [u / 64., v / 32.],
-            [(u + uw) / 64., v / 32.],
-            [(u + uw) / 64., (v + vh) / 32.],
-            [u / 64., (v + vh) / 32.],
-        ];
+    fn skin_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
         for i in [0, 1, 2, 0, 2, 3] {
             self.player_vertices.push(Vertex {
                 position: [
@@ -396,6 +365,7 @@ impl HudGeometry {
         }
     }
     pub fn build(&mut self, s: &HudSnapshot, width: u32, height: u32, camera: Camera) {
+        self.player_vertices.clear();
         self.text_runs.clear();
         self.vertices.clear();
         self.selection_vertices.clear();
@@ -429,66 +399,42 @@ impl HudGeometry {
             let slot = 18. * scale;
             let craft_x = panel_x + 88. * scale;
             let craft_y = panel_y + 26. * scale;
-            // Beta char.png regions: head, torso, arms and legs in the inventory viewport.
+            // Resolved preview regions: head, torso, arms and legs.
             self.skin_rect(
                 panel_x + 48. * scale,
                 panel_y + 18. * scale,
                 16. * scale,
                 16. * scale,
-                8.,
-                8.,
-                8.,
-                8.,
             );
             self.skin_rect(
                 panel_x + 46. * scale,
                 panel_y + 34. * scale,
                 20. * scale,
                 26. * scale,
-                20.,
-                20.,
-                8.,
-                12.,
             );
             self.skin_rect(
                 panel_x + 42. * scale,
                 panel_y + 35. * scale,
                 4. * scale,
                 23. * scale,
-                44.,
-                20.,
-                4.,
-                12.,
             );
             self.skin_rect(
                 panel_x + 66. * scale,
                 panel_y + 35. * scale,
                 4. * scale,
                 23. * scale,
-                36.,
-                20.,
-                4.,
-                12.,
             );
             self.skin_rect(
                 panel_x + 47. * scale,
                 panel_y + 60. * scale,
                 8. * scale,
                 20. * scale,
-                4.,
-                20.,
-                4.,
-                12.,
             );
             self.skin_rect(
                 panel_x + 57. * scale,
                 panel_y + 60. * scale,
                 8. * scale,
                 20. * scale,
-                4.,
-                20.,
-                4.,
-                12.,
             );
             for (index, item) in s.inventory_slots.into_iter().enumerate() {
                 if let (Some(item), Some((x, y))) = (item, inventory_slot_position(index)) {
@@ -694,6 +640,72 @@ mod tests {
             near: 0.05,
             far: 100.0,
         }
+    }
+
+    #[test]
+    fn semantic_presentation_uses_full_regions_and_preserves_preview() {
+        let mut geometry = HudGeometry::default();
+        geometry.build_gui_background(800, 600, false, 3);
+        assert_eq!(geometry.hotbar_vertices.len(), 12);
+        let original_positions = geometry
+            .hotbar_vertices
+            .iter()
+            .map(|v| v.position)
+            .collect::<Vec<_>>();
+        let regions = [
+            AtlasRegion::from_pixels(crate::TextureHandle(3), [1024, 512], [17, 31, 182, 22])
+                .unwrap(),
+            AtlasRegion::from_pixels(crate::TextureHandle(7), [128, 256], [43, 69, 24, 22])
+                .unwrap(),
+        ];
+        let draws = crate::resolve_presentation_quads(&mut geometry.hotbar_vertices, &regions);
+        assert_eq!(
+            draws,
+            vec![
+                (crate::TextureHandle(3), 0..6),
+                (crate::TextureHandle(7), 6..12)
+            ]
+        );
+        assert_eq!(
+            geometry
+                .hotbar_vertices
+                .iter()
+                .map(|v| v.position)
+                .collect::<Vec<_>>(),
+            original_positions
+        );
+        for (index, quad) in geometry
+            .hotbar_vertices
+            .as_chunks::<6>()
+            .0
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(quad[0].uv, regions[index].uv_min);
+            assert_eq!(quad[2].uv, regions[index].uv_max);
+        }
+        let snapshot = HudSnapshot {
+            inventory_open: true,
+            ..Default::default()
+        };
+        geometry.build(&snapshot, 800, 600, test_camera(Vec3::ZERO));
+        assert_eq!(geometry.player_vertices.len(), 36);
+        geometry.build_gui_background(800, 600, true, 0);
+        assert_eq!(
+            geometry.player_vertices.len(),
+            36,
+            "background rebuild must preserve preview"
+        );
+        assert_eq!(geometry.gui_vertices[0].uv, [0., 0.]);
+        assert_eq!(geometry.gui_vertices[2].uv, [1., 1.]);
+        geometry.build(&snapshot, 800, 600, test_camera(Vec3::ZERO));
+        assert_eq!(
+            geometry.player_vertices.len(),
+            36,
+            "preview must not accumulate"
+        );
+        geometry.build(&HudSnapshot::default(), 800, 600, test_camera(Vec3::ZERO));
+        assert!(geometry.player_vertices.is_empty());
     }
 
     #[test]
