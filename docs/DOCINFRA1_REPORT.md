@@ -85,8 +85,14 @@ is updated to the new contract/registry owners. Operational docs reference regis
 
 ## Publication
 
-Implementation SHA and Ubuntu/Windows CI will be recorded after publication acceptance. No issue is
-closed by this batch; no subsequent implementation stage is started.
+Implementation SHA: `c332c8b3c135488796f4af11b56a79480a2bebac`. Published to public
+`main` by non-force push from `/tmp/rustcraft-r2-recovered`.
+
+Public implementation CI: [run 37342382225](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37342382225).
+Ubuntu (`rust (ubuntu-latest)`): success. Windows (`rust (windows-latest)`): success.
+Both required platform jobs completed successfully; DOCINFRA1 publication is accepted.
+
+No issue is closed by this batch; no subsequent implementation stage is started.
 
 ## Limitations
 
