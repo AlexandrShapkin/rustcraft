@@ -1,6 +1,6 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "A1"
+focus = "C2"
 sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
@@ -16,7 +16,7 @@ source_areas = ["crates/client", "crates/control", "crates/runtime", "crates/scr
 [[stage]]
 id = "A1"
 title = "external identity, policy boundary & trust preparation"
-state = "active"
+state = "closed"
 contract = "docs/stages/A1.md"
 issue_label = "stage:A1"
 relevant_docs = ["docs/ARCHITECTURE_AUDIT.md", "docs/AGENTS_AND_BOTS.md", "docs/GAMEPLAY_CONTRACT.md", "docs/SECURITY.md"]

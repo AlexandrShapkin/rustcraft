@@ -75,7 +75,7 @@ No new external contract may export dense handles without an explicit authoritat
 VS1 adds stable VoxelSpaceId and local/reference-space positions where required. Bots must reason about
 moving structures, entities and relative motion from semantic observations, not renderer-coordinate
 scraping. References identify durable entity identity and relevant frame; contacting a space does not
-imply permanent ownership. No Bot API version bump or new types are implemented in this docs pass.
+imply permanent ownership. A1 versions the present Bot contract; VS1 space-context types remain future work.
 
 ## A1 durable item observation identity
 
@@ -94,7 +94,8 @@ local mappings fail explicitly; no dense handle crosses this external boundary. 
 rejected intent admission in last_action_error, and direct place_semantic returns Result. Target,
 adjacency, held-item, collision and quantity checks remain shared with local controller placement.
 AgentIntent is not a serialized network protocol. Retained historical world/storage consumers still
-use an explicit local compatibility registry; their active migration is tracked separately in A1.
+use explicit local compatibility adapters retained by A1. These do not qualify numeric IDs as
+external identity.
 
 Version history during A1: version 3 introduced durable EntityId; version 4 separates typed game
 observation/action payloads from generic Bot contracts. A server must negotiate/validate a future

@@ -38,8 +38,9 @@ SHAs, CI runs or metrics. This is not a second evidence database.
 [ARCHITECTURE_AUDIT](ARCHITECTURE_AUDIT.md) maps migration pressure. [DEFECTS_HISTORY](DEFECTS_HISTORY.md)
 preserves completed pre-Issue evidence. These do not override newer stage planning or GitHub live state.
 
-## Accepted F1 field evidence
+## Accepted stage evidence
 
 | Stage | Accepted artifact | Evidence |
 | --- | --- | --- |
 | F1 | [Accepted report](F1_REPORT.md) | Matched 1280x720 six-phase AMD/RADV/Vulkan dev/release, owner manual release smoothness, production input/capability tests, checkpoint correlation, durability/recovery and both-platform CI. |
+| A1 | [Accepted report](A1_REPORT.md) | Semantic placement/profile mapping, durable Bot EntityId, typed game adapters, native policy registration, local provenance and independent sandbox; [identity CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37375463910), [policy/trust CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37377613595), both platforms green. |
