@@ -2762,6 +2762,13 @@
     "s1_3_required": false,
     "caller_limit": "current client at most one save/tick =20 admissions/s; first-saving entry can defer other columns; backend 50/s probe is not client throughput",
     "scope": "initial bounded M5 deployment within measured store/payload/durable-rate envelope; higher load requires measured admission/drain acceptance",
-    "pm5_004": "accepted disposition, closure awaits public CI"
+    "pm5_004": "resolved: measured keep-current decision; Ubuntu/Windows implementation CI 37271791735 success; final closeout CI required"
+  },
+  "acceptance": {
+    "implementation_sha": "711637aa297b2a3bf195ccf5af46d64e4981fb77",
+    "implementation_ci": 37271791735,
+    "ubuntu": "success",
+    "windows": "success",
+    "closeout": "Final documentation commit requires Ubuntu and Windows success before publication completion"
   }
 }

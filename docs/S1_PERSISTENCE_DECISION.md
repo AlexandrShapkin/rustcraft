@@ -1,6 +1,6 @@
 # S1 persistence decision (D-051)
 
-Status: local evaluation accepted; public implementation/final CI pending.
+Status: accepted — Ubuntu/Windows implementation CI 37271791735 passed; final closeout publication requires both CI jobs green.
 
 ## Context and decision criteria
 

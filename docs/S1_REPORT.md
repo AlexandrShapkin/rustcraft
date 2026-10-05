@@ -2,7 +2,7 @@
 
 Starting public main: `e07d8bd4110a972588c2ceafe55df400521d72cb` (P1 closeout).
 P1 implementation/closeout CI 37256205733 / 37256646904: Ubuntu and Windows verified green.
-S1 is ACTIVE. Production backend and format identities remain unchanged.
+S1 is CLOSED after implementation acceptance; final closeout CI is required for publication completion. Production backend and format identities remain unchanged.
 
 ## Physical model verified from source
 
@@ -202,7 +202,7 @@ The split prototype's 1k conversion costs 13.868 s plus 6.014 s full validation,
 
 ## Decision and acceptance
 
-**Keep the current physical backend for bounded initial M5; no S1.3 is required.** The canonical ADR defines the measured envelope, caller limits, future component/capability contract and reconsideration triggers. PM5-004 closure awaits public Ubuntu/Windows acceptance. No unlimited world size, player count, sustained entity churn rate or Windows performance equivalence is claimed.
+**Keep the current physical backend for bounded initial M5; no S1.3 is required.** The canonical ADR defines the measured envelope, caller limits, future component/capability contract and reconsideration triggers. PM5-004 is resolved by the accepted measured decision and Ubuntu/Windows implementation CI. No unlimited world size, player count, sustained entity churn rate or Windows performance equivalence is claimed.
 
 Local acceptance passed formatter, all-target check, workspace tests, strict all-feature Clippy, just ci/dx-test/dx-console/sample-game, S1 correctness/examples, world/player/global/entity/pickup/transfer/corruption/migration/generator persistence gates, C1 smoke and focused RSM1/P1 regressions. Full graphical residency/presentation campaigns are unnecessary because their ownership and presentation code was not changed. Server normal dependency graph remains graphics-free. Machete is clean; audit reports no known vulnerabilities and three existing allowed unmaintained warnings (paste, smartstring, ttf-parser). No new third-party package was added.
 
@@ -211,3 +211,9 @@ Known limitations: controlled faults are not hardware power-cut certification; W
 Graphical Persistence smoke: `target/test-runs/scenario/17-1791180525250074072/result.json` status pass; inspected `target/captures/s1_persistence-17-1791180526005762555/frame.png`. Evidence is generated/ignored, not committed. File scaling after initial creation: 1k/10k/50k columns produce 1,001/10,001/50,001 files including metadata, 23,557,549/235,578,880/1,177,904,255 stored bytes. Warm listing of the completed 50k chunk directory took 157.79 ms; startup does not perform that enumeration.
 
 Supplemental comparison: split isolated file-sync p50/p95/p99 1.024/1.367/1.536 ms, using the same 4 KiB calibration, not internal per-column fsync attribution. Auxiliary drain+flush of eight accepted saves took 56.766 ms with four queued and one inflight at the observed start; all eight reopened. Existing generated-v2 persistence bench (four columns) encoded 264,873 raw / 9,379 stored bytes (ratio .035), whereas the varied synthetic pressure corpus is roughly .35. Thus the amplification figures are payload-specific, not claimed exact compression behavior for every production world.
+
+## Public acceptance
+
+Implementation: `711637aa297b2a3bf195ccf5af46d64e4981fb77` — Evaluate persistence scalability. [GitHub Actions 37271791735](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37271791735): Ubuntu success; Windows success. Formatter, all-target check, workspace tests and strict all-feature Clippy pass on both. Local final `just ci`: 312 passed, one existing skipped test.
+
+This documentation closeout records S1 CLOSED / PM5-004 resolved; final publication acceptance requires both jobs on this closeout SHA to succeed. The closeout run/SHA are discoverable without a self-referential follow-up commit via `gh run list --commit $(git rev-parse HEAD)` and are returned in the final acceptance message. R2 remains next and inactive. No production backend migration, version bump, tag or release.

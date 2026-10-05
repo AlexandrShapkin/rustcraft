@@ -113,6 +113,6 @@ PM5-003 local repair measures and removes fixed-tick camera/position duplication
 authoritative 20 TPS. Shared timing and discontinuity/input-once tests are documented in
 [P1_REPORT.md](P1_REPORT.md). Ubuntu and Windows implementation CI 37256205733 passed. P1 is CLOSED and PM5-003 is resolved.
 Software-GPU cadence/physical display limitations remain explicit. RSM1/UX1/C1/DUX1 remain CLOSED;
-S1 and subsequent stages are inactive.
+S1 is CLOSED; R2 and subsequent stages are inactive.
 
-S1 local evaluation is accepted, pending public CI. [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md) retain the current backend for bounded initial M5; no S1.3. PM5-004 final disposition awaits publication acceptance. R2 and subsequent stages remain inactive.
+S1 is CLOSED and PM5-004 is resolved by the measured keep-current decision in [S1_REPORT.md](S1_REPORT.md) and [S1_PERSISTENCE_DECISION.md](S1_PERSISTENCE_DECISION.md). Ubuntu/Windows implementation CI 37271791735 passed. No S1.3 is required; R2 and subsequent stages remain inactive. Final closeout CI must pass before publication acceptance is reported.
