@@ -270,19 +270,20 @@ is absent, unauthenticated or offline; full issue reconciliation still requires 
 Source anchors are navigation hints checked for existence/case, refreshed after structural changes.
 See [INDEX](INDEX.md) for document ownership and templates, not a full tree dump.
 
-## F1 normal client and pending hardware evidence
+## F1 normal client and accepted hardware evidence
 
 `just client [ARGS…]` is canonical normal human/developer startup. `just client-release [ARGS…]`
 uses the same runtime in the release profile. `--survival` selects game-owned player state;
 `--devtools` explicitly grants trusted local tooling; `--player` demonstrates denied selector
 operations. These arguments are independent. `client-survival` and `dev-client` delegate to `client`;
 specialist scenarios/acceptance aliases remain harnesses until DX2 proves retirement equivalence.
-No measurement yet justifies a recommendation that one profile feels smoother.
+Owner normal-speed release play is accepted; use `just client-release` for that play profile.
+Both automated profiles measured successfully; no unprovided comparative speedup is claimed.
 
 `just f1-input-window-test` runs deterministic production input-router regression without display/GPU.
 `just f1-test` runs client, scripting and storage tests sequentially. `just f1-client [both|dev|release]`
 produces isolated AMD/RADV/Vulkan field evidence under ignored `target/f1/`; see
-[DEBUGGING](DEBUGGING.md#f1-routing-and-field-acceptance-pending-hardware). It preserves normal build
+[DEBUGGING](DEBUGGING.md#f1-routing-and-field-acceptance). It preserves normal build
 profiles; local quota-constrained test symbol overrides are not owner field measurements.
 
 `just f1-manual` records 45 seconds of owner-controlled normal release gameplay in disposable

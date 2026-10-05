@@ -1,12 +1,12 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "F1"
+focus = "A1"
 sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
 id = "F1"
 title = "unified client path & real-hardware field validation"
-state = "active"
+state = "closed"
 contract = "docs/stages/F1.md"
 issue_label = "stage:F1"
 relevant_docs = ["docs/DEBUGGING.md", "docs/CONFIGURATION.md", "docs/ARCHITECTURE.md"]

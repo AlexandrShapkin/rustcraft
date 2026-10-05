@@ -138,7 +138,7 @@ exclude checkpoint/failed-write bytes; they are not SSD/NAND write or isolated f
 Use `just scenario-client scripts/scenarios/s1_diagnostics.rhai` for a disposable graphical smoke.
 Use isolated save/config paths as for other acceptance runs. Full storage evaluation is headless.
 
-## F1 routing and field acceptance (pending hardware)
+## F1 routing and field acceptance
 
 The production `WindowEvent` adapter copies physical key/state/repeat/text into one safe payload
 and feeds the complete client router. That router owns developer admission, gameplay digit/ordinary
@@ -166,8 +166,8 @@ At least twenty successful player checkpoints are required. CLI checkpoint caden
 both disposable runs. Worker publication envelopes and main-thread submission/completion service
 spans share the monotonic frame timeline; overlap is correlation, not proof of a frame stall.
 `sync_ms` includes atomic publication/directory work, not isolated fsync. No scanout, input-to-photon
-or subjective smoothness is measured. Hardware acceptance and any necessary owner observation remain
-pending; see [F1_REPORT](F1_REPORT.md). P1 presentation policy is unchanged.
+or subjective smoothness is inferred from these timings. Owner hardware and normal-speed subjective
+acceptance are recorded in [F1_REPORT](F1_REPORT.md). P1 presentation policy is unchanged.
 
 ### Normal-speed F1 follow-up
 

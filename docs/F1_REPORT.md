@@ -1,154 +1,163 @@
-# F1 report — implementation progress, hardware acceptance pending
+# F1 report — accepted unified client path and field validation
 
-Evidence for the recorded baseline; not a claim that F1 is closed. Registry remains F1 active,
-focus F1; A1 planned. Issue #18 remains open until field acceptance and public CI are reconciled.
+Historical acceptance evidence for the recorded implementation baseline. The registry owns current
+stage state. The owner authorized final closeout after matched hardware acceptance; A1 implementation
+was not started.
 
 ## Baseline
 
-Clean public `426a44b651146c1d41b352701ba9538950d1ebdb` (DOCINFRA1 acceptance).
-Working/publication clone: `/tmp/rustcraft-r2-recovered`; old dirty source clone untouched.
-Owner authorizes implementation/publication while hardware evidence is pending, not F1 closure.
+Started from clean public `426a44b651146c1d41b352701ba9538950d1ebdb` (DOCINFRA1 acceptance).
+Final implementation baseline: `3d8f48b47ec20f2c4feb5c0e432dec4a94b9ec6e`.
+Publication workspace: `/tmp/rustcraft-r2-recovered`; old dirty source clone untouched.
 
 ## Scope completed
 
-One production WindowEvent input router for normal/developer/scenario sessions. Launch grant
-composition is independent of game-owned Development/Survival state. `just client [ARGS…]` is
-canonical; survival/dev aliases delegate to it. Existing specialist modes remain harnesses;
-DX2 retirement and A1 remote/trust design are not performed.
+One normal rustcraft-client runtime/input path, capability-gated developer operations, independent
+game-owned gameplay mode, production input-route regressions, sequential dev/release hardware
+measurements, normal owner-controlled release acceptance, checkpoint/frame correlation and removal
+of one proven duplicate file sync. No A1 remote authentication, DX2 alias retirement, P1 presentation
+redesign or save-format migration.
 
 ## Implementation
 
-`session.rs` records one local principal, an explanatory grant role, and existing Control
-capabilities. No mechanism branches on role names. Default local sessions can read diagnostics and
-configure their transient selector; `--player` denies selector changes; `--devtools` explicitly
-admits trusted Control and Rhai. Mutation/config writes/script loading remain absent by default.
-Console evaluation and scenario admission preserve the supplied grants. Missing scripts directories
-do not prevent untrusted diagnostic startup. Interpreter presence does not select input semantics.
+`session.rs` composes a bounded local principal and Control grants independently of gameplay mode.
+Role labels explain grants but do not authorize effects. Default local diagnostic grants do not
+permit world mutation, configuration writes or trusted Rhai; explicit trusted launches grant
+`script.load`. Interpreter existence never selects keyboard semantics.
 
-WindowEvent copies public physical key/state/repeat/text into a safe payload used by one complete
-client router. It includes developer effects, ordinary controller keys/digits, inventory and focus
-transitions. KeyEvent's private platform payload cannot be constructed portably; deterministic
-integration tests enter that exact production payload boundary and also feed real Focused events.
-The exploratory shared-desktop X11 driver lost marker keys and was replaced; its ignored research
-artifact is retained locally under target/f1/research, not used as acceptance evidence.
+WindowEvent public physical key/state/repeat/text feeds one complete production client router.
+Portable tests enter that exact production payload boundary (winit KeyEvent has private platform
+fields) and feed actual Focused events. This is not shortcut-helper-only coverage or host-global
+keyboard injection. Held F3 digits are consumed even when privileges deny effects; bare F3 toggles
+on release; F4/repeat, ordinary hotbar digits, inventory, cursor and focus transitions use this router.
+Focus loss clears the chord and entire human controller. Native mouse ingestion and semantic
+LocalHumanController intent remain the normal gameplay path.
 
-Held F3 consumes all digit states even on denial; bare F3 toggles on release; F4 repeats cannot
-retrigger; focus loss clears the entire human controller and chord. Trusted Rhai stays explicit.
-No P1 interpolation/preview/rebase or scheduling policy is redesigned.
-
-Checkpoint callbacks no longer call an extra file sync. Exact installed atomicwrites 0.4.4
-`write_with_options` calls callback, then `tmpfile.sync_all()`, then commit. Unix `replace_atomic`
-renames and syncs source/destination parents; Windows uses MoveFileExW with WRITE_THROUGH and
-REPLACE_EXISTING. RustCraft still syncs its required parent after publication (Windows directory
-sync remains the previously documented unavailable guarantee). Only duplicate callback file-content
-sync is removed. No measured speedup is claimed; generic/player/world save formats are unchanged.
-Worker completion follows successful store return; existing revision/receipt/ownership logic is
-unchanged. New transient worker start/end Instants are never persisted.
+`just client` is canonical. client-survival/dev-client delegate to it; specialist scenario/acceptance
+aliases wrap the same runtime and remain until DX2 proves retirement safe. Survival/Development
+state does not choose a parallel implementation. The server retains its distinct authority process.
 
 ## Evidence
 
-`just f1-client` wraps the same runtime in sequential dev/release processes. All world/config/cache
-paths are disposable under target/f1/run-NONCE. Application Vulkan preflight runs before asset/save
-opening; the actual surface adapter is checked again. Missing/non-AMD/non-RADV/non-Vulkan adapters
-fail explicitly. One run contains four thirty-second phases; readiness and workload share a bounded
-420-second application timeout. Automated pan uses native mouse ingestion and walking uses normal
-LocalHumanController intent. This is not physical mouse/input-to-photon or subjective display evidence.
+Owner-confirmed AMD Radeon Vega 8 / RADV / Vulkan evidence is accepted. Automated dev/release runs
+use disposable state and the same normal client, with six thirty-second phases: stationary, pan,
+walk, walk_pan, fast_pan and walk_fast_pan. Original pan is 325 counts/s (about 37.24 degrees/s);
+fast pan is 1500 counts/s (about 171.89 degrees/s) through normal mouse ingestion at unchanged
+0.002 radians/count sensitivity, not direct presented-camera animation.
 
-Per-profile summary.json records adapter/device/driver/backend, actual build profile, surface/present
-mode, window size, world seed/generator, exact effective C1 config, frame/render/request/redraw/
-present/submit/cpu/acquire distributions, authoritative/shown transforms, duplicate counts,
-input-to-camera/authority distributions and fixed-step counts. timeline.json records bounded frame
-intervals, checkpoint worker publication envelopes, main persistence service spans and fixed budgets
-on one monotonic clock. Long-frame overlap is correlated separately with workers and main services;
-worker overlap alone cannot establish main-thread blocking. Each phase summary also includes
-long-frame counts overlapping workers/main services and distributions of main persistence service
-cost/time inside long-frame intervals, so the top-level returned summary supports initial review.
-At least twenty successful player checkpoints are required. Publication metrics are envelopes, not isolated fsync counters.
+Final top-level automated result is `measured`, with both effective window_pixels equal to
+[1280, 720]. The generic fixed physical client-area request preserves one window/runtime path and
+comparison checks. Earlier evidence at `1c30f15526ee304b49bd0706eed742d1b55e785f` remains valid:
+both profiles individually measured, but top-level comparison failed solely because dev was
+1280x662 and release 1920x1012. That reproducibility defect is resolved by the final rerun;
+it was not evidence of a camera/render defect.
+
+The accepted manual release run used the same AMD/RADV/Vulkan machine, clean worktree, 1280x662,
+45 seconds of normal owner-controlled input, status measured and zero long frames in that phase.
+The owner reports the camera is substantially better than before and sufficiently smooth during
+ordinary walking and fast mouse-look. Manual mode was unaffected by automated sizing and needed
+no repeat. Existing hardware evidence and persistence correlation are preserved.
+
+Ignored target/f1/run-NONCE directories contain root/per-profile schema-v1 summaries and timeline
+JSON. They record actual adapter/driver/backend, profile, window/present mode, effective C1 config,
+world/generator, frame/render/present cadence, duplicate transforms, input-camera timing and fixed
+steps/catch-up/drops. The owner supplied acceptance outcomes in this session rather than the raw
+numeric distribution files; this report does not invent their values or a dev/release speedup.
 
 ## Measurements
 
-Hardware unavailable in recovery: /dev/dri absent; vulkaninfo reports no valid GPU. Radeon ICD
-installation alone does not establish a usable adapter. No software-GPU substitute or AMD result
-is claimed. Dev/release stationary/pan/walk/walk+pan distributions and checkpoint correlation are
-pending owner-machine evidence. No subjective or physical scanout acceptance is claimed.
+Representative release evidence reveals no long-frame problem requiring P1 reopening; normal-speed
+owner-visible release behavior is accepted. Dev and release measured all six phases at matched
+1280x720; no unsupported claim that debug is equally smooth or a specific percentage faster is made.
+Use `just client-release` for the accepted play profile; `just client` remains normal development use.
+
+Frame intervals, worker checkpoint start/end/publication envelopes, main-thread persistence service
+spans and fixed-step budgets share one monotonic Instant timeline. Summaries distinguish worker
+intersection from measured main-thread service cost and time inside long frames. The accepted
+correlation evidence does not justify attributing judder to worker sync tails; no persistence-induced
+representative release stall requiring repair was established. Publication timings include replacement,
+directory work and cleanup rather than isolated fsync. No causal claim follows from overlap alone.
+
+The recovery workspace lacked /dev/dri and usable Vulkan hardware. Its preflight correctly failed
+before save opening; software rendering was never substituted for representative owner evidence.
 
 ## Tests
 
-Focused production routing, local grant, presentation/correlation, console admission and storage
-regressions run with CARGO_BUILD_JOBS=2. Local quota-constrained builds disable debug symbols and
-incremental compilation only for validation; normal owner dev/release profiles are unchanged.
-Client tests: 55 passed, one existing explicit R2 GPU test ignored. Scripting: 18 passed. World:
-41 passed plus two example tests. New publication-failure test preserves the previous acknowledged
-checkpoint, reports failure, retries successfully and recovers from a torn newest slot. Existing
-S1 interruption/reopen and entity-transfer tests are retained. Python wrapper safety/schema/rejection
-tests pass. Local `just ci` passed: docs tests/check, formatting, workspace/all-target checking, 331
-nextest tests passed (two existing ignored tests skipped), and workspace/all-feature Clippy with
-warnings denied. The real `just f1-client dev` command compiled/started its Vulkan preflight,
-failed with the expected no-adapter error, wrote valid schema-v1 failure JSON under
-`target/f1/run-1791225560351787334/`, and stopped before save opening/release launch. This is
-failure-path validation, not representative hardware acceptance. Public CI is still required.
+Focused production-router/capability/digit/focus/repeat, presentation/input extraction, wrapper
+isolation/schema/GPU rejection and fixed-size/mismatch tests passed. Latest local client validation:
+57 passed, one existing R2 GPU-only test ignored; seven wrapper tests passed; client all-target/all-feature
+Clippy, formatting and docs-check passed. Earlier scripting validation: 18 passed; world: 41 plus two
+example tests. Earlier full just ci: 331 nextest tests passed, two existing tests skipped, with workspace
+checks and strict Clippy green. Closeout docs-sync/check and all 21 docs tests passed. Sequential just ci passed again: 333
+nextest tests, two existing skips, workspace/all-target check, formatting and workspace/all-feature
+Clippy with warnings denied. Seven wrapper tests also passed. Local symbol/incremental overrides are recovery validation settings, not owner build profiles.
+
+## Persistence durability conclusion
+
+Only duplicate callback file-content sync was removed. Exact pinned atomicwrites 0.4.4 ordering is
+callback, tmpfile.sync_all(), then commit. Unix atomic replacement syncs required parents; Windows
+uses MoveFileExW WRITE_THROUGH and REPLACE_EXISTING. RustCraft's required parent sync remains;
+Windows directory durability retains its documented platform limitation. Successful completion still
+follows successful store publication. No measured durability speedup is claimed.
+
+Fault/reopen regressions preserve previous acknowledged checkpoints on publication failure, retry
+successfully and recover a torn newest slot. Existing S1 interruption/recovery and D-052 entity-transfer
+regressions remain green: exact durable player receipt before full pickup retirement, quantity/revision-aware
+partial receipt, destination durability before migration retirement, failed-generation transient cleanup,
+and no persistence acknowledgement on failure. Save formats and transfer ordering are unchanged.
+P1 20 TPS authority, transient interpolation and local preview/rebase are preserved; R2 remains intact.
 
 ## Issues resolved
 
-None closed. Implementation references #18; required hardware/CI acceptance is pending.
+[Issue #18](https://github.com/AlexandrShapkin/rustcraft/issues/18) is reconciled with the production
+route tests, final hardware/owner acceptance and both-platform implementation CI. Final evidence
+[comment](https://github.com/AlexandrShapkin/rustcraft/issues/18#issuecomment-6002552887)
+preceded completed closure; current GitHub state was verified CLOSED/COMPLETED. Unrelated issues
+are untouched.
 
 ## Issues remaining / waivers
 
-#18 remains open. Owner explicitly requires AMD/RADV/Vulkan evidence before closure. This is a
-pending requirement, not a waiver. No new issue is needed for the inaccessible recovery GPU.
+No other F1-labelled issue was found. No F1-owned acceptance requirement is waived or left pending.
+A1 remains planned and its implementation was not started.
 
 ## Known limitations
 
-| F1 acceptance question | Current evidence / remaining gate |
+Application timing is not physical scanout or input-to-photon measurement. Subjective acceptance is
+the owner's observation, not an automated inference. These limits do not block F1 because representative
+owner-visible normal-speed behavior is explicitly accepted. Raw timing distributions remain in owner
+artifacts; only supplied outcomes are reproduced here.
+
+| Acceptance | Accepted evidence |
 | --- | --- |
-| A: one normal runtime/input path | Same ClientApp/WindowEvent/router/composition; startup variants only set state/grants/harnesses. |
-| B: game mode separate | Same initialize_simulation; game/session mode and launch grants are independent. |
-| C: capabilities | Local Control grants, including explicit script.load; no role-name effects. |
-| D–F: F3/F4/digits/focus/repeat | Deterministic production-router tests; no interpreter-existence branch. |
-| G–H: canonical workflow/aliases | just client accepts arguments; historical aliases delegate; specialist harnesses retained until DX2. |
-| I–K: hardware/smoothness | Pending actual AMD/RADV/Vulkan dev/release phases; no conclusion yet. |
-| L: checkpoint/frame correlation | Instrumentation/tests ready; representative correlation pending. |
-| M: duplicate durability work | Proven callback duplicate removed; library/pre-publication/replace/directory ordering preserved; focused recovery regression. |
-| N: P1/S1/R2/D-052 | No presentation policy/save format/transfer logic change; existing regressions retained; local wider regression green; public CI pending. |
-| O: issue reconciliation | #18 open; no acceptance closure yet. |
+| A–C: one path, mode/grants separation | One ClientApp/router; game-owned mode; capability-authorized effects. |
+| D–F: F3/F4/digits/focus/repeat | Complete production-route tests in granted/denied normal contexts. |
+| G–H: workflow/aliases | Canonical just client; compatibility/harness aliases retained until DX2. |
+| I–K: hardware and normal-speed behavior | Matched six-phase dev/release measured; manual release and owner smoothness accepted. |
+| L: persistence correlation | Shared monotonic worker/main/frame traces; no unjustified causal attribution. |
+| M: durability | Proven duplicate only; atomic/file/directory ordering and recovery tests preserved. |
+| N: P1/S1/R2/D-052 | No redesign/format change; correctness regressions and public CI green. |
+| O: issue reconciliation | #18 final evidence and completed closure; no other owned issue. |
 
 ## Implementation SHA
 
-Core implementation: `ed33bd7a26789f583597d0cc448e08b3a3e4a5ff` (Refs #18).
-A follow-up adds concise per-phase checkpoint/frame overlap and main-service cost summaries;
-its identity is discoverable through Git history. Hardware acceptance is still pending.
+- `ed33bd7a26789f583597d0cc448e08b3a3e4a5ff`: unified input/grants, durability proof, field harness.
+- `39afe363365db2ddcd409da40f6d4b0f3c2ad4b5`: concise checkpoint/frame correlation.
+- `1c30f15526ee304b49bd0706eed742d1b55e785f`: fast-motion and manual release evidence.
+- `3d8f48b47ec20f2c4feb5c0e432dec4a94b9ec6e`: matched automated window reproducibility.
 
 ## CI
 
-Core implementation [CI 37358378714](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37358378714):
-Ubuntu success; Windows success. The field-summary follow-up also requires both platform jobs;
-its final public run is discoverable from that commit. This is implementation CI, not F1 hardware acceptance.
+Each implementation run was reverified: Ubuntu success and Windows success.
+
+- [Core 37358378714](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37358378714).
+- [Correlation 37359466704](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37359466704).
+- [Fast/manual 37365477477](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37365477477).
+- [Window reproducibility 37369126446](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37369126446).
+
+Closeout CI is associated with the closeout commit in public GitHub Actions; formal publication
+acceptance requires both platforms green before the final user report.
 
 ## Closeout SHA
 
-None. F1 stays active until owner hardware evidence and all acceptance requirements pass.
-
-## Normal-speed hardware follow-up
-
-The owner confirms existing AMD/RADV/Vulkan evidence is valid and automated motion looked smooth,
-but its low pan rate leaves normal-speed subjective acceptance inconclusive. Existing evidence
-must be preserved. A narrow harness extension retains the original phases and adds fast_pan and
-walk_fast_pan through production mouse ingestion, plus a 45-second owner-controlled release
-recording via `just f1-manual`. No P1 presentation, persistence or runtime authority design changes
-are made. Faster hardware measurements and the owner's observation remain pending; F1 stays active,
-Issue #18 stays open, and A1 stays planned.
-
-## Owner acceptance and window reproducibility correction
-
-Owner evidence at `1c30f15526ee304b49bd0706eed742d1b55e785f` is preserved and valid.
-Both automated profiles individually measured, including fast_pan and walk_fast_pan. The wrapper
-failed only its comparison: dev client area 1280x662 versus release 1920x1012. This is a workload
-reproducibility defect, not a camera defect. Automated reruns now request fixed 1280x720 physical
-client areas through a generic normal-window override; comparison checks remain intact.
-
-The owner accepts the interactive release run: AMD Radeon Vega 8 / RADV / Vulkan, clean worktree,
-1280x662, status measured, zero long frames in the 45-second interactive phase. The owner reports
-camera motion is substantially better and sufficiently smooth during ordinary walking and fast
-mouse-look. That subjective acceptance, previous timing/persistence evidence, and production
-WindowEvent/capability regressions remain valid. Manual mode is unchanged and requires no rerun.
-One final matched-size automated run remains pending. F1 active, focus F1, #18 open, A1 planned.
+The commit containing this accepted report and deliberate registry transition, titled Record F1
+acceptance, is discoverable in Git history; its SHA cannot be embedded in its own contents.
