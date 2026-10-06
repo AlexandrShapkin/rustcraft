@@ -1,6 +1,6 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "WF1"
+focus = "BG1"
 sequence = ["F1", "A1", "C2", "WF1", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
@@ -36,7 +36,7 @@ source_areas = ["crates/game-api", "crates/mod-api", "crates/content", "crates/m
 [[stage]]
 id = "WF1"
 title = "workspace & workflow normalization"
-state = "active"
+state = "closed"
 contract = "docs/stages/WF1.md"
 issue_label = "stage:WF1"
 relevant_docs = ["docs/CODEX.md", "docs/WORKFLOW.md", "docs/TOOLING.md"]

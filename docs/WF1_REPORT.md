@@ -1,4 +1,6 @@
-# WF1 report — implementation validation
+# WF1 report
+
+Historical evidence for the recorded baseline; registry owns current stage state.
 
 ## Baseline
 
@@ -71,12 +73,16 @@ Existing just/toolchain prerequisites still apply; no broad cross-platform recip
 
 ## Implementation SHA
 
-Pending coherent implementation commit; discover through Git history.
+`83b2137b4edd7b3df27029e0fa6d2a45be9e4dfd` — workspace discovery helper, tests and workflow convention.
 
 ## CI
 
-Pending publication; Ubuntu and Windows required before acceptance.
+[Implementation CI 37408417592](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37408417592):
+Ubuntu success, Windows success, including workspace helper tests and all retained Rust gates.
+Closeout CI is discoverable by the closeout commit below; both platforms are required.
 
 ## Closeout SHA
 
-Pending acceptance. WF1 active, focus WF1, BG1 planned and not started.
+The commit titled `Record WF1 acceptance` introducing this finalized report is the closeout identity;
+resolve with `git log -1 --format=%H --grep='^Record WF1 acceptance$'`.
+WF1 closed, focus BG1, BG1 planned. No BG1 implementation or broad DX2 work was started.
