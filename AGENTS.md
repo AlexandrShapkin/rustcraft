@@ -2,6 +2,12 @@
 
 ## Start small
 
+First discover `git rev-parse --show-toplevel` from the launch directory and verify HEAD and
+`git status --short`; use `just status` to report checkout, command directory and registry state.
+Work in the checkout from which the agent was launched. Stop on a requested baseline/checkout
+mismatch or unknown dirty work; never silently switch to a remembered path or invent another
+clone/worktree without explicit owner authorization.
+
 Read this file, run `just codex-context [STAGE]` (add `--offline` when needed), then read the
 selected stage contract and only task-relevant pointers. [Documentation index](docs/INDEX.md)
 defines ownership/precedence. Do not load all reports or architecture docs by default.

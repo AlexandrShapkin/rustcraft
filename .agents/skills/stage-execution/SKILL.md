@@ -5,7 +5,9 @@ description: Execute an explicitly authorized repository stage with progressive 
 
 # Stage execution
 
-1. Verify cwd, HEAD/log, remote baseline and `git status --short`. Inspect unknown dirty changes;
+1. Discover `git rev-parse --show-toplevel` from the launch directory; run `just status`, then verify
+   HEAD/log and remote baseline. Work in the launched checkout; do not silently select a remembered
+   path or create another clone/worktree without explicit owner authorization. Inspect unknown dirty changes;
    never reset/discard them to reach a remembered baseline.
 2. Run `just codex-context ID`; use `--offline` for local recovery. Read that contract and only
    necessary pointers/decision sections. Verify actual source, relevant evidence and owned issues.

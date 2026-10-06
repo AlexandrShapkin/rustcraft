@@ -8,6 +8,17 @@ should not fail merely because an optional utility is absent.
 
 ## Repository command surface
 
+Start with `just status`: repository root, actual command directory, branch, full HEAD, upstream,
+clean/dirty worktree, remote and focused registry stage/state. It uses a Python stdlib helper, discovers
+the caller's Git root, and does not fetch, select a checkout, modify registry state or create worktrees.
+The owner workspace convention is `~/Projects/rustcraft`; actual roots are discovered, never hardcoded.
+See [WORKFLOW](WORKFLOW.md) for workspace/asset policy.
+
+Canonical everyday commands: `just client`, `just client-release`, `just smoke`, `just sample-game`,
+`just test`, `just ci`. Historical acceptance recipes remain specialist tools until deliberate DX2 work.
+These invocations are the same from fish/Bash/PowerShell. On systems with `python` rather than `python3`,
+use the existing interpreter override, for example `just --set python python status`.
+
 Common recipes:
 
 - `just version` — print the authoritative product version;
@@ -17,7 +28,7 @@ Documentation and release helpers use Python standard library only. Python 3.11+
 required for normal documentation/CI validation; direct Cargo builds remain independent of Python.
 - `just doctor` — inspect the local toolchain;
 - `just bootstrap-check` — baseline repo validation;
-- `just ci` — offline docs tests/check, then formatting/check/tests/clippy;
+- `just ci` — offline docs/workspace-helper tests/check, then formatting/check/tests/clippy;
 - `just smoke` — headless vertical-slice smoke scenario;
 - `just refs-status` — inspect local reference sources/revisions;
 - `just refs-fetch` — fetch declared public references;
@@ -235,7 +246,7 @@ Search both states before creation. On work/closeout follow [WORKFLOW](WORKFLOW.
 multiline bodies/comments. After required acceptance and CI, post the evidence comment before closure:
 
 ```sh
-gh issue comment 18 --repo AlexandrShapkin/rustcraft --body-file /tmp/issue-resolution.md
+gh issue comment 18 --repo AlexandrShapkin/rustcraft --body-file issue-resolution.md
 gh issue close 18 --repo AlexandrShapkin/rustcraft --reason completed
 ```
 

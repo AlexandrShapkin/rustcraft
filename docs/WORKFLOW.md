@@ -10,13 +10,50 @@ criteria. Preserve recognizable behavior; exact reproduction is one option rathe
 default requirement. Do not ship an arbitrary placeholder when a researched presentation or an
 intentional documented alternative is practical.
 
+## Owner workspace and command directory
+
+The normal owner workspace convention is `~/Projects/rustcraft`. It describes where the owner keeps
+source, not an absolute path scripts/tests enforce. Discover the actual Git root at launch; agents
+work in that checkout and verify HEAD/worktree before editing. A mismatch must be reported, never
+resolved by silently choosing a remembered checkout or creating a second clone/worktree. Additional
+checkouts require explicit owner authorization. No workspace migration is performed by these commands.
+
+`/tmp` checkouts are recovery/temporary only. Milestone acceptance clones collect isolated evidence;
+they are not normal development workspaces. Neither historical reports nor a legacy checkout name
+selects today's source root. `just status` reports the actual checkout and command working directory.
+By default, `just` discovers the nearest justfile and runs recipes from its directory, so normal
+project commands operate at that checkout's root even when invoked in a subdirectory.
+
+Proprietary assets are owner-supplied local data, separate from tracked source. The preferred ignored
+location is `reference/assets/vanilla-b1.7.3/` beneath the actual chosen checkout (the ignored zip is
+also supported). Keep assets untracked; source/CI does not depend on another historical checkout to
+provide them. See [reference sources](../reference/SOURCES.md) for policy. No proprietary asset is
+committed or automatically copied by this workflow.
+
 ## Canonical commands
 
 Use `just` recipes instead of repeatedly inventing command sequences.
 
+Normal development commands are shell-neutral invocations of the repository recipes:
+
+| Command | Purpose |
+| --- | --- |
+| `just status` | Discover checkout, command directory, HEAD/worktree and focused stage. |
+| `just client` | Normal human/developer client in the development profile. |
+| `just client-release` | Same client runtime in release for ordinary play. |
+| `just smoke` | Headless shared-runtime smoke. |
+| `just sample-game` | Independent-game composition proof. |
+| `just test` | Workspace tests. |
+| `just ci` | Documentation/tooling, formatting, check, tests and strict Clippy. |
+
+Historical milestone/acceptance recipes remain specialist evidence tools. WF1 retires none of them;
+DX2 still owns broader equivalence/retirement. Fish, Bash and PowerShell users invoke the same recipes;
+recipe implementation handles project operations rather than owner-specific shell snippets.
+
 Typical loop:
 
 ```text
+just status
 just doctor
 just refs-status        # when reference material may matter
 just bootstrap-check
@@ -88,7 +125,7 @@ At accepted closeout, reconcile labelled issues, add a baseline-specific report 
 [report template](templates/REPORT.md), update [EVIDENCE_INDEX](EVIDENCE_INDEX.md), and deliberately
 update registry state/focus. Closed stages remain in the sequence; advance focus only after acceptance
 and owner authorization. Run `just docs-sync` and `just docs-check`; stop before the next stage.
-No repository-wide status replacement is needed. New planning uses `just stage-new` plus one contract;
+`just status` reports live checkout/registry facts; it is not a second mutable planning database. New planning uses `just stage-new` plus one contract;
 architectural changes additionally update their canonical domain docs and decisions.
 
 Docs-only work uses docs tests/checks and diff review, not expensive Rust bootstrap. Tooling changes

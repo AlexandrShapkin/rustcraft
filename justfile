@@ -7,6 +7,14 @@ python := "python3"
 default:
     @just --list --unsorted
 
+# Read-only status of the discovered checkout and registry focus.
+status:
+    {{python}} scripts/workspace.py
+
+# Focused cross-platform checkout/status regression tests.
+workspace-test:
+    {{python}} -m unittest discover -s scripts/tests -p 'test_workspace.py'
+
 # Report installed baseline/optional developer tools.
 doctor:
     ./scripts/doctor.sh
@@ -64,7 +72,7 @@ lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Normal local/CI quality gate.
-ci: docs-test docs-check fmt-check check test lint
+ci: docs-test workspace-test docs-check fmt-check check test lint
 
 # Minimal repository bootstrap validation.
 bootstrap-check: doctor fmt-check check test refs-status

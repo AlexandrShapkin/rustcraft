@@ -84,6 +84,10 @@ Preferred local paths:
 - `reference/assets/vanilla-b1.7.3/`
 - `reference/assets/vanilla-b1.7.3.zip`
 
+These paths are ignored local owner data beneath the discovered source root; assets are not tracked
+source and do not require a particular historical checkout. Supply them separately from the source
+checkout; never commit proprietary files.
+
 Use as the visual baseline for texture coordinates, atlas layout, animation conventions, alpha
 behavior and near-field appearance. Keep it local and untracked.
 

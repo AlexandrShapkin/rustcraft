@@ -1,7 +1,7 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "BG1"
-sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
+focus = "WF1"
+sequence = ["F1", "A1", "C2", "WF1", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
 id = "F1"
@@ -32,6 +32,16 @@ issue_label = "stage:C2"
 relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/GAMEPLAY_CONTRACT.md", "docs/MODDING.md"]
 decisions = ["D-024", "D-028", "D-054"]
 source_areas = ["crates/game-api", "crates/mod-api", "crates/content", "crates/minecraft-b173", "crates/sandbox-test"]
+
+[[stage]]
+id = "WF1"
+title = "workspace & workflow normalization"
+state = "active"
+contract = "docs/stages/WF1.md"
+issue_label = "stage:WF1"
+relevant_docs = ["docs/CODEX.md", "docs/WORKFLOW.md", "docs/TOOLING.md"]
+decisions = []
+source_areas = ["scripts/workspace.py", "scripts/tests/test_workspace.py", "justfile"]
 
 [[stage]]
 id = "BG1"

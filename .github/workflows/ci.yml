@@ -20,6 +20,8 @@ jobs:
           python-version: '3.11'
       - name: Documentation tool tests
         run: python -m unittest discover -s scripts/tests -p "test_docs.py"
+      - name: Workspace status tests
+        run: python -m unittest discover -s scripts/tests -p "test_workspace.py"
       - name: F1 field wrapper tests
         run: python -m unittest discover -s scripts/tests -p "test_f1_client.py"
       - name: Documentation integrity (offline)
