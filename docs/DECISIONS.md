@@ -940,3 +940,49 @@ masks preserve exposed geometry without arbitrary polygon clipping. Coarse light
 authored attenuation independently of physical blocking. Persistent identity remains semantic block
 key + canonical u16 state; handles and GPU resources never enter the existing codec. Details,
 bounds and deliberate limitations are owned by [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
+
+## D-064 — Component UI with a policy-governed content browser
+
+Status: accepted future direction; UI1 is reserved for later planning, not activated or registered.
+
+Replace hard-wired HUD/inventory screens with a public component UI mechanism, offering DOM/CSS-like
+convenience through native UI Tree/Style Sheets/layout/components/bindings/events, without a browser,
+Chromium or JavaScript. Games/mods use that mechanism; Minecraft UI is one implementation. A universal
+creative/content browser derives its catalog from C2/ContentDefinition, while game policy owns
+permission to obtain content and validates semantic actions affecting inventory/hotbar.
+
+Rationale: a real searchable, filterable catalog with interactive reusable components proves the
+general UI boundary more strongly than isolated HUD widgets. UI1 acceptance must include independent
+game content, not a Minecraft-specific catalog. [ARCHITECTURE](ARCHITECTURE.md#future-component-ui-and-creativecontent-browser)
+owns the component vocabulary and target behavior; implementation technology is not selected here.
+
+This extends D-017's presentation/authority separation and D-054's common content model. It does not
+supersede their implemented contracts or earlier HUD acceptance. It supersedes no current stage
+scope: DX2/RF1/VS1 exclude this new UI capability. The future sequence is conceptual only, as recorded
+in [ROADMAP](ROADMAP.md#future-branding-and-ui-direction); registry states/focus are unchanged.
+
+## D-065 — Independent client/server products within one monorepo
+
+Status: accepted future direction; BRAND1 is reserved for later planning, not activated or registered.
+
+Around rebranding, finalize client/server logical product boundaries and the new project identity:
+distinct apps/crates and dependencies with independent builds/releases, retaining one repository and
+workspace. Separate release artifacts do not require separate source repositories. Consider physical
+repository separation only for a concrete need.
+
+Rationale: shared-contract changes remain atomic, CI stays coherent and contributor/Codex maintenance
+avoids coordinating unnecessary repositories. BRAND1 owns final product organization; this pass
+changes no Cargo layout, binaries or release workflow. [ARCHITECTURE](ARCHITECTURE.md#future-clientserver-product-boundaries)
+owns the boundary and [ROADMAP](ROADMAP.md#future-branding-and-ui-direction) the indicative placement.
+
+Public repository metadata is product identity, so future authorized BRAND1 execution includes
+GitHub identity management through `gh` where possible, coordinated with public docs/package/artifact
+names. Inventory and a bounded canonical-identity migration plan precede changes; distinguish
+compatibility names from presentation names and preserve stable semantic IDs unless an independent
+compatibility decision requires their migration. Verify remote state through CLI/API and reconcile
+docs afterward. [ARCHITECTURE](ARCHITECTURE.md#future-public-identity-migration-brand1) owns the surfaces
+and migration checks; this is future scope, not authorization to rename anything now.
+
+This extends D-037's product/game identity separation and preserves D-053's distinction between
+process responsibility, authority and game state. It supersedes neither decision and does not
+authorize DX2/RF1/VS1 expansion or stage activation.

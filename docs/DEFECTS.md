@@ -14,6 +14,9 @@ synonymous type:defect/type:feature-gap labels. Other types are `type:architectu
 `type:performance`, `type:investigation`. Use one primary type, severity and `area:*` label;
 add `stage:*` only when current documentation assigns an owner. Historical discovery IDs do not
 assign current stages. No speculative area/stage labels are needed before consumers exist.
+Preserve the `stage:*`, `area:*`, `severity:*` and `type:*` taxonomy and existing bug/enhancement
+conventions; do not introduce duplicate status labels. Issue state belongs to GitHub. Keep titles
+as clean descriptions of the concern; severity/type belong in labels, not title prefixes.
 
 | Severity | Contract |
 | --- | --- |
@@ -41,16 +44,15 @@ change/no-change decision; "make faster" is not acceptance.
    reproduction/source evidence, type/severity/area/stage where known, expected invariant and acceptance.
 3. Use the [issue template](../.github/ISSUE_TEMPLATE/defect.md); do not create a parallel Markdown entry.
 4. Before implementation, inspect the ticket, revalidate it and reference it in notes/commits.
-5. Prefer `Refs #N` or `Issue #N` until acceptance is complete. Avoid automatic issue-closing commit/PR
-   keywords (`Fixes`/`Closes`) when validation/CI follows the push.
-6. Close **completed** only after committed implementation, focused regression tests, required wider
-   validation, acceptance and required Ubuntu/Windows CI have passed. Post a final evidence comment first.
-7. Use **not_planned** for intentionally declined, abandoned, superseded or unreproducible concerns with
+5. Follow [WORKFLOW](WORKFLOW.md#github-issue-reconciliation-and-stage-closure) for PR references,
+   acceptance/CI-gated merge and completed closure. The PR/report provide normal resolution evidence;
+   add a separate comment only when extra explanation/evidence is needed.
+6. Use **not_planned** for intentionally declined, abandoned, superseded or unreproducible concerns with
    rationale. Use **duplicate** only with a canonical ticket link. Deferral alone leaves a ticket open.
    A bounded investigation can complete when its promised evidence/decision is delivered, even if no
    optimization is justified; distinguish that from abandoning the investigation.
 
-Closure comment:
+Optional additional-evidence closure comment:
 
 ```text
 Resolved by <SHA>.

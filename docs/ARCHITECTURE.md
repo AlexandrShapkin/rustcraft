@@ -53,6 +53,40 @@ crafting, recipes, progression, blocks, items, mobs, time, fluids, and other gam
 - `sandbox-test`: tiny non-Minecraft integration game proving that engine, renderer, world,
   Game API and semantic input work without the Minecraft package.
 
+### Future client/server product boundaries
+
+Around the future rebranding, client and server should become more clearly independent products:
+separate apps/crates, composition roots and dependency boundaries, with separately buildable and
+releasable artifacts. Shared engine/Game API mechanisms remain shared; process responsibility does
+not redefine gameplay authority. BRAND1 should finalize that logical organization together with
+the new project identity, without requiring physical repository separation.
+
+Keep one monorepo and Rust workspace unless a concrete need justifies another arrangement.
+Separate builds/releases do not require separate source repositories. One repository preserves
+atomic changes across shared contracts, coherent CI and straightforward contributor/Codex work.
+This is a future target, not a change to today's crate layout or release implementation.
+
+### Future public identity migration (BRAND1)
+
+GitHub repository metadata is part of product identity. When BRAND1 is authorized for execution,
+it may manage that metadata through `gh`/GitHub API where supported, as part of a bounded rebrand.
+Before changing anything, inventory the current public name and metadata, choose the new canonical
+identity and record a bounded migration plan. Classify old names separately as public compatibility
+contracts or safely renameable presentation identifiers; do not automatically change stable semantic
+content/package/state IDs merely to match the brand.
+
+The migration must coordinate repository name, description, GitHub Topics and homepage (if one
+exists then), README and primary public documentation, and Cargo/package metadata. Include
+client/server binary names and release artifacts when the selected rebrand covers them, release/archive
+naming and other public identifiers, and GitHub-facing names/descriptions where the old RustCraft
+identity should no longer remain. Change stage/area labels only if the rename actually requires it;
+preserve the existing taxonomy rather than renaming labels as cosmetic cleanup.
+
+After applying the migration, verify actual public metadata through GitHub CLI/API and synchronize
+documentation with that verified state. Record the renamed surfaces and retained compatibility names
+as evidence. A proposed name or successful local edit alone is not proof of the remote identity.
+This direction authorizes no repository, package, binary or artifact rename in the current pass.
+
 ## Extension model
 
 The API supplies a small set of extension mechanisms rather than a complete catalogue of future
@@ -165,6 +199,33 @@ Simulation owns authoritative state. Presentation extraction produces read-only 
 data. Renderer and UI drawing never mutate gameplay. Beta reference work defines the observable
 semantics and recognizable presentation of `minecraft_b173`; it does not define engine
 architecture or require historically identical algorithms/output.
+
+## Future component UI and creative/content browser
+
+UI1 should replace purpose-built HUD/inventory screens with a universal component UI mechanism.
+The authoring experience should be DOM/CSS-like without a browser, Chromium or JavaScript:
+an engine-owned UI Tree, Style Sheets, flex/grid-like layout, reusable components, data bindings
+and events/actions, focus/hover/disabled states, text and scaling. This is an architectural direction;
+it does not select syntax, libraries, layout algorithms or a rendering backend.
+
+The intended component vocabulary includes InventoryGrid, ItemSlot, Hotbar, HealthBar,
+ContentBrowser, Tooltip, Button, TextInput and ScrollView. Games and mods compose their UI through
+the public engine mechanism. Minecraft HUD/inventory styling and behavior become one implementation
+over that shared UI API; game-owned inventory rules and authorization remain outside the renderer.
+
+A universal creative inventory/content browser is a substantial UI1 acceptance proof. It derives
+available content from the selected C2/ContentDefinition catalog rather than an embedded Minecraft
+list, with categories, search, filters/tags, item grids, tooltips and inventory/hotbar interaction.
+Game policy decides which content a player may obtain. UI displays the permitted catalog and sends
+semantic actions; authoritative game policy validates acquisition and inventory changes. Catalog
+visibility alone grants no permission.
+
+Future acceptance should exercise this browser with independent game content and the shared
+components, bindings, interaction states, text, scaling and scrolling. A static mockup or a
+Minecraft-only menu is insufficient proof of the general mechanism. UI1 owns this new capability;
+DX2's existing UI proofs, RF1's structural refactor and VS1's spatial mechanisms do not include it.
+See [future roadmap direction](ROADMAP.md#future-branding-and-ui-direction) and D-064/D-065 in
+[DECISIONS](DECISIONS.md).
 
 ## Performance
 
