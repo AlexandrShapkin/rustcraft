@@ -196,5 +196,7 @@ Before any stage closeout, query open issues using its registry issue label. Acc
 closure through the PR, owner transfer with rationale or explicit bounded waiver. Verify actual
 issue disposition after merge rather than reporting automation as already completed. No unresolved
 owned P0/P1 may be silently carried past closure. The registry owns sequencing; do not ticket every future capability.
+After merge, verify that actual main contains the accepted result and proposed closeout, and check
+relevant milestone membership/state without treating a stage merge as automatic milestone closure.
 Offline builds/tests remain independent of GitHub; unavailable tracking access means reconciliation
 and issue closure cannot be claimed complete.
