@@ -65,6 +65,7 @@ impl CompiledTextureRegistry {
 
 #[derive(Debug, Clone)]
 pub struct CompiledVoxelRender {
+    pub geometry: Option<rustcraft_game_api::CompiledGeometryBinding>,
     pub visible: bool,
     pub opaque: bool,
     pub translucent: bool,
@@ -79,6 +80,7 @@ pub struct CompiledVoxelRender {
 
 #[derive(Debug, Clone)]
 pub struct CompiledVoxelRenderRegistry {
+    geometry: std::sync::Arc<rustcraft_game_api::GeometryCatalog>,
     blocks: Vec<CompiledVoxelRender>,
 }
 
@@ -102,6 +104,7 @@ impl CompiledVoxelRenderRegistry {
                 }
             }
             blocks.push(CompiledVoxelRender {
+                geometry: definition.geometry.clone(),
                 visible: definition.material != MaterialClass::Invisible,
                 opaque: definition.material == MaterialClass::Opaque,
                 translucent: matches!(
@@ -120,7 +123,10 @@ impl CompiledVoxelRenderRegistry {
                 state_schema: definition.state_schema.clone(),
             });
         }
-        Ok(Self { blocks })
+        Ok(Self {
+            blocks,
+            geometry: profile.geometry().clone(),
+        })
     }
 
     #[must_use]
@@ -131,20 +137,127 @@ impl CompiledVoxelRenderRegistry {
     #[must_use]
     pub fn block_model(&self, state: BlockState) -> Option<BlockModel> {
         let block = self.block(state.block)?;
-        let rotation = block.state_schema.rotation(state.variant).ok()?;
+        block.state_schema.validate(state.variant).ok()?;
+        let rotation = self.model_rotation(state);
         block.visible.then(|| BlockModel {
             state,
+            triangles: self.model_triangles(state).cloned(),
             textures: block.faces,
             tints: block.tints,
-            rotation: block.base_rotation.compose(rotation),
+            rotation,
         })
     }
 }
 
 impl BlockTextureResolver for CompiledVoxelRenderRegistry {
+    fn covers_triangle(&self, state: BlockState, face: Face, positions: [[f32; 3]; 3]) -> bool {
+        if self.covers_face(state, face) {
+            return true;
+        }
+        let Some(block) = self.block(state.block).filter(|b| b.opaque) else {
+            return false;
+        };
+        let Some(binding) = &block.geometry else {
+            return false;
+        };
+        let Ok(g) = binding.resolve(state.variant) else {
+            return false;
+        };
+        let inverse = block.base_rotation.compose(g.transform).inverse();
+        let local = inverse.transform(rustcraft_render::geometry::FACES[face as usize].normal);
+        let f = rustcraft_render::geometry::FACES
+            .iter()
+            .position(|f| f.normal == local)
+            .unwrap();
+        let axis = [2, 2, 0, 0, 1, 1][f];
+        let uv = match axis {
+            0 => [1, 2],
+            1 => [0, 2],
+            _ => [0, 1],
+        };
+        let positions = positions.map(|p| inverse.point(p));
+        let min: [f32; 2] =
+            std::array::from_fn(|i| positions.iter().map(|p| p[uv[i]]).fold(1., f32::min));
+        let max: [f32; 2] =
+            std::array::from_fn(|i| positions.iter().map(|p| p[uv[i]]).fold(0., f32::max));
+        let mut required = 0u16;
+        for v in 0..4 {
+            for u in 0..4 {
+                if min[0] < (u + 1) as f32 / 4.
+                    && max[0] > u as f32 / 4.
+                    && min[1] < (v + 1) as f32 / 4.
+                    && max[1] > v as f32 / 4.
+                {
+                    required |= 1 << (v * 4 + u);
+                }
+            }
+        }
+        let covered = self.geometry.models[g.model.0 as usize].boundary_masks[f];
+        required != 0 && required & !covered == 0
+    }
+
+    fn valid_state(&self, state: BlockState) -> bool {
+        self.block(state.block)
+            .is_some_and(|b| b.state_schema.validate(state.variant).is_ok())
+    }
+
+    fn selection_edges(&self, state: BlockState) -> Option<&std::sync::Arc<[[[f32; 3]; 2]]>> {
+        let g = self
+            .block(state.block)?
+            .geometry
+            .as_ref()?
+            .resolve(state.variant)
+            .ok()?;
+        self.geometry.shapes[g.selection.0 as usize].edges.as_ref()
+    }
+
+    fn model_triangles(
+        &self,
+        state: BlockState,
+    ) -> Option<&std::sync::Arc<[rustcraft_engine_core::shape::Triangle]>> {
+        let g = self
+            .block(state.block)?
+            .geometry
+            .as_ref()?
+            .resolve(state.variant)
+            .ok()?;
+        self.geometry
+            .models
+            .get(g.model.0 as usize)?
+            .triangles
+            .as_ref()
+    }
+    fn covers_face(&self, state: BlockState, face: Face) -> bool {
+        let Some(block) = self.block(state.block).filter(|b| b.opaque) else {
+            return false;
+        };
+        let Some(binding) = &block.geometry else {
+            return true;
+        };
+        let Ok(g) = binding.resolve(state.variant) else {
+            return false;
+        };
+        let rotation = block.base_rotation.compose(g.transform);
+        let local = rotation
+            .inverse()
+            .transform(rustcraft_render::geometry::FACES[face as usize].normal);
+        let f = rustcraft_render::geometry::FACES
+            .iter()
+            .position(|f| f.normal == local)
+            .unwrap();
+        self.geometry.models[g.model.0 as usize].coverage[f] == rustcraft_game_api::Coverage::Full
+    }
+
     fn model_rotation(&self, state: BlockState) -> ModelRotation {
         self.block(state.block)
             .map_or(ModelRotation::IDENTITY, |block| {
+                if let Some(binding) = &block.geometry {
+                    return binding
+                        .resolve(state.variant)
+                        .map_or(ModelRotation::IDENTITY, |g| {
+                            block.base_rotation.compose(g.transform)
+                        });
+                }
                 block.base_rotation.compose(
                     block
                         .state_schema
@@ -266,6 +379,7 @@ mod tests {
         let block_key = BlockKey::parse("test:block/value").unwrap();
         registry
             .register_block(VoxelDefinition {
+                geometry: None,
                 common: rustcraft_game_api::ContentDefinition::new(
                     block_key.clone().as_id().clone(),
                 )
@@ -284,6 +398,7 @@ mod tests {
         let water_key = BlockKey::parse("test:block/water").unwrap();
         registry
             .register_block(VoxelDefinition {
+                geometry: None,
                 common: rustcraft_game_api::ContentDefinition::new(
                     water_key.clone().as_id().clone(),
                 )

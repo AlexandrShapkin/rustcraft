@@ -97,6 +97,30 @@ impl AtlasRegion {
 }
 
 pub trait BlockTextureResolver {
+    /// Triangle positions are in the neighbor cell's local coordinates.
+    fn covers_triangle(&self, state: BlockState, face: Face, _positions: [[f32; 3]; 3]) -> bool {
+        self.covers_face(state, face)
+    }
+
+    fn valid_state(&self, _state: BlockState) -> bool {
+        true
+    }
+
+    fn selection_edges(&self, _state: BlockState) -> Option<&std::sync::Arc<[[[f32; 3]; 2]]>> {
+        None
+    }
+
+    /// Shared compiled triangles; None selects the specialized canonical cube path.
+    fn model_triangles(
+        &self,
+        _state: BlockState,
+    ) -> Option<&std::sync::Arc<[rustcraft_engine_core::shape::Triangle]>> {
+        None
+    }
+    fn covers_face(&self, state: BlockState, _face: Face) -> bool {
+        self.opaque(state.block)
+    }
+
     /// Independent hooks: whole-model orientation and state-dependent material selection.
     fn model_rotation(
         &self,
@@ -466,7 +490,7 @@ pub(crate) fn page_vertices_mut(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ItemSprite {
     pub model: Option<inspection::BlockModel>,
     pub position: Vec3,
@@ -531,6 +555,18 @@ pub fn append_dropped_item_pages(pages: &mut Vec<PageVertices>, sprites: &[ItemS
                     p.z + x * sin + z * cos,
                 ]
             };
+            if let Some(model) = sprite.model.as_ref().filter(|m| m.triangles.is_some()) {
+                let mut model_pages = Vec::new();
+                model.world_page_vertices(&mut model_pages);
+                for page in model_pages {
+                    let out = page_vertices_mut(pages, page.texture);
+                    for mut vertex in page.vertices {
+                        vertex.position = transform(vertex.position.map(|v| (v - 0.5) * scale));
+                        out.push(vertex);
+                    }
+                }
+                continue;
+            }
             for definition in geometry::FACES {
                 let direction = definition.direction;
                 let shade = match direction {
@@ -541,10 +577,10 @@ pub fn append_dropped_item_pages(pages: &mut Vec<PageVertices>, sprites: &[ItemS
                 };
                 let face = definition.positions.map(|p| {
                     let p = p.map(|v| (v - 0.5) * 2. * h);
-                    sprite.model.map_or(p, |m| m.rotation.transform(p))
+                    sprite.model.as_ref().map_or(p, |m| m.rotation.transform(p))
                 });
                 let uvs = definition.uv_corners;
-                let tile = sprite.model.map_or(
+                let tile = sprite.model.as_ref().map_or(
                     match direction {
                         Face::Top => sprite.top,
                         Face::Bottom => sprite.bottom,
@@ -554,6 +590,7 @@ pub fn append_dropped_item_pages(pages: &mut Vec<PageVertices>, sprites: &[ItemS
                 );
                 let tint = sprite
                     .model
+                    .as_ref()
                     .map_or(sprite.tint, |m| m.tints[direction as usize]);
                 let uv = uvs.map(|uv| region_uv(tile, uv));
                 let vertices = page_vertices_mut(pages, tile.texture);
@@ -674,7 +711,7 @@ pub fn build_section_mesh_pages(
                 let rotation = resolver.model_rotation(state);
                 let translucent = resolver.translucent(block);
                 let liquid_height = resolver.liquid_surface_height(state);
-                if !resolver.visible(block) {
+                if !resolver.visible(block) || !resolver.valid_state(state) {
                     continue;
                 }
                 let position = BlockPos {
@@ -682,6 +719,70 @@ pub fn build_section_mesh_pages(
                     y: origin.y + y,
                     z: origin.z + z,
                 };
+                if let Some(triangles) = resolver.model_triangles(state) {
+                    for triangle in triangles.iter() {
+                        let transformed = triangle.positions.map(|p| rotation.point(p));
+                        let normal = rotation.transform(triangle.normal());
+                        let axis = (0..3)
+                            .max_by(|a, b| {
+                                normal[*a]
+                                    .abs()
+                                    .total_cmp(&normal[*b].abs())
+                                    .then_with(|| b.cmp(a))
+                            })
+                            .unwrap();
+                        let mut n = [0; 3];
+                        n[axis] = if normal[axis] > 0. { 1 } else { -1 };
+                        let face = geometry::FACES
+                            .iter()
+                            .find(|f| f.normal == n.map(|v| v as f32))
+                            .unwrap()
+                            .direction;
+                        let neighbor_local = (x + n[0], y + n[1], z + n[2]);
+                        let neighbor = chunk.state(neighbor_local);
+                        let boundary = transformed
+                            .iter()
+                            .all(|p| p[axis] == if n[axis] > 0 { 1. } else { 0. });
+                        let opposite = geometry::FACES
+                            .iter()
+                            .find(|f| f.normal == n.map(|v| -v as f32))
+                            .unwrap()
+                            .direction;
+                        let neighbor_positions =
+                            transformed.map(|p| std::array::from_fn(|a| p[a] - n[a] as f32));
+                        if boundary
+                            && resolver.covers_triangle(neighbor, opposite, neighbor_positions)
+                        {
+                            continue;
+                        }
+                        let model_face = geometry::FACES[triangle.face as usize].direction;
+                        if let Some(tile) = resolver.state_texture(state, model_face) {
+                            let mesh = pages.entry((translucent, tile.texture.0)).or_default();
+                            let light = chunk.light(neighbor_local);
+                            let strength = light
+                                .sky()
+                                .max(light.block())
+                                .max(chunk.light((x, y, z)).block());
+                            let shade = faces(position)[face as usize].2
+                                * (0.05 + 0.95 * f32::from(strength) / 15.);
+                            let base = mesh.vertices.len() as u32;
+                            for (p, uv) in transformed.into_iter().zip(triangle.uv) {
+                                mesh.vertices.push(Vertex {
+                                    position: [
+                                        p[0] + position.x as f32,
+                                        p[1] + position.y as f32,
+                                        p[2] + position.z as f32,
+                                    ],
+                                    uv: region_uv(tile, uv),
+                                    shade,
+                                    color: resolver.tint(block, model_face),
+                                });
+                            }
+                            mesh.indices.extend([base, base + 1, base + 2]);
+                        }
+                    }
+                    continue;
+                }
                 for model_face in geometry::FACES {
                     let normal = rotation.transform(model_face.normal);
                     let face = geometry::FACES
@@ -695,9 +796,13 @@ pub fn build_section_mesh_pages(
                         y + normal[1] as i32,
                         z + normal[2] as i32,
                     );
-                    let neighbor_block = chunk.state(neighbor_local).block;
-                    if resolver.opaque(neighbor_block)
-                        || ((!resolver.opaque(block) || translucent) && neighbor_block == block)
+                    let neighbor_state = chunk.state(neighbor_local);
+                    let neighbor_block = neighbor_state.block;
+                    let opposite = geometry::FACES[(face as usize) ^ 1].direction;
+                    if resolver.covers_face(neighbor_state, opposite)
+                        || ((!resolver.opaque(block) || translucent)
+                            && neighbor_block == block
+                            && resolver.model_triangles(neighbor_state).is_none())
                     {
                         continue;
                     }
@@ -1688,6 +1793,14 @@ impl Renderer {
         self.item_vertices / 6
     }
     pub fn set_crack_overlay(&mut self, target: Option<BlockPos>, region: Option<AtlasRegion>) {
+        self.set_crack_overlay_model(target, region, None);
+    }
+    pub fn set_crack_overlay_model(
+        &mut self,
+        target: Option<BlockPos>,
+        region: Option<AtlasRegion>,
+        model: Option<&inspection::BlockModel>,
+    ) {
         let mut vertices = Vec::new();
         let Some(target) = target else {
             self.crack_vertices = 0;
@@ -1700,29 +1813,41 @@ impl Renderer {
             return;
         };
         let o = [target.x as f32, target.y as f32, target.z as f32];
-        for face in geometry::FACES {
-            let quad = face.positions;
-            let shade = match face.direction {
-                Face::Top => 1.,
-                Face::Bottom => 0.5,
-                Face::East | Face::West => 0.7,
-                _ => 0.8,
-            };
-            // Accepted destroy material orientation retained; it is independent of block-item UVs.
-            for (i, uv) in [
-                (0, [0., 0.]),
-                (1, [1., 0.]),
-                (2, [1., 1.]),
-                (0, [0., 0.]),
-                (2, [1., 1.]),
-                (3, [0., 1.]),
-            ] {
-                vertices.push(Vertex {
-                    position: [o[0] + quad[i][0], o[1] + quad[i][1], o[2] + quad[i][2]],
-                    uv: crate::region_uv(crack_region, uv),
-                    shade,
-                    color: [1.; 3],
-                });
+        if let Some(model) = model.filter(|m| m.triangles.is_some()) {
+            let mut model = model.clone();
+            model.textures = [crack_region; 6];
+            model.tints = [[1.; 3]; 6];
+            model.world_vertices(&mut vertices);
+            for vertex in &mut vertices {
+                for (a, offset) in o.into_iter().enumerate() {
+                    vertex.position[a] += offset;
+                }
+            }
+        } else {
+            for face in geometry::FACES {
+                let quad = face.positions;
+                let shade = match face.direction {
+                    Face::Top => 1.,
+                    Face::Bottom => 0.5,
+                    Face::East | Face::West => 0.7,
+                    _ => 0.8,
+                };
+                // Accepted destroy material orientation retained; it is independent of block-item UVs.
+                for (i, uv) in [
+                    (0, [0., 0.]),
+                    (1, [1., 0.]),
+                    (2, [1., 1.]),
+                    (0, [0., 0.]),
+                    (2, [1., 1.]),
+                    (3, [0., 1.]),
+                ] {
+                    vertices.push(Vertex {
+                        position: [o[0] + quad[i][0], o[1] + quad[i][1], o[2] + quad[i][2]],
+                        uv: crate::region_uv(crack_region, uv),
+                        shade,
+                        color: [1.; 3],
+                    });
+                }
             }
         }
         self.crack_vertices = vertices.len();
@@ -3494,6 +3619,7 @@ mod item_fidelity_tests {
 
     fn multi_page_model() -> inspection::BlockModel {
         inspection::BlockModel {
+            triangles: None,
             state: BlockState::new(BlockId(7)),
             textures: [
                 AtlasRegion::full(TextureHandle(1)),
@@ -3515,7 +3641,7 @@ mod item_fidelity_tests {
         append_dropped_item_pages(
             &mut pages,
             &[ItemSprite {
-                model: Some(model),
+                model: Some(model.clone()),
                 position: Vec3::new(3., 4., 5.),
                 top: model.texture(Face::Top),
                 side: model.texture(Face::North),

@@ -10,7 +10,7 @@ Current focus: **BG1**. List order is authorized execution order; it does not au
 | A1 | external identity, policy boundary & trust preparation | closed | [A1](A1.md) | `stage:A1` |
 | C2 | unified content definition & capability model | closed | [C2](C2.md) | `stage:C2` |
 | WF1 | workspace & workflow normalization | closed | [WF1](WF1.md) | `stage:WF1` |
-| BG1 | generalized block geometry & model system | planned | [BG1](BG1.md) | `stage:BG1` |
+| BG1 | generalized block geometry & model system | active | [BG1](BG1.md) | `stage:BG1` |
 | DX2 | tooling equivalence, workflow convergence & retirement | planned | [DX2](DX2.md) | `stage:DX2` |
 | RF1 | structural codebase refactor & code-graph optimization | planned | [RF1](RF1.md) | `stage:RF1` |
 | VS1 | voxel spaces, kinematics & optional composite physics | planned | [VS1](VS1.md) | `stage:VS1` |

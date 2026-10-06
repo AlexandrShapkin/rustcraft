@@ -46,11 +46,11 @@ source_areas = ["scripts/workspace.py", "scripts/tests/test_workspace.py", "just
 [[stage]]
 id = "BG1"
 title = "generalized block geometry & model system"
-state = "planned"
+state = "active"
 contract = "docs/stages/BG1.md"
 issue_label = "stage:BG1"
 relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/ARCHITECTURE.md", "docs/RENDER_DIAGNOSTICS.md"]
-decisions = ["D-054", "D-055"]
+decisions = ["D-054", "D-055", "D-063"]
 source_areas = ["crates/render", "crates/render-profile", "crates/game-api", "crates/engine-core", "crates/world", "crates/sandbox-test"]
 
 [[stage]]

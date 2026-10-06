@@ -13,6 +13,8 @@ use rustcraft_engine_core::{
 use std::collections::{HashMap, HashSet};
 
 pub mod definition;
+pub mod geometry;
+pub use geometry::*;
 pub mod state_schema;
 use definition::DefinitionCatalog;
 pub use definition::*;
@@ -51,6 +53,8 @@ macro_rules! semantic_key {
 
 semantic_key!(BlockKey);
 semantic_key!(TextureKey);
+semantic_key!(ModelKey);
+semantic_key!(ShapeKey);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollisionDescriptor {
@@ -115,6 +119,7 @@ impl Default for LightDescriptor {
 /// Package-authored definition. It deliberately contains no runtime `BlockId`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoxelDefinition {
+    pub geometry: Option<GeometryBinding>,
     pub common: ContentDefinition,
     /// None retains the historical orientation encoding unchanged.
     pub state_schema: Option<StateSchema>,
@@ -132,6 +137,7 @@ pub struct VoxelDefinition {
 /// Runtime definition indexed directly by its dense profile-local handle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledVoxelDefinition {
+    pub geometry: Option<CompiledGeometryBinding>,
     pub common: CompiledContentDefinition,
     pub state_schema: CompiledStateSchema,
     pub id: BlockId,
@@ -168,6 +174,8 @@ struct AuthoredPackage {
 
 #[derive(Debug, Default, Clone)]
 pub struct GameRegistry {
+    models: Vec<(PackageId, ModelDefinition)>,
+    shapes: Vec<(PackageId, ShapeDefinition)>,
     packages: Vec<AuthoredPackage>,
     active_package: Option<usize>,
     block_keys: HashSet<BlockKey>,
@@ -176,6 +184,32 @@ pub struct GameRegistry {
 }
 
 impl GameRegistry {
+    pub fn register_model(&mut self, definition: ModelDefinition) -> Result<(), RegistrationError> {
+        if !definition.geometry.valid() || self.models.iter().any(|(_, d)| d.key == definition.key)
+        {
+            return Err(RegistrationError::InvalidDefinition);
+        }
+        let package = self
+            .active_package
+            .ok_or(RegistrationError::NoActivePackage)?;
+        self.models
+            .push((self.packages[package].id.clone(), definition));
+        Ok(())
+    }
+    pub fn register_shape(&mut self, definition: ShapeDefinition) -> Result<(), RegistrationError> {
+        if !definition.shape.valid(false)
+            || self.shapes.iter().any(|(_, d)| d.key == definition.key)
+        {
+            return Err(RegistrationError::InvalidDefinition);
+        }
+        let package = self
+            .active_package
+            .ok_or(RegistrationError::NoActivePackage)?;
+        self.shapes
+            .push((self.packages[package].id.clone(), definition));
+        Ok(())
+    }
+
     pub fn register_package(&mut self, package: PackageId) -> Result<(), RegistrationError> {
         if self.packages.iter().any(|entry| entry.id == package) {
             return Err(RegistrationError::DuplicatePackage(package));
@@ -326,20 +360,41 @@ impl GameRegistry {
                 icon: item.icon.clone(),
             });
         }
+        let geometry = std::sync::Arc::new(GeometryCatalog::compile(
+            &self
+                .models
+                .iter()
+                .filter(|(p, _)| profile.packages.contains(p))
+                .map(|(_, d)| d.clone())
+                .collect::<Vec<_>>(),
+            &self
+                .shapes
+                .iter()
+                .filter(|(p, _)| profile.packages.contains(p))
+                .map(|(_, d)| d.clone())
+                .collect::<Vec<_>>(),
+        )?);
         let mut blocks = Vec::with_capacity(ordered.len());
         let mut by_key = HashMap::with_capacity(ordered.len());
         for (index, authored) in ordered.into_iter().enumerate() {
             let numeric = u32::try_from(index).map_err(|_| RegistrationError::TooManyBlocks)?;
             let id = BlockId(numeric);
             by_key.insert(BlockKey::from(authored.common.key.clone()), id);
+            let state_schema = authored
+                .state_schema
+                .as_ref()
+                .map(StateSchema::compile)
+                .transpose()?
+                .unwrap_or_else(|| CompiledStateSchema::legacy(authored.orientation));
+            let binding = authored
+                .geometry
+                .as_ref()
+                .map(|b| geometry.binding(b, &state_schema))
+                .transpose()?;
             blocks.push(CompiledVoxelDefinition {
+                geometry: binding,
                 common: catalog.compile(&authored.common, &handlers)?,
-                state_schema: authored
-                    .state_schema
-                    .as_ref()
-                    .map(StateSchema::compile)
-                    .transpose()?
-                    .unwrap_or_else(|| CompiledStateSchema::legacy(authored.orientation)),
+                state_schema,
                 id,
                 key: BlockKey::from(authored.common.key.clone()),
                 collision: authored.collision,
@@ -358,6 +413,7 @@ impl GameRegistry {
             resources: profile.resources.clone(),
             systems: profile.systems.clone(),
             manifest_digest: profile.manifest.canonical_digest(),
+            geometry,
             default_state: BlockState::new(BlockId(0)),
             blocks,
             by_key,
@@ -371,6 +427,7 @@ impl GameRegistry {
 
 #[derive(Debug, Clone)]
 pub struct CompiledGameProfile {
+    geometry: std::sync::Arc<GeometryCatalog>,
     pub id: ContentId,
     pub packages: Vec<PackageId>,
     pub resources: Vec<ResourceId>,
@@ -386,6 +443,93 @@ pub struct CompiledGameProfile {
 }
 
 impl CompiledGameProfile {
+    pub fn geometry(&self) -> &std::sync::Arc<GeometryCatalog> {
+        &self.geometry
+    }
+    pub fn geometry_for_state(
+        &self,
+        state: BlockState,
+    ) -> Result<Option<ResolvedGeometry>, StateError> {
+        let block = self.block(state.block).ok_or(StateError::InvalidVariant)?;
+        block.state_schema.validate(state.variant)?;
+        block
+            .geometry
+            .as_ref()
+            .map(|b| {
+                b.resolve(state.variant).map(|mut g| {
+                    g.transform = block.base_rotation.compose(g.transform);
+                    g
+                })
+            })
+            .transpose()
+    }
+    pub fn light_for_state(&self, state: BlockState) -> Result<LightDescriptor, StateError> {
+        let mut light = self
+            .block(state.block)
+            .ok_or(StateError::InvalidVariant)?
+            .light;
+        if let Some(g) = self.geometry_for_state(state)? {
+            let cap = match g.light {
+                LightCoverage::Full => 15,
+                LightCoverage::Partial => 8,
+                LightCoverage::None => 0,
+                LightCoverage::Transmitting => 1,
+            };
+            light.sky_opacity = light.sky_opacity.min(cap);
+            light.block_opacity = light.block_opacity.min(cap);
+        }
+        Ok(light)
+    }
+    pub fn overlaps_state(
+        &self,
+        state: BlockState,
+        bounds: rustcraft_engine_core::shape::LocalBox,
+    ) -> Result<bool, StateError> {
+        if let Some(g) = self.geometry_for_state(state)? {
+            Ok(self.geometry.shapes[g.collision.0 as usize]
+                .shape
+                .overlaps(bounds, g.transform))
+        } else {
+            Ok(self
+                .block(state.block)
+                .ok_or(StateError::InvalidVariant)?
+                .collision
+                == CollisionDescriptor::FullCube
+                && rustcraft_engine_core::shape::box_overlap(
+                    bounds,
+                    rustcraft_engine_core::shape::LocalBox::UNIT,
+                ))
+        }
+    }
+    pub fn selection_hit(
+        &self,
+        state: BlockState,
+        origin: [f32; 3],
+        direction: [f32; 3],
+        reach: f32,
+    ) -> Result<Option<rustcraft_engine_core::shape::ShapeHit>, StateError> {
+        let block = self.block(state.block).ok_or(StateError::InvalidVariant)?;
+        let geometry = self.geometry_for_state(state)?;
+        if !block.targetable || block.material == MaterialClass::Invisible {
+            return Ok(None);
+        }
+        Ok(if let Some(g) = geometry {
+            self.geometry.shapes[g.selection.0 as usize].shape.ray(
+                origin,
+                direction,
+                g.transform,
+                reach,
+            )
+        } else {
+            rustcraft_engine_core::shape::Shape::FullCube.ray(
+                origin,
+                direction,
+                ModelRotation::IDENTITY,
+                reach,
+            )
+        })
+    }
+
     pub fn serialize_state(
         &self,
         state: BlockState,
@@ -525,6 +669,9 @@ impl CompiledGameProfile {
             ]);
             if !block.state_schema.is_legacy() {
                 block.state_schema.hash_contract(&mut hasher);
+            }
+            if let Some(binding) = &block.geometry {
+                self.geometry.hash_binding(binding, &mut hasher);
             }
             hasher.update(&[
                 block.light.emission,
@@ -710,6 +857,7 @@ mod tests {
 
     pub(super) fn definition(value: &str) -> VoxelDefinition {
         VoxelDefinition {
+            geometry: None,
             common: ContentDefinition::new(block(value).as_id().clone())
                 .with_capabilities(Vec::new()),
             state_schema: None,
@@ -745,6 +893,7 @@ mod tests {
             .unwrap();
         registry
             .register_block(VoxelDefinition {
+                geometry: None,
                 common: ContentDefinition::new(key.as_id().clone()),
                 ..definition("dynamic_mod:block/placeholder")
             })
@@ -1039,7 +1188,7 @@ pub fn recipe_matches<T: Clone + Ord>(
 }
 
 impl CompiledVoxelDefinition {
-    /// Current collision contract stays Empty/FullCube; validate canonical state before lookup.
+    /// Legacy fallback descriptor. General bindings are resolved by `CompiledGameProfile::overlaps_state`.
     pub fn collision_for_state(&self, variant: u16) -> Result<CollisionDescriptor, StateError> {
         self.state_schema.validate(variant)?;
         Ok(self.collision)

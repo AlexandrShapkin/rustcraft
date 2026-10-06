@@ -36,7 +36,7 @@ fn selection_segments(position: BlockPos) -> Vec<([f32; 3], [f32; 3])> {
     }
     result
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Slot {
     pub model: Option<crate::inspection::BlockModel>,
     pub top: AtlasRegion,
@@ -50,6 +50,10 @@ pub struct HudSnapshot<'a> {
     pub slots: [Option<Slot>; 9],
     pub selected: usize,
     pub target: Option<BlockPos>,
+    pub target_geometry: Option<(
+        &'a [[[f32; 3]; 2]],
+        rustcraft_engine_core::orientation::ModelRotation,
+    )>,
     pub text: &'a str,
     pub caret: Option<crate::text::Caret>,
     pub items: &'a [[f32; 3]],
@@ -64,16 +68,17 @@ pub struct HudSnapshot<'a> {
 impl Default for HudSnapshot<'_> {
     fn default() -> Self {
         Self {
-            slots: [None; 9],
+            slots: [const { None }; 9],
             selected: 0,
             target: None,
+            target_geometry: None,
             text: "",
             caret: None,
             items: &[],
             mining_progress: None,
             inventory_open: false,
-            inventory_slots: [None; 36],
-            crafting_slots: [None; 4],
+            inventory_slots: [const { None }; 36],
+            crafting_slots: [const { None }; 4],
             crafting_output: None,
             cursor_slot: None,
             cursor_position: [0.; 2],
@@ -141,6 +146,7 @@ pub fn gui_block_vertices(
     viewport: [f32; 2],
 ) {
     let model = slot.model.unwrap_or(crate::inspection::BlockModel {
+        triangles: None,
         state: rustcraft_engine_core::BlockState::new(rustcraft_engine_core::BlockId(0)),
         textures: [
             slot.side,
@@ -165,6 +171,7 @@ pub fn gui_block_page_vertices(
     viewport: [f32; 2],
 ) {
     let model = slot.model.unwrap_or(crate::inspection::BlockModel {
+        triangles: None,
         state: rustcraft_engine_core::BlockState::new(rustcraft_engine_core::BlockId(0)),
         textures: [
             slot.side,
@@ -321,6 +328,7 @@ impl HudGeometry {
         }
     }
     fn slot_item(&mut self, slot: Slot, x: f32, y: f32, size: f32, scale: f32) {
+        let count = slot.count;
         if slot.block_3d {
             gui_block_page_vertices(
                 &mut self.item_pages,
@@ -339,9 +347,9 @@ impl HudGeometry {
                 slot.side,
             );
         }
-        if slot.count > 1 {
+        if count > 1 {
             self.text(
-                &slot.count.to_string(),
+                &count.to_string(),
                 x + size - 9. * scale,
                 y + size - 8. * scale,
                 scale,
@@ -380,7 +388,7 @@ impl HudGeometry {
                 break;
             }
             let x = left + i as f32 * 20. * scale;
-            if let Some(slot) = s.slots[i] {
+            if let Some(slot) = s.slots[i].clone() {
                 // GuiIngame item origin: center-90 + slot*20 + 2, height-19.
                 self.slot_item(
                     slot,
@@ -436,7 +444,7 @@ impl HudGeometry {
                 8. * scale,
                 20. * scale,
             );
-            for (index, item) in s.inventory_slots.into_iter().enumerate() {
+            for (index, item) in s.inventory_slots.iter().cloned().enumerate() {
                 if let (Some(item), Some((x, y))) = (item, inventory_slot_position(index)) {
                     self.slot_item(item, panel_x + x * scale, panel_y + y * scale, slot, scale);
                 }
@@ -444,7 +452,7 @@ impl HudGeometry {
             for i in 0..4 {
                 let x = craft_x + (i % 2) as f32 * 18. * scale;
                 let y = craft_y + (i / 2) as f32 * 18. * scale;
-                if let Some(item) = s.crafting_slots[i] {
+                if let Some(item) = s.crafting_slots[i].clone() {
                     self.slot_item(item, x, y, slot, scale);
                 }
             }
@@ -456,7 +464,7 @@ impl HudGeometry {
                 [0.08; 3],
                 None,
             );
-            if let Some(item) = s.crafting_output {
+            if let Some(item) = s.crafting_output.clone() {
                 self.slot_item(
                     item,
                     panel_x + 144. * scale,
@@ -465,7 +473,7 @@ impl HudGeometry {
                     scale,
                 );
             }
-            if let Some(item) = s.cursor_slot {
+            if let Some(item) = s.cursor_slot.clone() {
                 let cursor_starts = self
                     .item_pages
                     .iter()
@@ -518,7 +526,21 @@ impl HudGeometry {
         if !s.inventory_open
             && let Some(p) = s.target
         {
-            for (a, b) in selection_segments(p) {
+            let segments = if let Some((edges, rotation)) = s.target_geometry {
+                edges
+                    .iter()
+                    .map(|edge| {
+                        let edge =
+                            edge.map(|v| rotation.point(v).map(|v| v + (v - 0.5).signum() * 0.002));
+                        let edge =
+                            edge.map(|v| [v[0] + p.x as f32, v[1] + p.y as f32, v[2] + p.z as f32]);
+                        (edge[0], edge[1])
+                    })
+                    .collect()
+            } else {
+                selection_segments(p)
+            };
+            for (a, b) in segments {
                 for position in [a, b] {
                     self.selection_vertices.push(Vertex {
                         position,
@@ -798,7 +820,7 @@ mod tests {
             block_3d: true,
         };
         let mut s = HudSnapshot::default();
-        s.slots[0] = Some(slot);
+        s.slots[0] = Some(slot.clone());
         let mut h = HudGeometry::default();
         let mut camera = crate::diagnostic::Stage::Triangle.camera(1.);
         h.build(&s, 800, 600, camera);
@@ -812,7 +834,7 @@ mod tests {
             assert_eq!(a.position, b.position);
         }
         s.inventory_open = true;
-        s.inventory_slots[0] = Some(slot);
+        s.inventory_slots[0] = Some(slot.clone());
         h.build(&s, 800, 600, camera);
         let inventory = h.item_vertices.clone();
         s.inventory_slots[0] = None;
@@ -847,13 +869,14 @@ mod tests {
             crate::AtlasRegion::full(crate::TextureHandle(2)),
         ];
         let model = crate::inspection::BlockModel {
+            triangles: None,
             state: rustcraft_engine_core::BlockState::new(rustcraft_engine_core::BlockId(9)),
             textures: regions,
             tints: [[1.; 3]; 6],
             rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
         };
         let slot = Slot {
-            model: Some(model),
+            model: Some(model.clone()),
             top: regions[crate::Face::Top as usize],
             side: regions[crate::Face::North as usize],
             bottom: regions[crate::Face::Bottom as usize],
@@ -924,15 +947,16 @@ mod tests {
         let mut h = HudGeometry::default();
         let mut s = HudSnapshot {
             caret: None,
-            slots: [None; 9],
+            slots: [const { None }; 9],
             selected: 0,
             target: None,
+            target_geometry: None,
             text: "FPS 60",
             items: &[],
             mining_progress: None,
             inventory_open: false,
-            inventory_slots: [None; 36],
-            crafting_slots: [None; 4],
+            inventory_slots: [const { None }; 36],
+            crafting_slots: [const { None }; 4],
             crafting_output: None,
             cursor_slot: None,
             cursor_position: [0.; 2],

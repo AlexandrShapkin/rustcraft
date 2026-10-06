@@ -192,7 +192,7 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Diagno
             })
         };
         let slot = Slot {
-            model: Some(model),
+            model: Some(model.clone()),
             top: r.texture(block.id, Face::Top).ok_or("top texture")?,
             side: r.texture(block.id, Face::North).ok_or("side texture")?,
             bottom: r.texture(block.id, Face::Bottom).ok_or("bottom texture")?,
@@ -222,7 +222,7 @@ fn scene(name: &str, mode: &str, wire: bool, options: &Options) -> Result<Diagno
                 rustcraft_render::append_dropped_item_pages(
                     &mut pages,
                     &[ItemSprite {
-                        model: Some(model),
+                        model: Some(model.clone()),
                         position: Vec3::ZERO,
                         top: slot.top,
                         side: slot.side,
@@ -642,7 +642,7 @@ mod tests {
             let mut before = Vec::new();
             let mut after = Vec::new();
             let item = ItemSprite {
-                model: Some(model),
+                model: Some(model.clone()),
                 position: Vec3::new(3., 4., 5.),
                 top: model.texture(Face::Top),
                 side: model.texture(Face::North),
@@ -652,10 +652,16 @@ mod tests {
                 count: 1,
                 hover_start: 0.,
             };
-            rustcraft_render::append_dropped_items(&mut before, &[item]);
+            rustcraft_render::append_dropped_items(&mut before, std::slice::from_ref(&item));
             for age in [0., 5., 10., 20., 40.] {
                 after.clear();
-                rustcraft_render::append_dropped_items(&mut after, &[ItemSprite { age, ..item }]);
+                rustcraft_render::append_dropped_items(
+                    &mut after,
+                    &[ItemSprite {
+                        age,
+                        ..item.clone()
+                    }],
+                );
                 for (a, b) in before.iter().zip(&after) {
                     assert_eq!(a.uv, b.uv);
                     assert!(b.position.iter().all(|v| v.is_finite()));
@@ -667,7 +673,13 @@ mod tests {
             assert_eq!(item.position, Vec3::new(3., 4., 5.));
             for (count, copies) in [(1, 1), (2, 2), (6, 3), (21, 4)] {
                 after.clear();
-                rustcraft_render::append_dropped_items(&mut after, &[ItemSprite { count, ..item }]);
+                rustcraft_render::append_dropped_items(
+                    &mut after,
+                    &[ItemSprite {
+                        count,
+                        ..item.clone()
+                    }],
+                );
                 assert_eq!(after.len(), copies * 36);
             }
         }

@@ -796,7 +796,7 @@ impl Lighting {
                 continue;
             }
             let light = world.light(p);
-            let block = r.get(world.get(p));
+            let block = r.get_state(world.state(p));
             let emission = block.map_or(0, |block| block.emission);
             let can_receive_sky =
                 block.is_none_or(|block| block.sky_opacity < 15 && block.light_opacity < 15);
@@ -1088,7 +1088,7 @@ impl Lighting {
         for y in (low * 16..=(high + 1) * 16 - 1).rev() {
             let p = BlockPos { x, y, z };
             self.work_counters.direct_voxels_scanned += 1;
-            let definition = r.get(world.get(p));
+            let definition = r.get_state(world.state(p));
             if definition.is_some_and(|block| block.emission > 0) {
                 self.work_counters.emitters_found += 1;
             }
@@ -1137,7 +1137,7 @@ impl Lighting {
         for y in (low * 16..=(high + 1) * 16 - 1).rev() {
             let p = BlockPos { x, y, z };
             self.work_counters.direct_voxels_scanned += 1;
-            let definition = r.get(world.get(p));
+            let definition = r.get_state(world.state(p));
             if definition.is_some_and(|block| block.emission > 0) {
                 self.work_counters.emitters_found += 1;
             }
@@ -1185,7 +1185,7 @@ impl Lighting {
         let Some(source) = self.source(p) else {
             return false;
         };
-        let definition = r.get(world.get(p));
+        let definition = r.get_state(world.state(p));
         let sky_cost = definition.map_or(1, |block| block.sky_opacity.max(1));
         let block_cost = definition.map_or(1, |block| block.light_opacity.max(1));
         let mut sky = source;
@@ -1235,7 +1235,7 @@ impl Lighting {
                 continue;
             };
             self.last_visited += 1;
-            let b = r.get(world.get(p));
+            let b = r.get_state(world.state(p));
             let sky_cost = b.map_or(1, |b| b.sky_opacity.max(1));
             let block_cost = b.map_or(1, |b| b.light_opacity.max(1));
             let mut sky = source;

@@ -83,6 +83,11 @@ impl ModelRotation {
         self.0
             .map(|row| row.into_iter().zip(v).map(|(a, b)| f32::from(a) * b).sum())
     }
+    pub fn inverse(self) -> Self {
+        Self(std::array::from_fn(|r| {
+            std::array::from_fn(|c| self.0[c][r])
+        }))
+    }
     pub fn point(self, p: [f32; 3]) -> [f32; 3] {
         self.transform(p.map(|v| v - 0.5)).map(|v| v + 0.5)
     }

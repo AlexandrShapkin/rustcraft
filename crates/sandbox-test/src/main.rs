@@ -21,6 +21,8 @@ use rustcraft_render::{
 use rustcraft_render_profile::{CompiledTextureRegistry, CompiledVoxelRenderRegistry};
 use std::path::{Path, PathBuf};
 
+mod bg1;
+
 const TARGET: BlockPos = BlockPos { x: 0, y: 1, z: 0 };
 
 fn id(value: &str) -> ContentId {
@@ -83,6 +85,7 @@ impl GamePackage for SandboxPackage {
             ),
         ] {
             registry.register_block(VoxelDefinition {
+                geometry: None,
                 common: rustcraft_game_api::ContentDefinition::new(block_key(name).as_id().clone())
                     .with_capabilities(capabilities),
                 state_schema: None,
@@ -96,6 +99,7 @@ impl GamePackage for SandboxPackage {
                 face_tints: [[u16::MAX; 3]; 6],
             })?;
         }
+        bg1::register(registry)?;
         Ok(())
     }
 }
@@ -130,6 +134,7 @@ impl GamePackage for SandboxModPackage {
             key: id("sandbox_mod:handler/reactor_use"),
         }];
         registry.register_block(VoxelDefinition {
+            geometry: Some(bg1::reactor_binding()),
             common,
             state_schema: Some(StateSchema {
                 fields: vec![
@@ -505,6 +510,7 @@ fn main() {
     let ids = RuntimeIds::resolve(&profile);
     let (resources, materials) = compile_render_resources(&profile);
     let mut world = build_world(ids);
+    bg1::add_scene(&mut world, &profile);
     let mut controller = DemoController::default();
     let mut context = SandboxContext {
         intent: controller.next_intent(),
@@ -542,6 +548,7 @@ fn main() {
         output,
     ))
     .expect("render sandbox_test offscreen scene");
+    bg1::render_proof_scene(&profile, &materials, &resources);
     println!(
         "sample-game: profile={} packages={} blocks={} systems={} textures={} pages={} override={} cache={} observer=({:.2},{:.2},{:.2}) command=set_block output={} atlas_debug={}",
         profile.id,
@@ -600,7 +607,7 @@ mod tests {
         let profile = compile_profile(schedule.descriptors());
         let ids = RuntimeIds::resolve(&profile);
         let (resources, render) = compile_render_resources(&profile);
-        assert_eq!(profile.blocks().len(), 5);
+        assert_eq!(profile.blocks().len(), 10);
         assert_eq!(profile.default_state().block, ids.empty);
         assert!(
             profile

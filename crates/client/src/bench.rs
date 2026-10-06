@@ -230,20 +230,19 @@ fn measure_async_remesh_stress() {
 
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut max_ready = 0;
-    while scheduler.stats().mesh_jobs_completed < 1 + affected.len() as u64 {
-        scheduler.poll();
-        max_ready = max_ready.max(scheduler.stats().ready);
-        assert!(Instant::now() < deadline, "async remesh stress timed out");
-        std::thread::yield_now();
-    }
     let mut uploads = 0;
     let mut upload_bytes = 0;
     let mut worker_mesh_ms = 0.0;
     let mut upload_waves = 0;
-    while scheduler.stats().ready > 0 {
+    // A bounded pipeline cannot finish every job while its ready window is never drained.
+    // Exercise the real consumer loop while retaining the existing two-section upload budget.
+    loop {
+        scheduler.poll();
+        max_ready = max_ready.max(scheduler.stats().ready);
         let ready = scheduler.take_ready(Vec3::ZERO, Vec3::ZERO, 2, 2 * 1024 * 1024);
-        assert!(!ready.is_empty());
-        upload_waves += 1;
+        if !ready.is_empty() {
+            upload_waves += 1;
+        }
         for result in ready {
             uploads += 1;
             upload_bytes += result.logical_bytes();
@@ -252,6 +251,12 @@ fn measure_async_remesh_stress() {
                 assert!(result.pages.iter().any(|page| page.texture.0 == 2));
             }
         }
+        let stats = scheduler.stats();
+        if stats.mesh_jobs_completed > affected.len() as u64 && stats.ready == 0 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "async remesh stress timed out");
+        std::thread::yield_now();
     }
     let stats = scheduler.stats();
     println!(
@@ -317,15 +322,16 @@ pub fn run() {
     let text = "FPS 55 FRAME 18.18 MS 1% LOW 29\nTPS 20 / 20 TICK 0.05 MS\nCPU 40% RAM 180 MIB THREADS 10\nGPU AMD RADEON VEGA 8 GRAPHICS\nBACKEND VULKAN TYPE INTEGRATED\n1280X662 FIFO BGRA8UNORMSRGB\nGPU FRAME 0.45 MS UTIL 0%\nVRAM 845 / 1024 MIB\nXYZ 0.5 1.0 0.5 CHUNK 0 0\nYAW 0 PITCH 0\nCHUNKS 9 SECTIONS 18 RENDERED 18\nMESHES 18 DIRTY 0 PENDING 0\nVERTICES 10824 INDICES 16236 DRAWS 19\nREBUILDS 18 RATE 0 /S\nBUILD LAST 2.3 MEAN 1.8 MS\nLIGHT INIT 3400 LAST 0 MS\nHELD CORE:STONE SLOT 1\nPROFILE CORE:SANDBOX-M2 MODULES 2";
     let snapshot = rustcraft_render::hud::HudSnapshot {
         caret: None,
-        slots: [None; 9],
+        slots: [const { None }; 9],
         selected: 0,
         target: None,
+        target_geometry: None,
         text,
         items: &[],
         mining_progress: None,
         inventory_open: false,
-        inventory_slots: [None; 36],
-        crafting_slots: [None; 4],
+        inventory_slots: [const { None }; 36],
+        crafting_slots: [const { None }; 4],
         crafting_output: None,
         cursor_slot: None,
         cursor_position: [0.; 2],

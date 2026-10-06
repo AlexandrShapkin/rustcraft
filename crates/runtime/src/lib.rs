@@ -543,7 +543,7 @@ impl Simulation {
         self.dirty_sections.len()
     }
     pub fn target(&self) -> Option<rustcraft_engine_core::raycast::RayHit> {
-        rustcraft_engine_core::raycast::cast(
+        rustcraft_engine_core::raycast::cast_shapes(
             &self.world,
             Vec3::new(
                 self.player.position.x,
@@ -556,11 +556,8 @@ impl Simulation {
                 self.player.yaw.cos() * self.player.pitch.cos(),
             ),
             5.,
-            |id| {
-                self.registry.get(id).is_some_and(|definition| {
-                    definition.targetable
-                        && definition.material != rustcraft_mod_api::Material::Invisible
-                })
+            |state, origin, direction, reach| {
+                self.registry.selection_hit(state, origin, direction, reach)
             },
         )
     }
@@ -646,10 +643,10 @@ impl Simulation {
             self.player.on_ground = false;
         }
         velocity.y -= 9.81 * dt;
-        let (bounds, moved) = self.world.move_and_collide(
+        let (bounds, moved) = self.world.move_and_collide_shapes(
             self.player.bounds(),
             Vec3::new(velocity.x * dt, velocity.y * dt, velocity.z * dt),
-            |id| self.registry.is_solid(id),
+            |state, bounds| self.registry.overlaps_state(state, bounds),
         );
         self.player.position = Vec3::new(
             (bounds.min.x + bounds.max.x) * 0.5,
@@ -674,9 +671,9 @@ impl Simulation {
             },
         );
         self.player.on_ground = velocity.y < 0.0
-            && self.world.collides(
+            && self.world.collides_shapes(
                 self.player.bounds().translated(Vec3::new(0.0, -0.001, 0.0)),
-                |id| self.registry.is_solid(id),
+                |state, bounds| self.registry.overlaps_state(state, bounds),
             );
         if self.player.on_ground {
             self.player.velocity.y = 0.0;
@@ -817,9 +814,9 @@ impl Simulation {
         if !self.world.column_available(split_block(position).0) {
             return false;
         }
-        let Some(definition) = self.registry.get(block) else {
+        if self.registry.get(block).is_none() {
             return false;
-        };
+        }
         let held_block = self
             .inventory
             .held()
@@ -831,15 +828,23 @@ impl Simulation {
         {
             return false;
         }
-        let block_bounds = Aabb::new(
-            Vec3::new(position.x as f32, position.y as f32, position.z as f32),
-            Vec3::new(
-                position.x as f32 + 1.0,
-                position.y as f32 + 1.0,
-                position.z as f32 + 1.0,
-            ),
-        );
-        if definition.solid && block_bounds.intersects(self.player.bounds()) {
+        let actor = self.player.bounds();
+        let local = rustcraft_engine_core::shape::LocalBox {
+            min: [
+                actor.min.x - position.x as f32,
+                actor.min.y - position.y as f32,
+                actor.min.z - position.z as f32,
+            ],
+            max: [
+                actor.max.x - position.x as f32,
+                actor.max.y - position.y as f32,
+                actor.max.z - position.z as f32,
+            ],
+        };
+        if self
+            .registry
+            .overlaps_state(rustcraft_engine_core::BlockState::new(block), local)
+        {
             return false;
         }
         self.world.set(position, block);
@@ -1919,6 +1924,7 @@ mod interaction_tests {
                 }
                 authored
                     .register_block(VoxelDefinition {
+                        geometry: None,
                         common: rustcraft_game_api::ContentDefinition::new(
                             BlockKey::parse(name).unwrap().as_id().clone(),
                         )

@@ -395,7 +395,7 @@ mod tests {
         append_dropped_item_pages(
             &mut dropped,
             &[ItemSprite {
-                model: Some(block_model),
+                model: Some(block_model.clone()),
                 position: Vec3::ZERO,
                 top: block_model.texture(Face::Top),
                 side: block_model.texture(Face::North),

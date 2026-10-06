@@ -139,6 +139,7 @@ pub mod legacy {
         work: Vec<rustcraft_game_api::WorkDefinition>,
         recipes: Vec<rustcraft_game_api::RecipeDefinition>,
         profile: Option<rustcraft_game_api::CompiledGameProfile>,
+        profile_ids: std::collections::HashMap<BlockId, BlockId>,
     }
 
     impl BlockRegistry {
@@ -153,6 +154,14 @@ pub mod legacy {
                     return Err(RegistrationError::InvalidDefinition);
                 }
             }
+            self.profile_ids = self
+                .definitions
+                .iter()
+                .map(|block| {
+                    let key = rustcraft_game_api::BlockKey::parse(block.name).unwrap();
+                    (block.id, profile.block_id(&key).unwrap())
+                })
+                .collect();
             self.profile = Some(profile);
             Ok(())
         }
@@ -244,6 +253,87 @@ pub mod legacy {
         #[must_use]
         pub fn get(&self, id: BlockId) -> Option<BlockDefinition> {
             self.definitions.iter().copied().find(|d| d.id == id)
+        }
+        #[must_use]
+        pub fn overlaps_state(
+            &self,
+            state: rustcraft_engine_core::BlockState,
+            bounds: rustcraft_engine_core::shape::LocalBox,
+        ) -> bool {
+            if let Some(profile) = &self.profile
+                && let Some(id) = self.profile_ids.get(&state.block)
+            {
+                return profile
+                    .overlaps_state(
+                        rustcraft_engine_core::BlockState {
+                            block: *id,
+                            ..state
+                        },
+                        bounds,
+                    )
+                    .unwrap_or(true);
+            }
+            self.is_solid(state.block)
+                && rustcraft_engine_core::shape::box_overlap(
+                    bounds,
+                    rustcraft_engine_core::shape::LocalBox::UNIT,
+                )
+        }
+        pub fn selection_hit(
+            &self,
+            state: rustcraft_engine_core::BlockState,
+            origin: [f32; 3],
+            direction: [f32; 3],
+            reach: f32,
+        ) -> Option<rustcraft_engine_core::shape::ShapeHit> {
+            if let Some(profile) = &self.profile
+                && let Some(id) = self.profile_ids.get(&state.block)
+            {
+                return profile
+                    .selection_hit(
+                        rustcraft_engine_core::BlockState {
+                            block: *id,
+                            ..state
+                        },
+                        origin,
+                        direction,
+                        reach,
+                    )
+                    .ok()
+                    .flatten();
+            }
+            if self
+                .get(state.block)
+                .is_some_and(|d| d.targetable && d.material != Material::Invisible)
+            {
+                rustcraft_engine_core::shape::Shape::FullCube.ray(
+                    origin,
+                    direction,
+                    rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+                    reach,
+                )
+            } else {
+                None
+            }
+        }
+        pub fn get_state(
+            &self,
+            state: rustcraft_engine_core::BlockState,
+        ) -> Option<BlockDefinition> {
+            let mut definition = self.get(state.block)?;
+            if let Some(profile) = &self.profile
+                && let Some(id) = self.profile_ids.get(&state.block)
+            {
+                let state = rustcraft_engine_core::BlockState {
+                    block: *id,
+                    ..state
+                };
+                if let Ok(light) = profile.light_for_state(state) {
+                    definition.sky_opacity = light.sky_opacity;
+                    definition.light_opacity = light.block_opacity;
+                }
+            }
+            Some(definition)
         }
         #[must_use]
         pub fn is_solid(&self, id: BlockId) -> bool {

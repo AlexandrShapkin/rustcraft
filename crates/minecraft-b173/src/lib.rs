@@ -223,6 +223,7 @@ impl GamePackage for MinecraftB173Package {
                 FaceTextures::Faces(resources) => FaceResources::Faces(resources.map(texture_key)),
             };
             registry.register_block(VoxelDefinition {
+                geometry: None,
                 common: rustcraft_game_api::ContentDefinition::new(
                     block_key(block.name).as_id().clone(),
                 )

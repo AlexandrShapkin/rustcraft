@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 pub mod orientation;
 pub mod raycast;
+pub mod shape;
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
@@ -456,6 +457,13 @@ impl World {
     }
     #[must_use]
     pub fn collides(&self, bounds: Aabb, is_solid: impl Fn(BlockId) -> bool) -> bool {
+        self.collides_shapes(bounds, |state, _| is_solid(state.block))
+    }
+    pub fn collides_shapes(
+        &self,
+        bounds: Aabb,
+        overlaps: impl Fn(BlockState, shape::LocalBox) -> bool,
+    ) -> bool {
         let min = BlockPos {
             x: bounds.min.x.floor() as i32,
             y: bounds.min.y.floor() as i32,
@@ -478,7 +486,19 @@ impl World {
         for y in min.y..=max.y {
             for z in min.z..=max.z {
                 for x in min.x..=max.x {
-                    if is_solid(self.get(BlockPos { x, y, z })) {
+                    let local = shape::LocalBox {
+                        min: [
+                            bounds.min.x - x as f32,
+                            bounds.min.y - y as f32,
+                            bounds.min.z - z as f32,
+                        ],
+                        max: [
+                            bounds.max.x - x as f32,
+                            bounds.max.y - y as f32,
+                            bounds.max.z - z as f32,
+                        ],
+                    };
+                    if overlaps(self.state(BlockPos { x, y, z }), local) {
                         return true;
                     }
                 }
@@ -492,6 +512,14 @@ impl World {
         delta: Vec3,
         is_solid: impl Fn(BlockId) -> bool + Copy,
     ) -> (Aabb, Vec3) {
+        self.move_and_collide_shapes(bounds, delta, |state, _| is_solid(state.block))
+    }
+    pub fn move_and_collide_shapes(
+        &self,
+        bounds: Aabb,
+        delta: Vec3,
+        overlaps: impl Fn(BlockState, shape::LocalBox) -> bool + Copy,
+    ) -> (Aabb, Vec3) {
         let mut current = bounds;
         let mut moved = Vec3::ZERO;
         for (axis, amount) in [(0, delta.x), (1, delta.y), (2, delta.z)] {
@@ -499,7 +527,7 @@ impl World {
                 continue;
             }
             let attempt = axis_delta(axis, amount);
-            if !self.collides(current.translated(attempt), is_solid) {
+            if !self.collides_shapes(current.translated(attempt), overlaps) {
                 current = current.translated(attempt);
                 moved = add(moved, attempt);
                 continue;
@@ -508,7 +536,7 @@ impl World {
             let mut high = amount;
             for _ in 0..12 {
                 let middle = (low + high) * 0.5;
-                if self.collides(current.translated(axis_delta(axis, middle)), is_solid) {
+                if self.collides_shapes(current.translated(axis_delta(axis, middle)), overlaps) {
                     high = middle;
                 } else {
                     low = middle;

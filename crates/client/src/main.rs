@@ -4715,7 +4715,13 @@ impl ClientApp {
                 .collect::<Vec<_>>();
             renderer.set_item_sprites(&item_sprites);
             let mining_target = sim.mining.map(|m| m.target);
-            renderer.set_crack_overlay(
+            let mining_model = mining_target.and_then(|p| {
+                rustcraft_render::inspection::BlockModel::resolve(
+                    sim.world.state(p),
+                    &FirstPartyTextures,
+                )
+            });
+            renderer.set_crack_overlay_model(
                 if self.inventory_open {
                     None
                 } else {
@@ -4732,25 +4738,33 @@ impl ClientApp {
                             .ok()
                             .map(|compiled| compiled.destroy_stages[stage as usize])
                     }),
+                mining_model.as_ref(),
             );
             renderer.set_debug_boxes_colored(&self.dx_boxes, &self.dx_colors);
             renderer.set_text_scale(self.font_scale);
+            let selection_target = rustcraft_engine_core::raycast::cast_shapes(
+                &sim.world,
+                camera.position,
+                camera.forward(),
+                5.,
+                |s, o, d, r| sim.registry.selection_hit(s, o, d, r),
+            );
+            let selected_state = selection_target.map(|h| sim.world.state(h.block));
+            let selection_outline = selected_state
+                .and_then(|s| FirstPartyTextures.selection_edges(s))
+                .cloned();
+            let selection_rotation = selected_state.map_or(
+                rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
+                |s| FirstPartyTextures.model_rotation(s),
+            );
             renderer.set_hud(
                 &rustcraft_render::hud::HudSnapshot {
                     slots,
                     selected: sim.inventory.selected(),
-                    target: rustcraft_engine_core::raycast::cast(
-                        &sim.world,
-                        camera.position,
-                        camera.forward(),
-                        5.,
-                        |id| {
-                            sim.registry.get(id).is_some_and(|d| {
-                                d.targetable && d.material != rustcraft_mod_api::Material::Invisible
-                            })
-                        },
-                    )
-                    .map(|h| h.block),
+                    target: selection_target.map(|h| h.block),
+                    target_geometry: selection_outline
+                        .as_ref()
+                        .map(|edges| (edges.as_ref(), selection_rotation)),
                     text: if !self.dx_text.is_empty() {
                         &self.dx_text
                     } else if self.debug {
@@ -5577,6 +5591,94 @@ impl ApplicationHandler for ClientApp {
 #[derive(Clone, Copy)]
 struct FirstPartyTextures;
 impl BlockTextureResolver for FirstPartyTextures {
+    fn covers_triangle(
+        &self,
+        state: rustcraft_engine_core::BlockState,
+        face: Face,
+        positions: [[f32; 3]; 3],
+    ) -> bool {
+        let Ok(compiled) = first_party_compiled() else {
+            return false;
+        };
+        let Some(block) = compiled
+            .legacy_to_compiled
+            .get(state.block.0 as usize)
+            .copied()
+            .flatten()
+        else {
+            return false;
+        };
+        compiled.materials.covers_triangle(
+            rustcraft_engine_core::BlockState { block, ..state },
+            face,
+            positions,
+        )
+    }
+
+    fn valid_state(&self, state: rustcraft_engine_core::BlockState) -> bool {
+        let Ok(compiled) = first_party_compiled() else {
+            return false;
+        };
+        let Some(block) = compiled
+            .legacy_to_compiled
+            .get(state.block.0 as usize)
+            .copied()
+            .flatten()
+        else {
+            return false;
+        };
+        compiled
+            .materials
+            .valid_state(rustcraft_engine_core::BlockState { block, ..state })
+    }
+
+    fn model_triangles(
+        &self,
+        state: rustcraft_engine_core::BlockState,
+    ) -> Option<&Arc<[rustcraft_engine_core::shape::Triangle]>> {
+        first_party_compiled().ok()?;
+        let compiled = FIRST_PARTY_COMPILED.get()?;
+        let block = compiled
+            .legacy_to_compiled
+            .get(state.block.0 as usize)
+            .copied()
+            .flatten()?;
+        compiled
+            .materials
+            .model_triangles(rustcraft_engine_core::BlockState { block, ..state })
+    }
+    fn selection_edges(
+        &self,
+        state: rustcraft_engine_core::BlockState,
+    ) -> Option<&Arc<[[[f32; 3]; 2]]>> {
+        first_party_compiled().ok()?;
+        let compiled = FIRST_PARTY_COMPILED.get()?;
+        let block = compiled
+            .legacy_to_compiled
+            .get(state.block.0 as usize)
+            .copied()
+            .flatten()?;
+        compiled
+            .materials
+            .selection_edges(rustcraft_engine_core::BlockState { block, ..state })
+    }
+    fn covers_face(&self, state: rustcraft_engine_core::BlockState, face: Face) -> bool {
+        let Ok(compiled) = first_party_compiled() else {
+            return false;
+        };
+        let Some(block) = compiled
+            .legacy_to_compiled
+            .get(state.block.0 as usize)
+            .copied()
+            .flatten()
+        else {
+            return false;
+        };
+        compiled
+            .materials
+            .covers_face(rustcraft_engine_core::BlockState { block, ..state }, face)
+    }
+
     fn model_rotation(
         &self,
         state: rustcraft_engine_core::BlockState,

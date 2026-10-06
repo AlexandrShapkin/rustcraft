@@ -212,6 +212,14 @@ impl CompiledStateSchema {
             hasher.update(&variant.to_le_bytes());
         }
     }
+    pub fn cardinality(&self) -> u32 {
+        self.count
+    }
+    pub fn accepts(&self, slot: usize, value: &StateValue) -> bool {
+        self.fields
+            .get(slot)
+            .is_some_and(|f| f.values.contains(value))
+    }
     pub fn is_legacy(&self) -> bool {
         self.legacy.is_some()
     }

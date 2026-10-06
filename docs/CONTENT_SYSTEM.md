@@ -193,9 +193,9 @@ combinations, duplicate/missing fields and out-of-range variants fail explicitly
 are rejected. Encoding depends on the schema, never package/dense-ID order or Beta metadata.
 
 `CompiledStateSchema` offers indexed value access and pre-resolved orientation slots. The renderer
-bridge uses its rotation; `collision_for_state` validates state before the current Empty/FullCube
+bridge uses its rotation; `collision_for_state` validates state before the legacy Empty/FullCube
 lookup. The independent reactor's handler uses facing/powered state. These are bounded C2 consumers;
-BG1's generalized geometry/model/collision/selection system is not implemented.
+BG1 adds independent state-selected model/collision/selection bindings as described below.
 
 `SemanticVoxelState` serializes a semantic block key, schema version and canonical semantic field
 values. Import validates the key/schema/value domains. This is a semantic boundary helper, not an M5
@@ -229,32 +229,58 @@ voxel registration composes common data; representative stick item registration 
 from the existing explicit adapter. A1 recipe/work/drop policy remains in minecraft-b173; retained
 legacy slot/damage/worldgen/render/persistence adapters are not competing universal definitions.
 
-Issue #15's C2 schema/serialization portion is implemented. Its generalized model/collision consumer
-acceptance remains BG1-owned; a sample rotation/handler is not proof of generalized shapes.
+## BG1: semantic models and separate shape contracts
 
-## Target BG1: semantic models and separate shape contracts
+`ModelKey` and `ShapeKey` wrap the existing validated `NamespacedId`. Native packages register
+`ModelDefinition`/`ShapeDefinition` through GameRegistry. Compilation selects only profile packages,
+sorts model/shape keys lexically and assigns local `ModelHandle(u32)`/`ShapeHandle(u32)` indexes.
+These handles have no durable or network meaning. No GPU state appears in authored content or saves.
 
-BlockState → semantic ModelKey/model provider → compiled model → local ModelHandle → renderer.
-Games map many states to variants (e.g. stair facing/half/straight/inner/outer) without engine classes.
-Physical source geometry/layout belongs to packages/importers; generic rendering knows no Minecraft
-model names. Full cube is the optimized common case, not the definition of a block.
+A voxel's optional `GeometryBinding` supplies independent render, collision and selection keys,
+a proper orthogonal local transform, coarse light category and semantic `GeometryRule` predicates.
+Predicates use C2 StateAssignment/CompiledStateSchema. Unknown fields/values, duplicate predicates,
+ambiguous overlapping rules, invalid shape roles and forbidden/noncanonical states are rejected.
+Compilation creates a shared indexed table, bounded to 4096 state entries and 128 rules per binding;
+runtime BlockState remains 8 bytes with no property map. Schema facing/axis rotation composes with
+the authored role transform and base rotation, identically for render, collision, selection and coverage.
+Geometry-free definitions retain their historical cube/orientation defaults.
 
-BG1 supports partial boxes, slabs, stairs, quarter/compound shapes, posts/beams/panels, wedges,
-45-degree and inner/outer slopes, composite geometry and bounded arbitrary static authored meshes.
-A compact proof set suffices; no huge decorative catalog is required.
+Engine-core owns validated [0,1] local boxes, compound primitives (maximum 32), triangular-prism
+wedges with a real linear slope, and bounded indexed static meshes (maximum 128 usable triangles,
+384 vertices). Finite/bounded positions/UVs, indices, material roles and nondegeneracy are checked.
+Compiled models share immutable triangles; box faces are subdivided at authored primitive boundaries
+and shared internal box surfaces removed during compilation. Arbitrary CSG and dynamic meshes are
+excluded. Surface meshes are supported for rendering/selection; physical volumes use closed box/wedge
+primitives and unions. Decorative visuals may choose a simpler independent collider.
 
-Resolve independently: render geometry, collision shape, selection/raycast shape, occlusion/coverage,
-and light/coverage behavior. Detailed render triangles need not define physical or targetable shape.
-AABB composition remains a fast path; raycast must hit the configured selection shape. Coverage must
-express full/partial/no occlusion; light behavior must distinguish blocking, partial and transmitting/
-non-occluding states. Exact polygon clipping or physically exact global illumination is not required
-without measurement, but six full square faces cannot be the permanent API.
+FullCube models have no generic triangle array: the renderer keeps canonical fixed quads, direct
+neighbor culling, face-attached UV/tint/rotation, light sampling and atlas-page batching. General
+models emit only compiled triangles. World, GUI, dropped items and crack overlays consume resolved
+models. Independent selection edges feed the depth-tested outline; cube outline remains specialized.
 
-Acceptance: a new decorative 45-degree wedge normally needs a semantic definition, optional local
-state schema, model/shape resources, properties/tags and optional placement handler. It must not need
-special switches in engine, renderer, serializer, inventory renderer, raycaster or collision loop.
-BG1 is a major C2 consumer. [VS1](VOXEL_SPACES.md) reuses these semantic shapes and physical properties
-for structure aggregation, with specialized compiled forms allowed by profiling.
+Collision clips actor AABB queries against closed local primitive volumes (exact wedge plane plus
+AABB separation). World traversal and existing axis-ordered movement/binary search are preserved;
+no rigid bodies or moving voxel spaces are introduced. DDA remains the ray broad phase; each candidate
+cell intersects its definition/state selection shape. Hits include distance, local/world point,
+surface normal and addressed cell. Placement adjacency uses the dominant normal axis with X/Y/Z
+tie precedence; inside-volume origins retain a zero normal and no placement face.
+
+Coverage is None/Partial/Full per boundary face, independently of alpha/material class. A conservative
+4×4 tile proof establishes full coverage from box unions (and the wedge's rectangular boundary faces).
+Unproven partial/static-mesh coverage never removes neighboring surfaces. General boundary triangles
+are culled only against a full opaque opposing face or a conservative tile mask covering the entire
+triangle's boundary bounding rectangle. Matching half-box neighbors remove their shared surfaces;
+unproven partial neighbor pairs retain surfaces without per-neighbor clipping. This may retain hidden portions of faces; it cannot remove exposed geometry.
+
+LightCoverage Full retains authored scalar opacity, Partial caps it at 8, None at 0, Transmitting at 1;
+emission is unchanged. `light_for_state` provides this coarse policy independently of renderer/collision.
+Existing geometry-free ordinary blocks retain their exact light descriptors. No arbitrary-mesh GI is claimed.
+
+Sandbox's small project-owned catalog proves half, shape, facing, connections and powered selection,
+compound forms, a 45-degree wedge and a static tetrahedral mesh through public APIs. Persistent identity
+remains semantic block key + canonical u16 state, using the existing chunk codec. Geometry affects
+semantic profile diagnostics via semantic keys/data, never local handles; it does not add a save-format
+version. See [BG1 report](BG1_REPORT.md) for measured evidence and acceptance limitations.
 
 ## Planned project-owned diagnostic content
 

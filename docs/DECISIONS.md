@@ -816,7 +816,7 @@ commands, not raw mutable World. Native and future sandbox adapters share contra
 
 ## D-055 — Generalized geometry separates visible and simulation contracts
 
-Status: accepted target; BG1 consumes C2.
+Status: implemented static mechanism in BG1; acceptance evidence in BG1_REPORT.
 
 Full cube is the optimized common case, not a block definition. Semantic model providers compile to
 local handles; independent render/collision/selection/occlusion/light coverage support boxes, compound
@@ -926,3 +926,17 @@ commands, then bounded profile validation precedes authoritative application. Co
 are supported contracts, not security grants. Item events and future WASM execution are not implemented.
 Sandbox's state-aware reactor and item prove independent registration and the existing renderer bridge;
 BG1 still owns generalized geometry/collision/model consumers and the residual acceptance of #15.
+
+## D-063 — Bounded static geometry compiles independent state-selected roles
+
+BG1 implements D-055 using existing semantic NamespacedId wrappers for ModelKey/ShapeKey and
+profile-local u32 handles. Proper orthogonal transforms and definition-local C2 predicates compile
+into shared indexed geometry-role tables. Box/wedge unions supply closed simulation volumes;
+validated indexed static meshes supply render/selection surfaces. Geometry-free cubes retain the
+specialized canonical emitter. No moving-space physics, mesh streaming or network format is added.
+
+Conservative per-face None/Partial/Full coverage culls only proven covered opaque boundary triangles; conservative tile
+masks preserve exposed geometry without arbitrary polygon clipping. Coarse light categories cap
+authored attenuation independently of physical blocking. Persistent identity remains semantic block
+key + canonical u16 state; handles and GPU resources never enter the existing codec. Details,
+bounds and deliberate limitations are owned by [CONTENT_SYSTEM](CONTENT_SYSTEM.md).

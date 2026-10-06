@@ -1,11 +1,18 @@
 //! Amanatides/Woo traversal; normalized distance, deterministic X/Y/Z tie order.
-use crate::{BlockId, BlockPos, Vec3, World};
+use crate::{
+    BlockId, BlockPos, BlockState, Vec3, World,
+    orientation::ModelRotation,
+    shape::{Shape, ShapeHit},
+};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RayHit {
     pub block: BlockPos,
     pub adjacent: BlockPos,
     pub normal: [i32; 3],
     pub distance: f32,
+    pub point: [f32; 3],
+    pub local_point: [f32; 3],
+    pub surface_normal: [f32; 3],
 }
 pub fn cast(
     world: &World,
@@ -13,6 +20,22 @@ pub fn cast(
     direction: Vec3,
     reach: f32,
     hit: impl Fn(BlockId) -> bool,
+) -> Option<RayHit> {
+    cast_shapes(world, eye, direction, reach, |state, o, d, reach| {
+        if hit(state.block) {
+            Shape::FullCube.ray(o, d, ModelRotation::IDENTITY, reach)
+        } else {
+            None
+        }
+    })
+}
+/// DDA remains the broad phase; the callback intersects one cell's selection shape.
+pub fn cast_shapes(
+    world: &World,
+    eye: Vec3,
+    direction: Vec3,
+    reach: f32,
+    intersect: impl Fn(BlockState, [f32; 3], [f32; 3], f32) -> Option<ShapeHit>,
 ) -> Option<RayHit> {
     let o = [eye.x, eye.y, eye.z];
     let mut d = [direction.x, direction.y, direction.z];
@@ -66,16 +89,39 @@ pub fn cast(
     if !available(cell) {
         return None;
     }
-    // Starting inside a target has no unambiguous placement face.
-    if hit(world.get(pos(cell))) {
-        return Some(RayHit {
-            block: pos(cell),
-            adjacent: pos(cell),
-            normal: [0; 3],
-            distance: 0.0,
-        });
-    }
+    let mut entered = 0.;
     loop {
+        let end = next.into_iter().fold(reach, f32::min);
+        let local = std::array::from_fn(|i| o[i] - cell[i] as f32);
+        if let Some(hit) = intersect(world.state(pos(cell)), local, d, reach)
+            && hit.distance + 1e-5 >= entered
+            && hit.distance <= end + 1e-5
+        {
+            let normal = if hit.normal == [0.; 3] {
+                [0; 3]
+            } else {
+                let a = (0..3)
+                    .max_by(|a, b| {
+                        hit.normal[*a]
+                            .abs()
+                            .total_cmp(&hit.normal[*b].abs())
+                            .then_with(|| b.cmp(a))
+                    })
+                    .unwrap();
+                let mut n = [0; 3];
+                n[a] = if hit.normal[a] > 0. { 1 } else { -1 };
+                n
+            };
+            return Some(RayHit {
+                block: pos(cell),
+                adjacent: pos(std::array::from_fn(|i| cell[i] + normal[i])),
+                normal,
+                distance: hit.distance,
+                point: std::array::from_fn(|i| o[i] + d[i] * hit.distance),
+                local_point: std::array::from_fn(|i| local[i] + d[i] * hit.distance),
+                surface_normal: hit.normal,
+            });
+        }
         let a = if next[0] <= next[1] && next[0] <= next[2] {
             0
         } else if next[1] <= next[2] {
@@ -83,25 +129,14 @@ pub fn cast(
         } else {
             2
         };
-        let distance = next[a];
-        if distance > reach {
+        entered = next[a];
+        if entered > reach {
             return None;
         }
-        let adjacent = pos(cell);
         cell[a] += step[a];
         next[a] += delta[a];
         if !available(cell) {
             return None;
-        }
-        if hit(world.get(pos(cell))) {
-            let mut normal = [0; 3];
-            normal[a] = -step[a];
-            return Some(RayHit {
-                block: pos(cell),
-                adjacent,
-                normal,
-                distance,
-            });
         }
     }
 }
@@ -176,5 +211,30 @@ mod axis_tests {
         )
         .unwrap();
         assert_eq!(inside.normal, [0; 3]);
+    }
+}
+
+#[cfg(test)]
+mod oblique_tests {
+    use super::*;
+    #[test]
+    fn oblique_cell_entry_rounding_never_skips_the_nearest_surface() {
+        let mut world = World::new(BlockId(0));
+        world.fill_box(
+            BlockPos {
+                x: -2,
+                y: -1,
+                z: -2,
+            },
+            BlockPos { x: 2, y: 0, z: 8 },
+            BlockId(1),
+        );
+        let eye = Vec3::new(0.5, 2.62, 0.5);
+        let direction = Vec3::new(0., -0.9_f32.sin(), 0.9_f32.cos());
+        for _ in 0..2 {
+            let hit = cast(&world, eye, direction, 8., |id| id.0 != 0).unwrap();
+            assert_eq!(world.get(hit.adjacent), BlockId(0));
+            world.set(hit.block, BlockId(0));
+        }
     }
 }

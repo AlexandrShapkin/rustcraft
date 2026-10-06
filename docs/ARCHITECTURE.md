@@ -146,8 +146,9 @@ every compiled page against the actual adapter limit and fails gracefully if con
 device disagree. Adapter discovery still occurs after first-party compilation in the current
 startup architecture.
 
-Block selection uses world-space AABB line geometry in a dedicated line-list pipeline after world
-geometry has populated depth. It uses a 0.002-unit expansion, black 0.55 alpha blending,
+Block selection uses world-space line geometry in a dedicated line-list pipeline after world
+geometry has populated depth. Cubes retain the AABB outline; BG1 bindings provide independent
+compiled selection edges transformed with their state. It uses a 0.002-unit expansion, black 0.55 alpha blending,
 `LessEqual` depth testing and disabled depth writes. GPU clipping handles near-plane intersections
 and scene depth hides rear edges; selection is not a screen-space HUD overlay. Interactive review
 confirmed occlusion/near-plane behavior; the line opacity was raised slightly after that review for
@@ -519,13 +520,15 @@ Field acceptance is still pending; routing and the bounded hardware workflow are
 Specialist acceptance drivers are test harnesses over the product composition, not client variants.
 DX2 retires them only after equivalent Control/semantic/scenario coverage is proven.
 
-### Target content, geometry and spatial foundation
+### Content, static geometry and future spatial foundation
 
 C2 composes shared identity/metadata/tags/typed properties/capabilities/handlers/resources with
 category-specific contracts and separate compact instance state. It compiles flexible semantic
 authoring into indexed runtime data; no string-map hot path. BG1 consumes definition-local state
 schemas and semantic models/shapes, keeping render, collision, selection, occlusion and light
-coverage distinct. Cube/AABB paths remain optimized common cases. See [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
+coverage distinct. Engine-core owns bounded primitive/mesh data and volume/ray queries; Game API
+compiles semantic geometry roles and state tables; render-profile binds shared models to materials.
+Model/shape u32 handles remain profile-local and are absent from persistence. Cube/AABB paths remain optimized common cases. See [CONTENT_SYSTEM](CONTENT_SYSTEM.md).
 
 RF1 measures ownership/dependencies/change hotspots after C2/BG1/DX2 stabilize, preserves behavior
 and efficient storage, and produces `docs/CODE_MAP.md` as a concise navigation artifact. It is not

@@ -28,7 +28,11 @@ impl ItemEntity {
         if self.age >= 300. {
             return;
         }
-        if self.velocity.y != 0. || !world.collides(self.bounds(), |b| registry.is_solid(b)) {
+        if self.velocity.y != 0.
+            || !world.collides_shapes(self.bounds(), |state, bounds| {
+                registry.overlaps_state(state, bounds)
+            })
+        {
             self.velocity.y -= 9.81 * dt;
             let moved = Vec3::new(
                 self.velocity.x * dt,
@@ -36,7 +40,9 @@ impl ItemEntity {
                 self.velocity.z * dt,
             );
             let (bounds, actual) =
-                world.move_and_collide(self.bounds(), moved, |b| registry.is_solid(b));
+                world.move_and_collide_shapes(self.bounds(), moved, |state, bounds| {
+                    registry.overlaps_state(state, bounds)
+                });
             self.position = Vec3::new(
                 (bounds.min.x + bounds.max.x) / 2.,
                 (bounds.min.y + bounds.max.y) / 2.,

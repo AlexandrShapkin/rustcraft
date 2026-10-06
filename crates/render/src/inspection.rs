@@ -5,8 +5,9 @@ use crate::{
     geometry, hud, page_vertices_mut,
 };
 use rustcraft_engine_core::orientation::ModelRotation;
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BlockModel {
+    pub triangles: Option<std::sync::Arc<[rustcraft_engine_core::shape::Triangle]>>,
     pub state: BlockState,
     pub textures: [AtlasRegion; 6],
     pub tints: [[f32; 3]; 6],
@@ -19,38 +20,55 @@ impl BlockModel {
             textures[f.direction as usize] = resolver.state_texture(state, f.direction)?;
         }
         Some(Self {
+            triangles: resolver.model_triangles(state).cloned(),
             state,
             textures,
             tints: geometry::FACES.map(|f| resolver.tint(state.block, f.direction)),
             rotation: resolver.model_rotation(state),
         })
     }
-    /// Canonical positions and UVs, with a model/state transform applied only to positions.
-    pub fn world_vertices(&self, out: &mut Vec<Vertex>) {
-        for f in geometry::FACES {
-            for i in f.indices {
-                out.push(Vertex {
-                    position: self.rotation.point(f.positions[i]),
-                    uv: crate::region_uv(self.textures[f.direction as usize], f.uv_corners[i]),
-                    shade: 1.,
-                    color: self.tints[f.direction as usize],
-                });
+    fn each_triangle(&self, mut emit: impl FnMut(rustcraft_engine_core::shape::Triangle)) {
+        if let Some(triangles) = &self.triangles {
+            for t in triangles.iter() {
+                emit(*t);
+            }
+        } else {
+            for f in geometry::FACES {
+                for ix in f.indices.as_chunks::<3>().0 {
+                    emit(rustcraft_engine_core::shape::Triangle {
+                        positions: ix.map(|i| f.positions[i]),
+                        uv: ix.map(|i| f.uv_corners[i]),
+                        face: f.direction as u8,
+                    });
+                }
             }
         }
     }
-    pub fn world_page_vertices(&self, pages: &mut Vec<PageVertices>) {
-        for f in geometry::FACES {
-            let region = self.textures[f.direction as usize];
-            let out = page_vertices_mut(pages, region.texture);
-            for i in f.indices {
+    pub fn world_vertices(&self, out: &mut Vec<Vertex>) {
+        self.each_triangle(|t| {
+            for (p, uv) in t.positions.into_iter().zip(t.uv) {
                 out.push(Vertex {
-                    position: self.rotation.point(f.positions[i]),
-                    uv: crate::region_uv(region, f.uv_corners[i]),
+                    position: self.rotation.point(p),
+                    uv: crate::region_uv(self.textures[t.face as usize], uv),
                     shade: 1.,
-                    color: self.tints[f.direction as usize],
+                    color: self.tints[t.face as usize],
                 });
             }
-        }
+        });
+    }
+    pub fn world_page_vertices(&self, pages: &mut Vec<PageVertices>) {
+        self.each_triangle(|t| {
+            let region = self.textures[t.face as usize];
+            let out = page_vertices_mut(pages, region.texture);
+            for (p, uv) in t.positions.into_iter().zip(t.uv) {
+                out.push(Vertex {
+                    position: self.rotation.point(p),
+                    uv: crate::region_uv(region, uv),
+                    shade: 1.,
+                    color: self.tints[t.face as usize],
+                });
+            }
+        });
     }
     pub fn gui_vertices(
         &self,
@@ -59,29 +77,16 @@ impl BlockModel {
         scale: f32,
         viewport: [f32; 2],
     ) {
-        let texture = self.textures[0].texture;
+        let mut pages = Vec::new();
+        self.gui_page_vertices(&mut pages, origin, scale, viewport);
         assert!(
-            self.textures.iter().all(|region| region.texture == texture),
+            pages.len() <= 1,
             "single-page GUI diagnostic helper received a multi-page model"
         );
-        for f in geometry::FACES {
-            let normal = self.rotation.transform(f.normal);
-            for i in f.indices {
-                let p = hud::beta_gui_project_point(self.rotation.point(f.positions[i]));
-                out.push(Vertex {
-                    position: [
-                        (origin[0] + p[0] * scale) / viewport[0] * 2. - 1.,
-                        1. - (origin[1] + p[1] * scale) / viewport[1] * 2.,
-                        0.5 - p[2] * 0.01,
-                    ],
-                    uv: crate::region_uv(self.textures[f.direction as usize], f.uv_corners[i]),
-                    shade: hud::gui_face_light(normal),
-                    color: self.tints[f.direction as usize],
-                });
-            }
+        for page in pages {
+            out.extend(page.vertices);
         }
     }
-    /// GUI geometry grouped by the physical atlas page sampled by each face.
     pub fn gui_page_vertices(
         &self,
         pages: &mut Vec<PageVertices>,
@@ -89,24 +94,24 @@ impl BlockModel {
         scale: f32,
         viewport: [f32; 2],
     ) {
-        for f in geometry::FACES {
-            let normal = self.rotation.transform(f.normal);
-            let region = self.textures[f.direction as usize];
+        self.each_triangle(|t| {
+            let normal = self.rotation.transform(t.normal());
+            let region = self.textures[t.face as usize];
             let out = page_vertices_mut(pages, region.texture);
-            for i in f.indices {
-                let p = hud::beta_gui_project_point(self.rotation.point(f.positions[i]));
+            for (p, uv) in t.positions.into_iter().zip(t.uv) {
+                let p = hud::beta_gui_project_point(self.rotation.point(p));
                 out.push(Vertex {
                     position: [
                         (origin[0] + p[0] * scale) / viewport[0] * 2. - 1.,
                         1. - (origin[1] + p[1] * scale) / viewport[1] * 2.,
                         0.5 - p[2] * 0.01,
                     ],
-                    uv: crate::region_uv(region, f.uv_corners[i]),
+                    uv: crate::region_uv(region, uv),
                     shade: hud::gui_face_light(normal),
-                    color: self.tints[f.direction as usize],
+                    color: self.tints[t.face as usize],
                 });
             }
-        }
+        });
     }
     pub fn texture(&self, face: Face) -> AtlasRegion {
         self.textures[face as usize]

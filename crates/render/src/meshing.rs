@@ -15,10 +15,14 @@ use std::{
 };
 
 pub const MAX_MESH_WORKERS: usize = 32;
-// Current section emitter visits 16^3 blocks, at most six quads per block; four vertices/six
-// indices per quad. Vec growth is bounded by twice the occupied payload for nonempty pages.
-pub const MAX_RESULT_LOGICAL_BYTES: usize =
-    16 * 16 * 16 * 6 * (4 * std::mem::size_of::<crate::Vertex>() + 6 * 4);
+// Static content compilation bounds general models to MAX_MODEL_TRIANGLES. Cubes still use
+// six compact quads. Account for the larger general path without under-reporting worker memory.
+pub const MAX_RESULT_LOGICAL_BYTES: usize = 16
+    * 16
+    * 16
+    * rustcraft_engine_core::shape::MAX_MODEL_TRIANGLES
+    * 3
+    * (std::mem::size_of::<crate::Vertex>() + std::mem::size_of::<u32>());
 pub const MAX_RESULT_CAPACITY_BYTES: usize =
     2 * MAX_RESULT_LOGICAL_BYTES + 2 * 16 * 16 * 16 * 6 * std::mem::size_of::<PageMesh>();
 

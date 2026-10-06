@@ -153,3 +153,22 @@ geometry/terrain composition. Hardware-backed captures for every stage were insp
 RADV RAVEN/Vulkan; each completed cleanly. Normal client composition additionally includes M2's
 authored building area, inventory HUD, lighting and telemetry. See `M2_VALIDATION.md` for M2-only
 measurements, capture evidence and the outstanding manual M2 acceptance distinction.
+
+## BG1 static geometry inspection
+
+`just sample-game` uses the independent project's generated texture packages and public compiled
+model resolver. Its proof content includes boxes, box compounds, a 45-degree wedge, an indexed
+static tetrahedral mesh and real half/shape/facing/powered/connections consumers. Focused sandbox
+and engine tests verify winding/normals, transforms, DDA/slope/AABB queries, partial-neighbor
+visibility and signed section/chunk boundaries. World, GUI/drop and selection roles remain distinct.
+
+`just render-scale` measures the existing cube-heavy release workloads. General model emission is
+separate from canonical cube quads. The bounded asynchronous stress harness consumes ready results
+while waiting for remaining jobs, preserving its two-section upload budget. Otherwise a full ready
+window prevents remaining jobs from being submitted. Baseline and post-change results, including
+any unavailable/conditional GPU evidence, belong in [BG1_REPORT](BG1_REPORT.md).
+
+Conservative boundary coverage avoids missing exposed faces without arbitrary polygon clipping.
+Partially hidden face portions can remain; static surface meshes do not claim full neighbor coverage.
+Model compilation limits general geometry to 128 triangles; worker result accounting includes the
+larger worst-case general-model payload without allocating that maximum for ordinary cube sections.

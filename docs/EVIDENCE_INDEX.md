@@ -46,3 +46,10 @@ preserves completed pre-Issue evidence. These do not override newer stage planni
 | A1 | [Accepted report](A1_REPORT.md) | Semantic placement/profile mapping, durable Bot EntityId, typed game adapters, native policy registration, local provenance and independent sandbox; [identity CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37375463910), [policy/trust CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37377613595), both platforms green. |
 | C2 | [Accepted report](C2_REPORT.md) | Composed voxel/item content, typed properties and indexed tags/contracts, command-based Use, canonical compact state and semantic codec/profile reorder proof; [implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37397475236), both platforms green. #15 remains open with BG1 residual consumer acceptance. |
 | WF1 | [Accepted report](WF1_REPORT.md) | Discovered checkout/status helper, six isolated Git tests, owner workspace/command/asset conventions; [implementation CI](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37408417592), Ubuntu and Windows green. |
+
+## Local evidence awaiting publication
+
+[BG1 worktree report](BG1_REPORT.md) records bounded static geometry, independent sandbox proof,
+local validation and paired cube measurements developed from `8af0f161`. Git metadata was mounted
+read-only, preventing an implementation commit/push. This is not accepted closeout evidence;
+no BG1 public CI or completed #15 disposition is claimed.
