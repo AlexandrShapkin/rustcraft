@@ -242,8 +242,10 @@ gh issue list --repo AlexandrShapkin/rustcraft --state open --label stage:F1
 gh issue view 18 --repo AlexandrShapkin/rustcraft
 ```
 
-Search both states before creation. On work/closeout follow [WORKFLOW](WORKFLOW.md), using a file for
-multiline bodies/comments. After required acceptance and CI, post the evidence comment before closure:
+Search both states before creation, at planning/reconciliation rather than in a continuous polling
+loop. Follow [WORKFLOW](WORKFLOW.md) for publication; use a file for multiline PR/issue bodies.
+The normal completed-issue path is a fully satisfying PR with `Closes #N`, closed by GitHub on merge.
+Only when additional explanation/evidence or manual disposition is required:
 
 ```sh
 gh issue comment 18 --repo AlexandrShapkin/rustcraft --body-file issue-resolution.md
@@ -254,6 +256,48 @@ Examples are not authorization to close F1 during another pass. For deliberate n
 `--reason "not planned"` (API state reason not_planned); for duplicates use `--duplicate-of NUMBER`
 with a canonical ticket. Do not fabricate completion evidence or close on migration alone.
 
+## GitHub milestone commands
+
+Use these explicit planning/reconciliation commands with the [WORKFLOW](WORKFLOW.md#planning-and-closeout-ownership)
+rules and [ROADMAP delivery horizons](ROADMAP.md#product-delivery-horizons). Milestone numbers are
+repository-local; inspect titles/membership before assigning or closing. Examples do not authorize
+new goals or speculative backlog reassignment. No due date is supplied.
+
+```sh
+gh api --method GET repos/AlexandrShapkin/rustcraft/milestones -f state=all --paginate
+gh api --method POST repos/AlexandrShapkin/rustcraft/milestones -f title='Product goal' -f description='Bounded delivery outcome'
+gh issue edit ISSUE_NUMBER --repo AlexandrShapkin/rustcraft --milestone 'Product goal'
+gh issue list --repo AlexandrShapkin/rustcraft --state all --milestone 'Product goal' --limit 200
+# Only after delivered-main evidence and member-issue reconciliation:
+gh api --method PATCH repos/AlexandrShapkin/rustcraft/milestones/MILESTONE_NUMBER -f state=closed
+gh api repos/AlexandrShapkin/rustcraft/milestones/MILESTONE_NUMBER
+```
+
+Verify actual state/membership through CLI/API after mutations. Existing issue labels remain intact;
+these commands change no stage registry or focus. Offline docs-check/docs-test need no GitHub access.
+
+## Focused branch and PR commands
+
+These examples require an authorized batch in the discovered checkout; they do not start DX2 or
+authorize push/merge. Inspect HEAD/worktree first and preserve existing work. A typical stage branch
+is `stage/DX2`; feature/fix branches likewise name one focused change.
+
+```sh
+git switch -c stage/DX2
+# Complete implementation, local validation, report/proposed closeout and diff review; commit.
+git push -u origin stage/DX2
+gh pr create --repo AlexandrShapkin/rustcraft --base main --head stage/DX2 --body-file pr-body.md
+gh pr checks PR_NUMBER --repo AlexandrShapkin/rustcraft
+gh pr view PR_NUMBER --repo AlexandrShapkin/rustcraft
+# After final green required checks, acceptance and explicit merge authorization:
+gh pr merge PR_NUMBER --repo AlexandrShapkin/rustcraft --squash --match-head-commit FINAL_HEAD_SHA
+```
+
+`pr-body.md` contains compact Scope, Changes, Validation, Issues and Deferred sections, with links
+to detailed report evidence. PR_NUMBER/FINAL_HEAD_SHA are placeholders for the reviewed PR revision.
+Query checks during publication, not during ordinary local coding. The final PR diff can include
+implementation and closeout together; [WORKFLOW](WORKFLOW.md#branches-and-pr-publication) owns the rules.
+
 ## Documentation navigation commands
 
 Python 3.11+ is a baseline tooling requirement, checked by `just doctor`. No pip packages are needed.
@@ -263,7 +307,8 @@ Public Ubuntu/Windows CI installs Python and runs the same offline tests/check b
 just docs-check                      # offline, deterministic, mutation-free integrity
 just docs-test                       # Python stdlib unittest
 just docs-sync                       # only generated index and ROADMAP marker block
-just codex-context                   # registry focus; optional GH enrichment with timeout
+just codex-context --offline         # registry focus, local pointers without GitHub queries
+just codex-context                   # optional live issue enrichment at planning/reconciliation
 just codex-context F1 --offline       # compact local pointers, no network
 just stage-new C3 "Some new stage" BG1  # insert after BG1; edit scope/navigation afterward
 just project-tree                    # current tracked paths from Git, no snapshot file

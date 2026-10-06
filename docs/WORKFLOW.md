@@ -117,33 +117,84 @@ interactive review; M3's required review is complete.
 
 ## Planning and closeout ownership
 
+GitHub Milestones group large product goals/delivery horizons; [ROADMAP](ROADMAP.md#product-delivery-horizons)
+defines the initial model. They complement the existing planning layers:
+
+- `stages.toml` alone owns execution order/state/focus; a milestone never activates a stage.
+- `stage:*` identifies an issue's technical stage owner; `area:*`, `type:*`, `severity:*` retain
+  their existing semantics in [DEFECTS](DEFECTS.md).
+- Issues remain bounded actionable work; PRs remain integration/acceptance units. An issue can carry
+  both a milestone and those labels, without either replacing the other.
+
+Do not create a milestone per stage or equate milestones with SemVer/releases. Do not invent due
+dates. Add further milestones only for sufficiently defined product goals. Assign existing issues
+only when their contribution to that goal is unambiguous; leave uncertain/unassigned backlog alone.
+Missing issues for future capabilities do not require placeholder tickets to fill a milestone.
+GitHub owns live milestone state and membership; do not mirror their progress/counts locally.
+
+Close a milestone only after its product result actually exists in main and its member issues are
+reconciled against acceptance, including explicit disposition of any incomplete work. Zero open
+issues alone does not prove the goal is delivered. Historical goals may be recorded and closed after
+reconciling existing completed issues with accepted main evidence. Query/verify milestones at
+planning/reconciliation using [TOOLING](TOOLING.md#github-milestone-commands), not in a polling loop.
+
 [Registry](stages.toml) owns order/state/focus; [stage contracts](stages/INDEX.md) own detailed scope.
 Use `just codex-context [STAGE]` and the selected contract. Neither the historical PRE_M5 audit nor
 registry focus activates a stage. [INDEX](INDEX.md) defines current versus historical ownership.
 
-At accepted closeout, reconcile labelled issues, add a baseline-specific report using the
-[report template](templates/REPORT.md), update [EVIDENCE_INDEX](EVIDENCE_INDEX.md), and deliberately
-update registry state/focus. Closed stages remain in the sequence; advance focus only after acceptance
-and owner authorization. Run `just docs-sync` and `just docs-check`; stop before the next stage.
+Prepare proposed closeout by reconciling labelled issues, adding a baseline-specific report using the
+[report template](templates/REPORT.md), updating [EVIDENCE_INDEX](EVIDENCE_INDEX.md), and deliberately
+proposing registry state/focus changes within owner authorization. The report and proposed closeout
+may be part of the same PR as implementation. A closed state in an unmerged branch is a proposal;
+merge after acceptance and final green PR CI makes closeout effective on main. Do not claim pending
+CI, merge or issue closure as completed evidence. Closed stages remain in the sequence.
+Run `just docs-sync`, `just docs-check` and `just docs-test`; stop before the next stage.
 `just status` reports live checkout/registry facts; it is not a second mutable planning database. New planning uses `just stage-new` plus one contract;
 architectural changes additionally update their canonical domain docs and decisions.
 
 Docs-only work uses docs tests/checks and diff review, not expensive Rust bootstrap. Tooling changes
 also validate affected command/CI paths. Normal `just ci` includes offline docs integrity.
 
-## GitHub issue implementation and stage closure
+## Branches and PR publication
+
+`main` is the sole primary integration branch. Substantial stage/feature/fix work defaults to a
+focused branch and enters main through a PR. Prefer one branch/PR per stage, e.g. `stage/DX2` or
+`stage/RF1`; split only for a genuinely independent bounded slice. Do not introduce GitFlow,
+`develop` or release branches. Small docs-only changes may use direct-main publication only with
+explicit owner permission; substantial code, architecture or stage changes use PRs.
+
+Complete local implementation, required checks and diff review before opening/finalizing the PR.
+Publish only when authorized. Keep the PR body compact, with **Scope**, **Changes**, **Validation**,
+**Issues**, **Deferred**; link detailed evidence in stage/report docs rather than copying logs.
+Review the complete final diff, including report and proposed closeout, and wait for required
+Ubuntu/Windows PR CI on that revision before an authorized merge. Changes after checks require
+appropriate validation and final PR CI. One green final PR CI over the complete result is sufficient:
+separate implementation/closeout publications and two CI passes on main are not required. Existing
+CI triggered by merge may still run; this workflow does not change CI configuration.
+
+These rules replace the historical two-publication/manual-closure procedure in earlier reports or
+execution notes. Reports retain their original baseline evidence. RustCraft's registry/contracts and
+[issue taxonomy](DEFECTS.md) remain unchanged; focused branches and explicit PR evidence follow the
+practice in [codex-smart development](https://github.com/AlexandrShapkin/codex-smart/blob/main/docs/development.md).
+
+## GitHub issue reconciliation and stage closure
 
 GitHub Issues owns live defect/debt state; [DEFECTS](DEFECTS.md) defines labels, severity and migration
-identity. Before work, inspect/revalidate the issue and use `Refs #N` or `Issue #N` in implementation
-notes/commits. Do not use auto-close keywords while required acceptance or CI is still pending.
+identity. Query live issues at planning/reconciliation, including open and closed matches before
+recording a finding. Query PR/check state during publication; do not continuously poll GitHub during
+local implementation. Offline context/build/test remain independent of tracking access.
 
-After committed implementation, focused tests, required wider acceptance and Ubuntu/Windows CI pass,
-post the final SHA/tests/acceptance/CI/invariant comment, then close completed. Not-planned and duplicate
-closures need an explicit rationale/canonical link; use the correct reason, not completed. Migration
-does not resolve the underlying concern. See [TOOLING](TOOLING.md) for portable query/close examples.
+Use `Closes #N` in the PR only when the complete PR satisfies that issue's acceptance; otherwise use
+`Refs #N`. Required acceptance and final green PR CI gate merge, so a closing reference may be prepared
+before that CI completes. After merge, standard GitHub automation may close completed issues. A
+separate closure comment is needed only for additional explanation/evidence not already available
+from the PR and linked report. Not-planned/duplicate closures still require explicit rationale or a
+canonical link and the correct reason. Migration alone does not resolve a concern.
+See [TOOLING](TOOLING.md) for portable publication/query examples.
 
 Before any stage closeout, query open issues using its registry issue label. Account for each
-closure, owner transfer with rationale or explicit bounded waiver. No unresolved owned P0/P1 may be
-silently carried past closure. The registry owns sequencing; do not ticket every future capability.
+closure through the PR, owner transfer with rationale or explicit bounded waiver. Verify actual
+issue disposition after merge rather than reporting automation as already completed. No unresolved
+owned P0/P1 may be silently carried past closure. The registry owns sequencing; do not ticket every future capability.
 Offline builds/tests remain independent of GitHub; unavailable tracking access means reconciliation
 and issue closure cannot be claimed complete.

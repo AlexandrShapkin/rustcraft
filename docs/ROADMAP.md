@@ -36,6 +36,52 @@ Current focus: **DX2**. Execution order and state are generated from [stages.tom
 Closed stages are not reopened without a reproducible regression. Later stages may update shared
 infrastructure, but must preserve the acceptance evidence and contracts of earlier stages.
 
+## Product delivery horizons
+
+The initial [GitHub Milestones](https://github.com/AlexandrShapkin/rustcraft/milestones) group product
+outcomes across technical stages. This table defines scope, not live progress or execution order;
+[WORKFLOW](WORKFLOW.md#planning-and-closeout-ownership) owns assignment/closure rules and GitHub owns
+actual membership/state.
+
+| Milestone | Product goal / contributing scope |
+| --- | --- |
+| Core Foundation | Historical accepted foundation through BG1; delivered evidence is in [EVIDENCE_INDEX](EVIDENCE_INDEX.md). Optional unassigned backlog is outside this completed foundation. |
+| Pre-M5 Platform Readiness | DX2, RF1, VS1, future BRAND1/UI1 and READY1: tooling, structure, spatial mechanisms, identity and UI ready for M5. |
+| Multiplayer & Content Resolution | M5 multiplayer and server content resolution. |
+| Third-Party Modding | M6 third-party modding. |
+| Optimization & Scale | M7 evidence-driven optimization and scale. |
+
+BRAND1/UI1 remain concepts below until separately formalized. Milestone membership neither registers
+these stages nor changes registry state/focus; an empty future horizon does not authorize work.
+
+## Future branding and UI direction
+
+Owner-selected future planning direction, not an amendment to the current registry or an activation
+of any stage. The indicative sequence is:
+
+**DX2 → RF1 → VS1 → BRAND1 → UI1 → READY1 → M5**.
+
+BRAND1 and UI1 are reserved future stages to formalize in the registry and stage contracts in a
+separately authorized planning pass. Existing stage states, focus, generated navigation and scope
+remain unchanged here. These capabilities must not be absorbed into DX2, RF1 or VS1.
+
+- **BRAND1:** finalize the new project identity and logical client/server organization as independent
+  products, with distinct apps/crates, dependency boundaries and separate build/release capability.
+  Retain the monorepo/workspace; separate source repositories require a concrete need, not branding
+  alone. Preserve atomic shared-contract refactors, unified CI and practical contributor/Codex work.
+  Include coordinated public GitHub identity/metadata management through `gh` where possible, with
+  inventory, canonical identity, bounded migration, compatibility decisions and verified remote/docs
+  reconciliation as defined in [ARCHITECTURE](ARCHITECTURE.md#future-public-identity-migration-brand1).
+- **UI1:** establish the public component UI mechanism and migrate game UI onto it. A universal
+  creative inventory/content browser backed by C2/ContentDefinition is a substantial acceptance
+  proof: categories, search, filters/tags, item grids, tooltips and inventory/hotbar interaction,
+  governed by game policy through semantic actions. Minecraft UI is one consumer of the general API.
+
+[ARCHITECTURE](ARCHITECTURE.md#future-component-ui-and-creativecontent-browser) owns the target UI
+and product boundaries; [D-064/D-065](DECISIONS.md#d-064--component-ui-with-a-policy-governed-content-browser)
+record rationale. This concept pass adds no implementation, dependency choice or detailed API design.
+READY1 would verify the resulting foundations before a separately authorized M5 start.
+
 ## M0 — foundation / first headless vertical slice
 
 Status: complete.
