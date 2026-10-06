@@ -185,8 +185,8 @@ semantic codec roundtrips, profile reorder and canonical worldgen hash expectati
 Focused engine-core/Game API/render/render-profile/runtime/sandbox tests pass. Wider
 `just sample-game`, `just smoke`, `just test`, `just ci` and configured `just render-test-all`
 pass with sequential Cargo work and CARGO_BUILD_JOBS=2 (360 workspace tests passed, 2 skipped).
-The final local CI rerun also includes the coverage-fingerprint regression. Publication is blocked
-by the Git metadata mount, as recorded below; public platform acceptance has not occurred.
+The final local CI rerun also includes the coverage-fingerprint regression. Initial publication was
+blocked by the Git metadata mount; the recovery and public platform acceptance are recorded below.
 
 ## Known deferred limitations
 
@@ -226,3 +226,30 @@ clean whitespace and synchronized documentation; the diff and this report were r
 the BG1 contract and #15 residual acceptance. Recorded final-source local gates above remain the
 local evidence; expensive render-scale/workspace/CI runs were not repeated without a source change.
 Implementation publication precedes public Ubuntu/Windows acceptance and issue/registry closeout.
+
+## Accepted publication and closeout
+
+Implementation SHA: `cc811614fc4803971c71d4b6e601bef285457f8f`, published non-force to main from
+the original checkout. Recovery changed no Rust source. The SSH transport encountered a system
+configuration permission error; authenticated HTTPS to the same repository published the commit.
+No credential or machine configuration was changed.
+
+Public [implementation CI 37473457978](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37473457978)
+completed successfully on both platforms:
+[Ubuntu](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37473457978/job/112302650741) and
+[Windows](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37473457978/job/112302650382).
+Both ran documentation/tooling tests, offline docs integrity, formatting, workspace check/test and
+strict all-target/all-feature Clippy. No CI regression or implementation repair was required.
+
+Issue [#15](https://github.com/AlexandrShapkin/rustcraft/issues/15) was closed completed only after
+both-platform acceptance, with a [final SHA/tests/invariants/CI evidence comment](https://github.com/AlexandrShapkin/rustcraft/issues/15#issuecomment-6017796562).
+C2's foundation plus BG1's actual half/shape/facing/powered/connections model/collision/selection
+consumers satisfy its residual acceptance. No BG1-owned issue remains open; no transfer or waiver
+was required. The known geometry limitations above remain explicit accepted scope boundaries.
+
+The owner-authorized closeout records BG1 closed, focus DX2 and DX2 planned in the canonical
+registry. Generated navigation is synchronized and docs-check/docs-test validate the closeout.
+Closeout SHA is the commit containing this section (discover through Git history, avoiding a
+self-referential SHA). Its final public CI is checked after publication; implementation acceptance
+above is the committed evidence available before that run. Work stops before DX2; DX2/RF1/VS1/M5/M6
+were not started.

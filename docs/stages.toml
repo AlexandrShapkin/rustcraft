@@ -1,6 +1,6 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "BG1"
+focus = "DX2"
 sequence = ["F1", "A1", "C2", "WF1", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
@@ -46,7 +46,7 @@ source_areas = ["scripts/workspace.py", "scripts/tests/test_workspace.py", "just
 [[stage]]
 id = "BG1"
 title = "generalized block geometry & model system"
-state = "active"
+state = "closed"
 contract = "docs/stages/BG1.md"
 issue_label = "stage:BG1"
 relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/ARCHITECTURE.md", "docs/RENDER_DIAGNOSTICS.md"]
