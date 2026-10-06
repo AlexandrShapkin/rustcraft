@@ -1919,7 +1919,11 @@ mod interaction_tests {
                 }
                 authored
                     .register_block(VoxelDefinition {
-                        key: BlockKey::parse(name).unwrap(),
+                        common: rustcraft_game_api::ContentDefinition::new(
+                            BlockKey::parse(name).unwrap().as_id().clone(),
+                        )
+                        .with_capabilities(vec![]),
+                        state_schema: None,
                         collision: CollisionDescriptor::Empty,
                         targetable: true,
                         material: MaterialClass::Opaque,
@@ -1928,7 +1932,6 @@ mod interaction_tests {
                         base_rotation: rustcraft_engine_core::orientation::ModelRotation::IDENTITY,
                         orientation: rustcraft_engine_core::orientation::OrientationProperty::None,
                         face_tints: [[u16::MAX; 3]; 6],
-                        capabilities: vec![],
                     })
                     .unwrap();
             }

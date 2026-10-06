@@ -13,3 +13,7 @@ workspace = true
 blake3.workspace = true
 rustcraft-content.workspace = true
 rustcraft-engine-core.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

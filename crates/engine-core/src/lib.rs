@@ -46,7 +46,7 @@ impl std::fmt::Display for EntityId {
     }
 }
 
-/// Compact state handle. Variant bits are reserved for orientation/properties.
+/// Compact state handle. The definition interprets variant; legacy adapters retain orientation bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockState {
     pub block: BlockId,

@@ -1777,6 +1777,8 @@ dependencies = [
  "blake3",
  "rustcraft-content",
  "rustcraft-engine-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

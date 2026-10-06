@@ -12,6 +12,12 @@ use rustcraft_engine_core::{
 };
 use std::collections::{HashMap, HashSet};
 
+pub mod definition;
+pub mod state_schema;
+use definition::DefinitionCatalog;
+pub use definition::*;
+use state_schema::{CompiledStateSchema, StateError, StateRecord, StateSchema};
+
 pub type ContentId = NamespacedId;
 
 macro_rules! semantic_key {
@@ -107,9 +113,11 @@ impl Default for LightDescriptor {
 }
 
 /// Package-authored definition. It deliberately contains no runtime `BlockId`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VoxelDefinition {
-    pub key: BlockKey,
+    pub common: ContentDefinition,
+    /// None retains the historical orientation encoding unchanged.
+    pub state_schema: Option<StateSchema>,
     pub collision: CollisionDescriptor,
     pub targetable: bool,
     pub material: MaterialClass,
@@ -119,12 +127,13 @@ pub struct VoxelDefinition {
     pub orientation: OrientationProperty,
     /// Per-face RGB tint bytes in +Z, -Z, +X, -X, +Y, -Y order.
     pub face_tints: [[u16; 3]; 6],
-    pub capabilities: Vec<ContentId>,
 }
 
 /// Runtime definition indexed directly by its dense profile-local handle.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledVoxelDefinition {
+    pub common: CompiledContentDefinition,
+    pub state_schema: CompiledStateSchema,
     pub id: BlockId,
     pub key: BlockKey,
     pub collision: CollisionDescriptor,
@@ -135,7 +144,6 @@ pub struct CompiledVoxelDefinition {
     pub base_rotation: ModelRotation,
     pub orientation: OrientationProperty,
     pub face_tints: [[u16; 3]; 6],
-    pub capabilities: Vec<ContentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +163,7 @@ pub enum RegistrationError {
 struct AuthoredPackage {
     id: PackageId,
     blocks: Vec<VoxelDefinition>,
+    items: Vec<ItemDefinition>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -162,6 +171,8 @@ pub struct GameRegistry {
     packages: Vec<AuthoredPackage>,
     active_package: Option<usize>,
     block_keys: HashSet<BlockKey>,
+    item_keys: HashSet<ContentId>,
+    handlers: Vec<(ContentId, NativeHandler)>,
 }
 
 impl GameRegistry {
@@ -172,12 +183,21 @@ impl GameRegistry {
         self.packages.push(AuthoredPackage {
             id: package,
             blocks: Vec::new(),
+            items: Vec::new(),
         });
         self.active_package = Some(self.packages.len() - 1);
         Ok(())
     }
 
     pub fn register_block(&mut self, definition: VoxelDefinition) -> Result<(), RegistrationError> {
+        definition.common.validate()?;
+        if let Some(schema) = &definition.state_schema {
+            schema.compile()?;
+        }
+        if definition.state_schema.is_some() && definition.orientation != OrientationProperty::None
+        {
+            return Err(RegistrationError::InvalidDefinition);
+        }
         if definition.light.emission > 15
             || definition.light.sky_opacity > 15
             || definition.light.block_opacity > 15
@@ -187,9 +207,17 @@ impl GameRegistry {
         let Some(package_index) = self.active_package else {
             return Err(RegistrationError::NoActivePackage);
         };
-        if !self.block_keys.insert(definition.key.clone()) {
+        if self.item_keys.contains(&definition.common.key) {
             return Err(RegistrationError::DuplicateContentId(
-                definition.key.as_id().clone(),
+                definition.common.key.clone(),
+            ));
+        }
+        if !self
+            .block_keys
+            .insert(BlockKey::from(definition.common.key.clone()))
+        {
+            return Err(RegistrationError::DuplicateContentId(
+                definition.common.key.clone(),
             ));
         }
         let package = &mut self.packages[package_index];
@@ -197,6 +225,36 @@ impl GameRegistry {
         Ok(())
     }
 
+    pub fn register_item(&mut self, definition: ItemDefinition) -> Result<(), RegistrationError> {
+        definition.common.validate()?;
+        if !definition.common.handlers.is_empty()
+            || self
+                .block_keys
+                .contains(&BlockKey::from(definition.common.key.clone()))
+            || definition.max_stack == 0
+        {
+            return Err(RegistrationError::InvalidDefinition);
+        }
+        let package = self
+            .active_package
+            .ok_or(RegistrationError::NoActivePackage)?;
+        if !self.item_keys.insert(definition.common.key.clone()) {
+            return Err(RegistrationError::DuplicateContentId(definition.common.key));
+        }
+        self.packages[package].items.push(definition);
+        Ok(())
+    }
+    pub fn register_handler(
+        &mut self,
+        key: ContentId,
+        handler: NativeHandler,
+    ) -> Result<(), RegistrationError> {
+        if self.handlers.iter().any(|(k, _)| k == &key) {
+            return Err(RegistrationError::DuplicateContentId(key));
+        }
+        self.handlers.push((key, handler));
+        Ok(())
+    }
     #[must_use]
     pub fn authored_block_count(&self) -> usize {
         self.packages
@@ -225,12 +283,12 @@ impl GameRegistry {
                 return Err(RegistrationError::PackageNotRegistered(package_id.clone()));
             };
             let mut definitions = package.blocks.iter().collect::<Vec<_>>();
-            definitions.sort_by(|left, right| left.key.cmp(&right.key));
+            definitions.sort_by(|left, right| left.common.key.cmp(&right.common.key));
             ordered.extend(definitions);
         }
         let Some(default_index) = ordered
             .iter()
-            .position(|definition| definition.key == profile.default_block)
+            .position(|definition| definition.common.key == *profile.default_block.as_id())
         else {
             return Err(RegistrationError::MissingDefaultBlock(
                 profile.default_block.clone(),
@@ -239,15 +297,51 @@ impl GameRegistry {
         let default = ordered.remove(default_index);
         ordered.insert(0, default);
 
+        let mut ordered_items = Vec::new();
+        for package_id in &profile.packages {
+            let package = self.packages.iter().find(|p| &p.id == package_id).unwrap();
+            let mut items: Vec<_> = package.items.iter().collect();
+            items.sort_by(|a, b| a.common.key.cmp(&b.common.key));
+            ordered_items.extend(items);
+        }
+        let mut handlers = self.handlers.clone();
+        handlers.sort_by(|a, b| a.0.cmp(&b.0));
+        let catalog = DefinitionCatalog::new(
+            ordered
+                .iter()
+                .map(|d| &d.common)
+                .chain(ordered_items.iter().map(|d| &d.common)),
+        );
+        let mut items = Vec::new();
+        let mut item_by_key = HashMap::new();
+        for (slot, item) in ordered_items.into_iter().enumerate() {
+            let id = ItemDefinitionId(
+                u32::try_from(slot).map_err(|_| RegistrationError::InvalidDefinition)?,
+            );
+            item_by_key.insert(item.common.key.clone(), id);
+            items.push(CompiledItemDefinition {
+                id,
+                common: catalog.compile(&item.common, &handlers)?,
+                max_stack: item.max_stack,
+                icon: item.icon.clone(),
+            });
+        }
         let mut blocks = Vec::with_capacity(ordered.len());
         let mut by_key = HashMap::with_capacity(ordered.len());
         for (index, authored) in ordered.into_iter().enumerate() {
             let numeric = u32::try_from(index).map_err(|_| RegistrationError::TooManyBlocks)?;
             let id = BlockId(numeric);
-            by_key.insert(authored.key.clone(), id);
+            by_key.insert(BlockKey::from(authored.common.key.clone()), id);
             blocks.push(CompiledVoxelDefinition {
+                common: catalog.compile(&authored.common, &handlers)?,
+                state_schema: authored
+                    .state_schema
+                    .as_ref()
+                    .map(StateSchema::compile)
+                    .transpose()?
+                    .unwrap_or_else(|| CompiledStateSchema::legacy(authored.orientation)),
                 id,
-                key: authored.key.clone(),
+                key: BlockKey::from(authored.common.key.clone()),
                 collision: authored.collision,
                 targetable: authored.targetable,
                 material: authored.material,
@@ -256,7 +350,6 @@ impl GameRegistry {
                 base_rotation: authored.base_rotation,
                 orientation: authored.orientation,
                 face_tints: authored.face_tints,
-                capabilities: authored.capabilities.clone(),
             });
         }
         Ok(CompiledGameProfile {
@@ -268,6 +361,10 @@ impl GameRegistry {
             default_state: BlockState::new(BlockId(0)),
             blocks,
             by_key,
+            items,
+            item_by_key,
+            catalog,
+            handlers,
         })
     }
 }
@@ -282,9 +379,113 @@ pub struct CompiledGameProfile {
     default_state: BlockState,
     blocks: Vec<CompiledVoxelDefinition>,
     by_key: HashMap<BlockKey, BlockId>,
+    items: Vec<CompiledItemDefinition>,
+    item_by_key: HashMap<ContentId, ItemDefinitionId>,
+    catalog: DefinitionCatalog,
+    handlers: Vec<(ContentId, NativeHandler)>,
 }
 
 impl CompiledGameProfile {
+    pub fn serialize_state(
+        &self,
+        state: BlockState,
+    ) -> Result<state_schema::SemanticVoxelState, StateError> {
+        let (block, state) = self.export_state(state)?;
+        Ok(state_schema::SemanticVoxelState {
+            block: block.as_str().into(),
+            state,
+        })
+    }
+    pub fn deserialize_state(
+        &self,
+        record: &state_schema::SemanticVoxelState,
+    ) -> Result<BlockState, StateError> {
+        let key = BlockKey::parse(&record.block).map_err(|_| StateError::UnknownField)?;
+        self.import_state(&key, &record.state)
+    }
+    pub fn tag_index(&self, key: &ContentId) -> Option<TagIndex> {
+        self.catalog.tags.get(key).copied().map(TagIndex)
+    }
+    pub fn capability_index(&self, key: &ContentId) -> Option<CapabilityIndex> {
+        self.catalog
+            .capabilities
+            .get(key)
+            .copied()
+            .map(CapabilityIndex)
+    }
+    pub fn item_id(&self, key: &ContentId) -> Option<ItemDefinitionId> {
+        self.item_by_key.get(key).copied()
+    }
+    pub fn item(&self, id: ItemDefinitionId) -> Option<&CompiledItemDefinition> {
+        self.items.get(id.0 as usize)
+    }
+    pub fn items(&self) -> &[CompiledItemDefinition] {
+        &self.items
+    }
+    /// Semantic serialization at the boundary, not a new world-save envelope.
+    pub fn export_state(&self, state: BlockState) -> Result<(BlockKey, StateRecord), StateError> {
+        let definition = self.block(state.block).ok_or(StateError::UnknownField)?;
+        Ok((
+            definition.key.clone(),
+            definition.state_schema.export(state.variant)?,
+        ))
+    }
+    pub fn import_state(
+        &self,
+        key: &BlockKey,
+        record: &StateRecord,
+    ) -> Result<BlockState, StateError> {
+        let block = self.block_id(key).ok_or(StateError::UnknownField)?;
+        Ok(BlockState {
+            block,
+            variant: self.block(block).unwrap().state_schema.import(record)?,
+        })
+    }
+    /// Native semantic event dispatch has no mutable World. Validate effects before admission.
+    pub fn dispatch(
+        &self,
+        event: ContentEvent,
+        position: BlockPos,
+        state: BlockState,
+    ) -> Result<CommandBuffer, StateError> {
+        let definition = self.block(state.block).ok_or(StateError::UnknownField)?;
+        definition.state_schema.validate(state.variant)?;
+        let mut output = CommandBuffer::default();
+        match event {
+            ContentEvent::Use => {
+                if let Some(index) = definition.common.use_handler {
+                    (self.handlers[index].1)(
+                        &HandlerContext {
+                            position,
+                            state,
+                            definition,
+                        },
+                        &mut output,
+                    )?;
+                }
+            }
+        }
+        if output.len() > 64 {
+            return Err(StateError::InvalidValue);
+        }
+        for command in &output.commands {
+            match command {
+                WorldCommand::SetBlock {
+                    position: target,
+                    state,
+                } => {
+                    if *target != position {
+                        return Err(StateError::InvalidValue);
+                    }
+                    self.block(state.block)
+                        .ok_or(StateError::UnknownField)?
+                        .state_schema
+                        .validate(state.variant)?;
+                }
+            }
+        }
+        Ok(output)
+    }
     #[must_use]
     pub const fn default_state(&self) -> BlockState {
         self.default_state
@@ -322,6 +523,9 @@ impl CompiledGameProfile {
                 u8::from(block.targetable),
                 block.material as u8,
             ]);
+            if !block.state_schema.is_legacy() {
+                block.state_schema.hash_contract(&mut hasher);
+            }
             hasher.update(&[
                 block.light.emission,
                 block.light.sky_opacity,
@@ -504,9 +708,11 @@ mod tests {
         TextureKey::parse(value).unwrap()
     }
 
-    fn definition(value: &str) -> VoxelDefinition {
+    pub(super) fn definition(value: &str) -> VoxelDefinition {
         VoxelDefinition {
-            key: block(value),
+            common: ContentDefinition::new(block(value).as_id().clone())
+                .with_capabilities(Vec::new()),
+            state_schema: None,
             collision: CollisionDescriptor::FullCube,
             targetable: true,
             material: MaterialClass::Opaque,
@@ -515,11 +721,10 @@ mod tests {
             base_rotation: ModelRotation::IDENTITY,
             orientation: OrientationProperty::None,
             face_tints: [[u16::MAX; 3]; 6],
-            capabilities: Vec::new(),
         }
     }
 
-    fn profile(packages: Vec<PackageId>, default: &str) -> GameProfile {
+    pub(super) fn profile(packages: Vec<PackageId>, default: &str) -> GameProfile {
         GameProfile {
             id: id("test:profile/runtime"),
             packages,
@@ -540,7 +745,7 @@ mod tests {
             .unwrap();
         registry
             .register_block(VoxelDefinition {
-                key: key.clone(),
+                common: ContentDefinition::new(key.as_id().clone()),
                 ..definition("dynamic_mod:block/placeholder")
             })
             .unwrap();
@@ -831,4 +1036,163 @@ pub fn recipe_matches<T: Clone + Ord>(
     actual.sort();
     wanted.sort();
     actual == wanted
+}
+
+impl CompiledVoxelDefinition {
+    /// Current collision contract stays Empty/FullCube; validate canonical state before lookup.
+    pub fn collision_for_state(&self, variant: u16) -> Result<CollisionDescriptor, StateError> {
+        self.state_schema.validate(variant)?;
+        Ok(self.collision)
+    }
+}
+#[cfg(test)]
+mod c2_tests {
+    use super::*;
+    use state_schema::*;
+    fn id(s: &str) -> ContentId {
+        ContentId::parse(s).unwrap()
+    }
+    fn effect(ctx: &HandlerContext<'_>, out: &mut CommandBuffer) -> Result<(), StateError> {
+        out.set_block(
+            BlockPos {
+                x: ctx.position.x + 1,
+                ..ctx.position
+            },
+            ctx.state,
+        );
+        Ok(())
+    }
+    #[test]
+    fn typed_properties_and_handler_admission_reject_invalid_authored_and_emitted_data() {
+        for value in [f32::NAN, f32::INFINITY, -1.] {
+            let mut d = tests::definition("test:block/empty");
+            d.common.properties.mass_kg = Some(value);
+            let mut r = GameRegistry::default();
+            r.register_package(PackageId::parse("test:package/main").unwrap())
+                .unwrap();
+            assert_eq!(
+                r.register_block(d),
+                Err(RegistrationError::InvalidDefinition)
+            );
+            assert_eq!(r.authored_block_count(), 0);
+        }
+        let mut d = tests::definition("test:block/empty");
+        d.common.capabilities = vec![id("voxel_std:capability/interactable")];
+        d.common.handlers = vec![HandlerBinding {
+            event: ContentEvent::Use,
+            key: id("test:handler/use"),
+        }];
+        let mut r = GameRegistry::default();
+        let package = PackageId::parse("test:package/main").unwrap();
+        r.register_package(package.clone()).unwrap();
+        r.register_block(d).unwrap();
+        let profile = tests::profile(vec![package], "test:block/empty");
+        assert!(r.compile(&profile).is_err(), "unknown handler rejected");
+        r.register_handler(id("test:handler/use"), effect).unwrap();
+        let compiled = r.compile(&profile).unwrap();
+        assert!(
+            compiled
+                .dispatch(
+                    ContentEvent::Use,
+                    BlockPos { x: 0, y: 0, z: 0 },
+                    compiled.default_state()
+                )
+                .is_err(),
+            "out-of-context effects rejected before application"
+        );
+    }
+    #[test]
+    fn semantic_state_json_and_indexes_survive_profile_package_reordering() {
+        let mut r = GameRegistry::default();
+        let packages = [
+            PackageId::parse("a:package/main").unwrap(),
+            PackageId::parse("b:package/main").unwrap(),
+        ];
+        for (slot, p) in packages.iter().enumerate() {
+            r.register_package(p.clone()).unwrap();
+            let mut d = tests::definition(if slot == 0 {
+                "a:block/value"
+            } else {
+                "b:block/value"
+            });
+            d.state_schema = Some(StateSchema {
+                fields: vec![StateField {
+                    key: id("test:state/powered"),
+                    domain: StateDomain::Powered,
+                    default: StateValue::Powered(false),
+                }],
+                ..Default::default()
+            });
+            d.common.tags = vec![id("test:tag/diagnostic")];
+            d.common.capabilities = vec![id("test:capability/sample")];
+            r.register_block(d).unwrap();
+        }
+        r.register_block(tests::definition("b:block/empty"))
+            .unwrap();
+        let forward = r
+            .compile(&tests::profile(packages.to_vec(), "b:block/empty"))
+            .unwrap();
+        let reverse = r
+            .compile(&tests::profile(
+                packages.into_iter().rev().collect(),
+                "b:block/empty",
+            ))
+            .unwrap();
+        let key = BlockKey::parse("a:block/value").unwrap();
+        let a = forward.block_id(&key).unwrap();
+        let b = reverse.block_id(&key).unwrap();
+        assert_ne!(a, b);
+        let state = BlockState {
+            block: a,
+            variant: 1,
+        };
+        let (semantic, record) = forward.export_state(state).unwrap();
+        let semantic_record = forward.serialize_state(state).unwrap();
+        let json = serde_json::to_string(&semantic_record).unwrap();
+        assert!(json.contains("a:block/value"));
+        let whole: state_schema::SemanticVoxelState = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            reverse.deserialize_state(&whole).unwrap(),
+            BlockState {
+                block: b,
+                variant: 1
+            }
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let decoded: StateRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            reverse.import_state(&semantic, &decoded).unwrap(),
+            BlockState {
+                block: b,
+                variant: 1
+            }
+        );
+        let tag = reverse.tag_index(&id("test:tag/diagnostic")).unwrap();
+        assert!(reverse.block(b).unwrap().common.has_tag(tag));
+        assert_eq!(forward.tag_index(&id("test:tag/diagnostic")), Some(tag));
+        assert_eq!(
+            forward.semantic_fingerprint(),
+            reverse.semantic_fingerprint()
+        );
+        assert!(reverse.block(b).unwrap().collision_for_state(2).is_err());
+        let mut changed = r.clone();
+        changed.packages[0].blocks[0]
+            .state_schema
+            .as_mut()
+            .unwrap()
+            .version = 2;
+        assert_ne!(
+            changed
+                .compile(&tests::profile(
+                    vec![
+                        PackageId::parse("a:package/main").unwrap(),
+                        PackageId::parse("b:package/main").unwrap()
+                    ],
+                    "b:block/empty"
+                ))
+                .unwrap()
+                .semantic_fingerprint(),
+            forward.semantic_fingerprint()
+        );
+    }
 }

@@ -223,7 +223,11 @@ impl GamePackage for MinecraftB173Package {
                 FaceTextures::Faces(resources) => FaceResources::Faces(resources.map(texture_key)),
             };
             registry.register_block(VoxelDefinition {
-                key: block_key(block.name),
+                common: rustcraft_game_api::ContentDefinition::new(
+                    block_key(block.name).as_id().clone(),
+                )
+                .with_capabilities(vec![id("voxel_std:capability/block")]),
+                state_schema: None,
                 collision: if block.solid {
                     CollisionDescriptor::FullCube
                 } else {
@@ -249,9 +253,14 @@ impl GamePackage for MinecraftB173Package {
                     blocks::tint(block.id, face == 4)
                         .map(|channel| (channel * f32::from(u16::MAX)).round() as u16)
                 }),
-                capabilities: vec![id("voxel_std:capability/block")],
             })?;
         }
+        let stick = blocks::STICK_ITEM;
+        registry.register_item(rustcraft_game_api::ItemDefinition {
+            common: rustcraft_game_api::ContentDefinition::new(id(stick.name)),
+            max_stack: stick.max_stack,
+            icon: None,
+        })?;
         Ok(())
     }
 }

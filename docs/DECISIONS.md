@@ -806,7 +806,7 @@ composition and DX2 retires them only with equivalent coverage. See [ARCHITECTUR
 
 ## D-054 — Common content uses composition and compiled local state
 
-Status: accepted target; C2 after A1.
+Status: implemented foundation in C2; generalized geometry consumer remains BG1.
 
 Common identity/metadata/tags/typed properties/capabilities/handlers/resources compose with category
 contracts, not OOP inheritance or meaningless universal fields. Tag/property/capability/handler/state/
@@ -905,3 +905,24 @@ Control API 2 stores validated principal and local grant provenance; Context has
 Deserialize admission. Source labels and local enum variants are not authentication. Mechanisms
 check explicit capabilities; game mode and role names cannot grant remote/admin authority. M5
 owns remote authentication/session admission and any wire representation.
+
+## D-062 — C2 typed composition and definition-local compact state
+
+Status: implemented in C2.
+
+Common ContentDefinition owns one validated semantic identity plus separate metadata, typed immutable
+properties, tags, content contracts, resources and handler bindings. Voxel and item contracts compose
+it; entity/fluid extensions need no voxel-only common fields. Authored keys compile into dense local
+vectors and deterministic tag/capability bitsets. Runtime properties use typed fields, not dynamic maps.
+
+New voxel schemas sort semantic fields, use typed finite domains and checked mixed-radix u16 encoding,
+put defaults at zero and reject forbidden/invalid combinations. Semantic serialization includes the
+block key and schema version; compact chunk storage stays key+variant. Legacy orientation adapters
+retain existing bits/fingerprints. Schema evolution requires explicit compatibility, never silent
+reinterpretation. Canonical schema meaning is included in the profile fingerprint.
+
+Only demonstrated native Use dispatch is added: immutable definition/state/position context produces
+commands, then bounded profile validation precedes authoritative application. Content capabilities
+are supported contracts, not security grants. Item events and future WASM execution are not implemented.
+Sandbox's state-aware reactor and item prove independent registration and the existing renderer bridge;
+BG1 still owns generalized geometry/collision/model consumers and the residual acceptance of #15.

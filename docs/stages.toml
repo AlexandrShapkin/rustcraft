@@ -26,7 +26,7 @@ source_areas = ["crates/agent-api", "crates/bot-api", "crates/mod-api", "crates/
 [[stage]]
 id = "C2"
 title = "unified content definition & capability model"
-state = "planned"
+state = "active"
 contract = "docs/stages/C2.md"
 issue_label = "stage:C2"
 relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/GAMEPLAY_CONTRACT.md", "docs/MODDING.md"]

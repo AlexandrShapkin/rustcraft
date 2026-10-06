@@ -74,7 +74,7 @@ pub struct CompiledVoxelRender {
     pub faces: [AtlasRegion; 6],
     pub tints: [[f32; 3]; 6],
     pub base_rotation: ModelRotation,
-    pub orientation: rustcraft_engine_core::orientation::OrientationProperty,
+    pub state_schema: rustcraft_game_api::state_schema::CompiledStateSchema,
 }
 
 #[derive(Debug, Clone)]
@@ -117,7 +117,7 @@ impl CompiledVoxelRenderRegistry {
                     .face_tints
                     .map(|color| color.map(|channel| f32::from(channel) / f32::from(u16::MAX))),
                 base_rotation: definition.base_rotation,
-                orientation: definition.orientation,
+                state_schema: definition.state_schema.clone(),
             });
         }
         Ok(Self { blocks })
@@ -131,13 +131,12 @@ impl CompiledVoxelRenderRegistry {
     #[must_use]
     pub fn block_model(&self, state: BlockState) -> Option<BlockModel> {
         let block = self.block(state.block)?;
+        let rotation = block.state_schema.rotation(state.variant).ok()?;
         block.visible.then(|| BlockModel {
             state,
             textures: block.faces,
             tints: block.tints,
-            rotation: block
-                .base_rotation
-                .compose(state.model_rotation(block.orientation)),
+            rotation: block.base_rotation.compose(rotation),
         })
     }
 }
@@ -146,9 +145,12 @@ impl BlockTextureResolver for CompiledVoxelRenderRegistry {
     fn model_rotation(&self, state: BlockState) -> ModelRotation {
         self.block(state.block)
             .map_or(ModelRotation::IDENTITY, |block| {
-                block
-                    .base_rotation
-                    .compose(state.model_rotation(block.orientation))
+                block.base_rotation.compose(
+                    block
+                        .state_schema
+                        .rotation(state.variant)
+                        .unwrap_or(ModelRotation::IDENTITY),
+                )
             })
     }
 
@@ -264,7 +266,11 @@ mod tests {
         let block_key = BlockKey::parse("test:block/value").unwrap();
         registry
             .register_block(VoxelDefinition {
-                key: block_key.clone(),
+                common: rustcraft_game_api::ContentDefinition::new(
+                    block_key.clone().as_id().clone(),
+                )
+                .with_capabilities(vec![]),
+                state_schema: None,
                 collision: CollisionDescriptor::FullCube,
                 targetable: true,
                 material: MaterialClass::Opaque,
@@ -273,13 +279,16 @@ mod tests {
                 base_rotation: ModelRotation::IDENTITY,
                 orientation: OrientationProperty::None,
                 face_tints: [[u16::MAX; 3]; 6],
-                capabilities: vec![],
             })
             .unwrap();
         let water_key = BlockKey::parse("test:block/water").unwrap();
         registry
             .register_block(VoxelDefinition {
-                key: water_key.clone(),
+                common: rustcraft_game_api::ContentDefinition::new(
+                    water_key.clone().as_id().clone(),
+                )
+                .with_capabilities(vec![]),
+                state_schema: None,
                 collision: CollisionDescriptor::Empty,
                 targetable: false,
                 material: MaterialClass::Liquid,
@@ -294,7 +303,6 @@ mod tests {
                 base_rotation: ModelRotation::IDENTITY,
                 orientation: OrientationProperty::None,
                 face_tints: [[u16::MAX; 3]; 6],
-                capabilities: vec![],
             })
             .unwrap();
         let profile = registry

@@ -157,51 +157,77 @@ the client resolves it via compiled liquid material/surface metadata and generic
 distance attenuation. Flow levels, propagation and swimming remain future gameplay policy; generic
 storage and rendering do not identify Minecraft block IDs.
 
-## Target C2: common composed definitions and local state
+## C2: composed definitions and local state
 
-Current: Game API registers semantic `VoxelDefinition` with face resources, Empty/FullCube collision
-and a capability list; transitional mod-api has separate policy-rich BlockDefinition/ItemDefinition.
-There is no complete common definition, handler catalog or definition-local state schema yet.
-C2 is the owning planned migration; A1 first secures external identities and affected policy boundaries.
+`game-api::ContentDefinition` composes existing validated `ContentId` identity, typed metadata,
+immutable `DefinitionProperties`, semantic tags, supported contract capabilities, semantic resources
+and handler bindings. `VoxelDefinition` adds voxel collision/material/light/face resources and state;
+`ItemDefinition` adds stack limit and an optional semantic texture icon. Common data contains no
+voxel assumption, permitting future entity/fluid specializations without implementing those systems.
+Categories use Rust composition, not inheritance, a universal dynamic map or engine class switches.
 
-Target common `ContentDefinition` layer composes identity, metadata, tags, properties, capabilities,
-handlers and resources. Voxel/block, item, entity, fluid and future categories add only meaningful
-domain contracts. This is Rust composition, not inheritance or a universal definition full of
-irrelevant fields. Keep these meanings distinct:
-
-| Concept | Meaning |
+| Concept | Implemented meaning |
 | --- | --- |
-| Tag | Classification or group membership. |
-| Property | Typed authored data/parameter. |
-| Capability | Supported semantic interface/mechanism. |
-| Handler | Reaction to a registered event/lifecycle hook. |
-| State | Compact mutable state of an individual instance. |
-| Resource | Semantic presentation/data dependency. |
+| Tag | Namespaced query/classification membership; changes no behavior. |
+| Property | Typed immutable data: optional finite nonnegative mass and friction; not mining/tool policy. |
+| Capability | A supported content contract, compiled independently from tags; not a host/session grant. |
+| Handler | A native function bound by semantic key to the demonstrated `Use` event. |
+| State | Compact mutable variant interpreted by this definition's schema. |
+| Resource | A semantic dependency; category texture bindings remain semantic `TextureKey`s. |
 
-Content capabilities are supported interfaces; security capabilities are grants authorizing use.
-They are related through validated composition, not interchangeable tags or permissions.
+Profile compilation validates authoring, follows explicit package order and lexical definition order,
+and produces dense voxel/item vectors. A deterministic lexical catalog maps tag/capability keys to
+profile-local typed indexes; membership is a bitset lookup. Property access is typed direct field
+access. Resource references remain semantic until the existing resource bridge resolves them.
+`ItemDefinitionId`, tag/capability indexes, BlockId and GPU/atlas handles are never authored identity.
+No per-frame key parsing, property reflection or per-voxel heap object is introduced.
 
-Authored definitions are flexible, namespaced and validated. Profile compilation produces typed,
-validated, indexed, cache-friendly runtime definitions, dense local handles and fast capability
-lookup. Semantic strings stay at composition/serialization/debug boundaries. Do not introduce
-`HashMap<String, DynamicValue>` or per-voxel/entity string lookups in hot loops.
+### Definition-local state
 
-C2 closes R1.0-003 with deterministic definition-local canonical state schemas: facing, axis, half,
-shape, powered and connection-mask properties are examples, not global reserved-bit assignments.
-Compile each schema into compact encoding, retaining compact BlockState where practical. Semantic
-serialization must validate the schema independently of Beta metadata; models, handlers and collision
-use the same canonical state meaning. Current key+u16 schema requires explicit compatibility/versioned
-migration if encoding changes; this documentation pass changes no format.
+`StateSchema` contains versioned semantic fields, typed domains/defaults and optional prohibited full
+combinations. Facing, axis, half, semantic shape choices, powered and six-bit connection domains are
+supported; each definition selects only its own fields. Compilation sorts fields lexically and shape
+choices semantically, places each declared default first, then uses checked mixed-radix encoding.
+Default variant is zero. At most 16 fields and 65536 combinations fit `u16`; invalid domains,
+combinations, duplicate/missing fields and out-of-range variants fail explicitly. Forbidden defaults
+are rejected. Encoding depends on the schema, never package/dense-ID order or Beta metadata.
 
-Handlers bind explicitly registered events such as place, break, use, tick, neighbor change, entity
-contact, damage and craft. Event/query context → handler/system/rule → CommandBuffer → authoritative
-mutation remains the boundary. No raw mutable World mod contract or giant universal callback API.
-Native first-party Rust and future WASM adapters share semantics, not necessarily runtime representation.
+`CompiledStateSchema` offers indexed value access and pre-resolved orientation slots. The renderer
+bridge uses its rotation; `collision_for_state` validates state before the current Empty/FullCube
+lookup. The independent reactor's handler uses facing/powered state. These are bounded C2 consumers;
+BG1's generalized geometry/model/collision/selection system is not implemented.
 
-Packages may eventually contain typed voxel/item/entity/fluid definitions, models, shapes and permitted
-handler/system metadata as well as other resources. Existing texture discovery remains texture-only;
-this is not an implemented universal loader. Typed semantic wrappers remain useful; do not erase domain
-safety by forcing everything into one untyped ResourceId. Dense handles remain local compilation data.
+`SemanticVoxelState` serializes a semantic block key, schema version and canonical semantic field
+values. Import validates the key/schema/value domains. This is a semantic boundary helper, not an M5
+wire protocol or a replacement save envelope. Current chunks still store semantic key plus u16 variant;
+the existing codec roundtrip under reordered profiles is tested. A schema version/layout change needs
+an explicit game compatibility/migration policy; silently reinterpreting persisted variants is forbidden.
+Canonical schema contracts contribute to profile fingerprints.
+
+Existing Minecraft and other untouched voxel definitions explicitly select the legacy orientation
+adapter with `state_schema: None`. Their historical bits, semantic fingerprints and persisted variants
+are unchanged, including uninterpreted legacy bits. New canonical definitions reject invalid variants;
+legacy permissiveness is compatibility, not the new schema contract. No storage width/format changes.
+
+### Bounded native handlers and category proof
+
+A registered `Use` handler receives immutable definition/state/position context and emits the existing
+CommandBuffer. It receives no mutable World or ambient host authority. Profile dispatch rejects unknown
+bindings, invalid canonical state, more than 64 output commands, out-of-context positions and invalid
+resulting states before returning effects for authoritative application. Handler-bearing definitions
+must declare the interactable contract. Only voxel use dispatch is currently implemented; item handlers
+are rejected until a real category consumer exists. Native code remains trusted; this output bound is
+not a completed WASM execution quota/sandbox. M6 is future work.
+
+Sandbox reactor/charge content proves voxel and item categories, typed properties, shared tags,
+different capability sets, semantic resources, command-emitting use and state-aware rendering without
+Minecraft. The normal sample workflow invokes this registered handler and applies commands. Minecraft
+voxel registration composes common data; representative stick item registration derives stack semantics
+from the existing explicit adapter. A1 recipe/work/drop policy remains in minecraft-b173; retained
+legacy slot/damage/worldgen/render/persistence adapters are not competing universal definitions.
+
+Issue #15's C2 schema/serialization portion is implemented. Its generalized model/collision consumer
+acceptance remains BG1-owned; a sample rotation/handler is not proof of generalized shapes.
 
 ## Target BG1: semantic models and separate shape contracts
 
@@ -245,5 +271,4 @@ from minecraft-b173::policy through public native registration, then resolves th
 dense handles. Retained mod-api::legacy definitions are explicit local compatibility for worldgen,
 renderer, slot transactions, tool-damage codec validation and persistence adapters; their hardness,
 tool/drop/placeable fields are not universal external definitions. VoxelDefinition remains the generic
-numeric-ID-free voxel contract. This bounded migration does not implement C2 composed content,
-handler dispatch or a new save format.
+numeric-ID-free voxel contract. C2 now adds composed content and bounded handler dispatch; this A1 adapter still introduces no save format.

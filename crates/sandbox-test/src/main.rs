@@ -83,7 +83,9 @@ impl GamePackage for SandboxPackage {
             ),
         ] {
             registry.register_block(VoxelDefinition {
-                key: block_key(name),
+                common: rustcraft_game_api::ContentDefinition::new(block_key(name).as_id().clone())
+                    .with_capabilities(capabilities),
+                state_schema: None,
                 collision,
                 targetable: true,
                 material,
@@ -92,7 +94,6 @@ impl GamePackage for SandboxPackage {
                 base_rotation: ModelRotation::IDENTITY,
                 orientation: OrientationProperty::None,
                 face_tints: [[u16::MAX; 3]; 6],
-                capabilities,
             })?;
         }
         Ok(())
@@ -108,22 +109,103 @@ impl GamePackage for SandboxModPackage {
 
     fn register(&self, registry: &mut GameRegistry) -> Result<(), RegistrationError> {
         registry.register_package(self.id())?;
+        use rustcraft_game_api::state_schema::{StateDomain, StateField, StateSchema, StateValue};
+        use rustcraft_game_api::{
+            ContentDefinition, ContentEvent, DefinitionProperties, HandlerBinding, ItemDefinition,
+        };
+        registry.register_handler(id("sandbox_mod:handler/reactor_use"), reactor_use)?;
+        let mut common = ContentDefinition::new(id("sandbox_mod:block/reactor"));
+        common.properties = DefinitionProperties {
+            mass_kg: Some(2.),
+            friction: Some(0.4),
+        };
+        common.tags = vec![id("sandbox_mod:tag/diagnostic")];
+        common.capabilities = vec![
+            id("voxel_std:capability/interactable"),
+            id("sandbox_mod:capability/reactor"),
+        ];
+        common.resources = vec![resource_id("sandbox_mod:textures/block/reactor")];
+        common.handlers = vec![HandlerBinding {
+            event: ContentEvent::Use,
+            key: id("sandbox_mod:handler/reactor_use"),
+        }];
         registry.register_block(VoxelDefinition {
-            key: block_key("sandbox_mod:block/reactor"),
+            common,
+            state_schema: Some(StateSchema {
+                fields: vec![
+                    StateField {
+                        key: id("voxel_std:state/facing"),
+                        domain: StateDomain::Facing,
+                        default: StateValue::Facing(
+                            rustcraft_engine_core::orientation::Facing::North,
+                        ),
+                    },
+                    StateField {
+                        key: id("voxel_std:state/powered"),
+                        domain: StateDomain::Powered,
+                        default: StateValue::Powered(false),
+                    },
+                ],
+                ..Default::default()
+            }),
             collision: CollisionDescriptor::FullCube,
             targetable: true,
             material: MaterialClass::Opaque,
             textures: FaceResources::All(texture_key("sandbox_mod:textures/block/reactor")),
             light: LightDescriptor {
                 emission: 12,
-                ..LightDescriptor::default()
+                ..Default::default()
             },
             base_rotation: ModelRotation::IDENTITY,
             orientation: OrientationProperty::None,
             face_tints: [[u16::MAX; 3]; 6],
-            capabilities: vec![id("sandbox_mod:capability/reactor")],
+        })?;
+        let mut common = ContentDefinition::new(id("sandbox_mod:item/charge"));
+        common.properties.mass_kg = Some(0.25);
+        common.tags = vec![id("sandbox_mod:tag/diagnostic")];
+        common.capabilities = vec![id("voxel_std:capability/stackable")];
+        common.resources = vec![resource_id("sandbox_mod:textures/block/reactor")];
+        registry.register_item(ItemDefinition {
+            common,
+            max_stack: 16,
+            icon: Some(texture_key("sandbox_mod:textures/block/reactor")),
         })
     }
+}
+
+fn reactor_use(
+    context: &rustcraft_game_api::HandlerContext<'_>,
+    commands: &mut CommandBuffer,
+) -> Result<(), rustcraft_game_api::state_schema::StateError> {
+    use rustcraft_game_api::state_schema::StateValue;
+    let schema = &context.definition.state_schema;
+    // Typed immutable parameter; neither a classification tag nor a security grant.
+    if context
+        .definition
+        .common
+        .properties
+        .mass_kg
+        .is_none_or(|mass| mass <= 0.)
+    {
+        return Ok(());
+    }
+    let mut values = schema.decode(context.state.variant)?;
+    for assignment in &mut values {
+        if let StateValue::Powered(value) = &mut assignment.value {
+            *value = !*value;
+        }
+        if let StateValue::Facing(value) = &mut assignment.value {
+            *value = rustcraft_engine_core::orientation::Facing::East;
+        }
+    }
+    commands.set_block(
+        context.position,
+        BlockState {
+            variant: schema.encode(&values)?,
+            ..context.state
+        },
+    );
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -437,6 +519,17 @@ fn main() {
     assert_eq!(commands.apply(&mut world), 1);
     assert_eq!(world.get(TARGET), ids.pulse);
 
+    let reactor_position = BlockPos { x: 2, y: 1, z: 0 };
+    world.set_state(reactor_position, BlockState::new(ids.reactor));
+    let mut effects = profile
+        .dispatch(
+            rustcraft_game_api::ContentEvent::Use,
+            reactor_position,
+            world.state(reactor_position),
+        )
+        .expect("admit reactor use");
+    assert_eq!(effects.apply(&mut world), 1);
+
     let output = Path::new("target/sample-game/sandbox-test.png");
     let atlas_outputs = write_atlas_debug(&resources, Path::new("target/sample-game/atlas"))
         .expect("write sandbox atlas diagnostics");
@@ -599,5 +692,121 @@ mod tests {
         assert_eq!(output.len(), 1);
         assert_eq!(output[0].1.get((0, 0, 0)), ids.foundation);
         assert_eq!(output[0].1.get((0, 1, 0)), ids.empty);
+    }
+    #[test]
+    fn c2_common_categories_state_handler_and_render_consumer() {
+        use rustcraft_game_api::ContentEvent;
+        let profile = compile_profile(schedule().descriptors());
+        let ids = RuntimeIds::resolve(&profile);
+        let definition = profile.block(ids.reactor).unwrap();
+        let tag = profile
+            .tag_index(&id("sandbox_mod:tag/diagnostic"))
+            .unwrap();
+        let capability = profile
+            .capability_index(&id("voxel_std:capability/interactable"))
+            .unwrap();
+        assert!(definition.common.has_tag(tag));
+        assert!(definition.common.has_capability(capability));
+        let item = profile
+            .item(profile.item_id(&id("sandbox_mod:item/charge")).unwrap())
+            .unwrap();
+        assert!(item.common.has_tag(tag));
+        assert!(!item.common.has_capability(capability));
+        assert_eq!(item.max_stack, 16);
+        let mut world = build_world(ids);
+        world.set_state(TARGET, BlockState::new(ids.reactor));
+        let mut commands = profile
+            .dispatch(ContentEvent::Use, TARGET, world.state(TARGET))
+            .unwrap();
+        assert_eq!(
+            world.state(TARGET).variant,
+            0,
+            "handler cannot mutate world directly"
+        );
+        assert_eq!(commands.apply(&mut world), 1);
+        let (_, render) = compile_render_resources(&profile);
+        let state = world.state(TARGET);
+        assert_eq!(
+            render.block_model(state).unwrap().rotation,
+            ModelRotation::facing(rustcraft_engine_core::orientation::Facing::East)
+        );
+        assert_eq!(
+            profile
+                .import_state(&definition.key, &profile.export_state(state).unwrap().1)
+                .unwrap(),
+            state
+        );
+    }
+
+    #[test]
+    fn c2_existing_chunk_codec_reopens_canonical_variant_with_reordered_profile() {
+        use rustcraft_world::{SemanticBlockResolver, WorldStorage};
+        struct Resolver(CompiledGameProfile);
+        impl SemanticBlockResolver for Resolver {
+            fn key_for(&self, state: BlockState) -> Option<&str> {
+                let definition = self.0.block(state.block)?;
+                definition.state_schema.validate(state.variant).ok()?;
+                Some(definition.key.as_str())
+            }
+            fn state_for(&self, key: &str, variant: u16) -> Option<BlockState> {
+                let block = self.0.block_id(&block_key(key))?;
+                self.0.block(block)?.state_schema.validate(variant).ok()?;
+                Some(BlockState { block, variant })
+            }
+        }
+        let mut registry = GameRegistry::default();
+        SandboxPackage.register(&mut registry).unwrap();
+        SandboxModPackage.register(&mut registry).unwrap();
+        let authored = authored_profile(vec![]);
+        let forward = Resolver(registry.compile(&authored).unwrap());
+        let mut reordered = authored;
+        reordered.packages.reverse();
+        let reverse = Resolver(registry.compile(&reordered).unwrap());
+        let a = RuntimeIds::resolve(&forward.0);
+        let b = RuntimeIds::resolve(&reverse.0);
+        assert_ne!(a.reactor, b.reactor);
+        let mut commands = forward
+            .0
+            .dispatch(
+                rustcraft_game_api::ContentEvent::Use,
+                TARGET,
+                BlockState::new(a.reactor),
+            )
+            .unwrap();
+        let mut world = World::new(a.empty);
+        commands.apply(&mut world);
+        let state = world.state(TARGET);
+        let mut section = rustcraft_engine_core::Chunk::new(a.empty);
+        section.set_state((0, 1, 0), state);
+        let pos = rustcraft_engine_core::ChunkPos { x: 0, z: 0 };
+        let stored = WorldStorage::encode_runtime_chunk(pos, [(0, section)], &forward).unwrap();
+        let root = std::env::temp_dir().join(format!("rustcraft-c2-codec-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let storage = WorldStorage::open(&root, "disposable").unwrap();
+        storage.store_chunk_measured(&stored).unwrap();
+        drop(storage);
+        let reopened = WorldStorage::open(&root, "disposable").unwrap();
+        let sections = reopened.load_runtime_chunk(pos, &reverse).unwrap();
+        assert_eq!(
+            sections[0].1.state((0, 1, 0)),
+            BlockState {
+                block: b.reactor,
+                variant: state.variant
+            }
+        );
+        assert_eq!(
+            forward.0.export_state(state).unwrap(),
+            reverse
+                .0
+                .export_state(sections[0].1.state((0, 1, 0)))
+                .unwrap()
+        );
+        assert!(
+            reverse
+                .state_for("sandbox_mod:block/reactor", 999)
+                .is_none()
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

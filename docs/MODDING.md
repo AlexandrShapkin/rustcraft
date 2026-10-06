@@ -50,3 +50,13 @@ Downloaded executable code remains sandboxed, capability-limited and quota-limit
 native-library autoexec or ambient host access. A content interface capability does not itself grant
 host security authority. Trusted local Rhai remains an explicitly authorized tooling adapter, not the
 untrusted mod runtime. Server roles and gameplay modes cannot bypass these boundaries.
+
+## Current C2 native contract
+
+Composed ContentDefinition, voxel/item specialization, typed mass/friction parameters, indexed
+classification/contract membership and compact definition-local state are implemented in Game API.
+Native use handlers receive controlled immutable context and emit validated commands. The independent
+sandbox registers reactor/charge content through these APIs; no Minecraft or renderer dependency is
+required by authoring. Item handlers, entity/fluid specialization and downloaded execution remain future
+work. The future WASM adapter must preserve this semantic command boundary and add execution quotas;
+C2 does not implement a sandbox, stable ABI or complete mod SDK.

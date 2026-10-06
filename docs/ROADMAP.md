@@ -20,7 +20,7 @@ Current focus: **C2**. Execution order and state are generated from [stages.toml
 | --- | --- | --- |
 | F1 | closed | [unified client path & real-hardware field validation](stages/F1.md) |
 | A1 | closed | [external identity, policy boundary & trust preparation](stages/A1.md) |
-| C2 | planned | [unified content definition & capability model](stages/C2.md) |
+| C2 | active | [unified content definition & capability model](stages/C2.md) |
 | BG1 | planned | [generalized block geometry & model system](stages/BG1.md) |
 | DX2 | planned | [tooling equivalence, workflow convergence & retirement](stages/DX2.md) |
 | RF1 | planned | [structural codebase refactor & code-graph optimization](stages/RF1.md) |

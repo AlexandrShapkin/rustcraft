@@ -37,3 +37,12 @@ rules, and game-level permissions distinct from host security. No Minecraft-spec
 vehicle taxonomy enters engine-core. AABB/cube paths remain efficient common cases, not permanent
 restrictions on gameplay geometry. [VOXEL_SPACES](VOXEL_SPACES.md) defines cross-space contact separately
 from local voxel adjacency; movement must preserve local block logic.
+
+## C2 implemented extension boundary
+
+Games register composed semantic voxel/item definitions and bounded native use handlers through the
+public Game API. Tags classify, typed properties parameterize, content capabilities declare contracts,
+and definition-local state describes instances; none grants user privilege. Handlers emit commands
+for authoritative application, without raw mutable world access. Sandbox proves independent content;
+Minecraft work/recipe/drop values remain game policy. Existing legacy orientation/save bits remain
+compatible; generalized shapes and collision consumers belong to BG1.
