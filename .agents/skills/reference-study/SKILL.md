@@ -1,3 +1,8 @@
+---
+name: reference-study
+description: Study reference implementations, specifications and assets before implementing player-observable Beta-like RustCraft behavior, extracting semantic invariants without porting reference architecture.
+---
+
 # Feature reference study
 
 Use this skill before implementing any player-observable Beta-like behavior: controls, gameplay,
