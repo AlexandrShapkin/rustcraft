@@ -7,7 +7,8 @@ description: Maintain canonical planning, context navigation, decisions and docu
 
 Read [INDEX](../../../docs/INDEX.md) for ownership/precedence. Git/source proves implementation;
 reports/audits prove only their recorded baseline. Registry owns mutable order/state/focus, contracts
-own scope, domain docs own architecture, decisions own rationale and GitHub owns live concerns.
+own scope, domain docs own architecture, decisions own rationale and GitHub owns live concerns
+and milestone delivery horizons (which do not activate stages).
 
 - Run `just docs-check` first; use `just codex-context ID --offline` for compact navigation.
 - For planning additions, use `just stage-new ID "Title" AFTER`, then author the one contract and
@@ -23,4 +24,5 @@ own scope, domain docs own architecture, decisions own rationale and GitHub owns
 - Update EVIDENCE_INDEX when accepting a report; do not invent SHAs, CI or metrics and do not turn it
   into a second evidence database. Preserve historical chronology and label current versus target.
 
-For issue/implementation lifecycle link [WORKFLOW](../../../docs/WORKFLOW.md) rather than duplicating it.
+For PR publication, proposed closeout and issue/milestone reconciliation follow canonical
+[WORKFLOW](../../../docs/WORKFLOW.md) rather than duplicating its lifecycle here.
