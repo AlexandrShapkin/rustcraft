@@ -202,7 +202,10 @@ values. Import validates the key/schema/value domains. This is a semantic bounda
 wire protocol or a replacement save envelope. Current chunks still store semantic key plus u16 variant;
 the existing codec roundtrip under reordered profiles is tested. A schema version/layout change needs
 an explicit game compatibility/migration policy; silently reinterpreting persisted variants is forbidden.
-Canonical schema contracts contribute to profile fingerprints.
+Canonical schema contracts contribute to profile fingerprints. The existing chunk envelope does not
+carry a per-definition schema version: bumping a version alone cannot protect old key+variant data.
+Published layouts must remain frozen or use a new semantic definition key / explicit game-owned
+migration before reinterpretation; C2 introduces no automatic migration.
 
 Existing Minecraft and other untouched voxel definitions explicitly select the legacy orientation
 adapter with `state_schema: None`. Their historical bits, semantic fingerprints and persisted variants

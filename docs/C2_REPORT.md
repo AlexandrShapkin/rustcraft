@@ -1,4 +1,6 @@
-# C2 report — implementation validation
+# C2 report
+
+Historical evidence for the recorded baseline; the registry owns current stage state.
 
 ## Baseline
 
@@ -10,7 +12,7 @@ Issue #15 was queried open and revalidated against the actual global orientation
 
 Common typed content composition, voxel/item category proof, indexed tags/capabilities, semantic
 resources, bounded native Use handlers, compact definition-local state compilation, semantic
-serialization and existing renderer/chunk-codec consumers. Acceptance remains pending public CI.
+serialization and existing renderer/chunk-codec consumers. Implementation acceptance passed on Ubuntu and Windows.
 
 ## Implementation
 
@@ -86,13 +88,16 @@ run sequentially with CARGO_BUILD_JOBS=2; recovery debug settings do not alter o
 
 ## Issues resolved
 
-No issue is falsely closed at this implementation checkpoint.
+No issue was falsely closed. The C2-owned foundation of #15 is accepted; the issue remains open
+for its explicitly transferred BG1 consumer acceptance. No new ticket was created.
 
 ## Issues remaining / waivers
 
-#15: C2 foundation implemented; generalized geometry/model/collision consumer proof belongs to BG1
-per the stage contract and explicit owner authorization. After accepted implementation CI, record
-this evidence and transfer the precise residual acceptance to stage:BG1, keeping the issue open.
+#15: C2 foundation accepted; generalized geometry/model/collision consumer proof transferred to BG1
+per the stage contract and explicit owner authorization. The issue is OPEN with stage:BG1; its
+body and evidence comment record the exact completed portion and residual acceptance.
+BG1 must demonstrate state-selected generalized model/collision/selection data, including half/shape
+combinations, in a coherent independent real consumer with codec/CPU/platform regressions.
 This is a scoped owner transfer, not a waiver of BG1 acceptance or completion of R1.0-003.
 
 ## Known limitations
@@ -100,16 +105,22 @@ This is a scoped owner transfer, not a waiver of BG1 acceptance or completion of
 Only voxel Use dispatch and current Empty/FullCube collision exist. No generalized geometry, fluid
 simulation, ECS, WASM/mod downloading, complete mod SDK or scripting DSL is implemented. Canonical
 schema version/layout changes need an explicit game migration policy; C2 does not invent a generic
-save-format migration. Legacy variant permissiveness is preserved compatibility only.
+save-format migration. Existing chunks carry no per-definition version: a version bump alone cannot
+protect old key+variant data. Published layouts must stay frozen or use a new semantic key / explicit
+game migration before reinterpretation. Legacy variant permissiveness is preserved compatibility only.
 
 ## Implementation SHA
 
-Pending coherent implementation commit; discover through Git history.
+`bbfa3bf4395aea2992a68daea9f3c1a99edc0402` — composed content, schemas, native handler/renderer and codec proof.
 
 ## CI
 
-Pending publication; both Ubuntu and Windows are required before acceptance.
+[Implementation CI 37397475236](https://github.com/AlexandrShapkin/rustcraft/actions/runs/37397475236):
+Ubuntu success, Windows success, including the final complete workspace suite.
+Closeout CI is discoverable by the closeout commit below; both platforms must pass.
 
 ## Closeout SHA
 
-Pending accepted closeout. C2 currently active; focus C2; BG1 planned and not started.
+The commit titled `Record C2 acceptance` introducing this finalized report is the closeout identity;
+resolve with `git log -1 --format=%H --grep='^Record C2 acceptance$'`.
+Registry records C2 closed, focus BG1 and BG1 planned. BG1 implementation was not started.

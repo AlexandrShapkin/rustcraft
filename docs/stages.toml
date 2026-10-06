@@ -1,6 +1,6 @@
 # Canonical mutable execution plan. Domain scope belongs to Markdown contracts.
 version = 1
-focus = "C2"
+focus = "BG1"
 sequence = ["F1", "A1", "C2", "BG1", "DX2", "RF1", "VS1", "READY1", "M5", "M6", "M7"]
 
 [[stage]]
@@ -26,7 +26,7 @@ source_areas = ["crates/agent-api", "crates/bot-api", "crates/mod-api", "crates/
 [[stage]]
 id = "C2"
 title = "unified content definition & capability model"
-state = "active"
+state = "closed"
 contract = "docs/stages/C2.md"
 issue_label = "stage:C2"
 relevant_docs = ["docs/CONTENT_SYSTEM.md", "docs/GAMEPLAY_CONTRACT.md", "docs/MODDING.md"]
