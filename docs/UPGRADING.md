@@ -46,7 +46,7 @@ policy or permission to execute commands from other projects.
 Pre-migration accepted base: `ca1ea1547fbcdd9e0df17e2c8d7a237102053e0c`. Its Git blobs retain every original
 entrypoint/template; the migration commit retains the new twelve-file source
 snapshot and both source records for rollback. No generated bundle is published.
-On a clean bounded rollback branch, review a revert of this migration commit:
+On a clean bounded rollback branch, review reverts of this migration's commits in reverse order:
 restore the old entrypoints and remove only task-added source/reference/notice
 files. Preserve later local changes and unrelated work; conflicts require explicit
 review. For later source updates, revert only the affected channel's reviewed
