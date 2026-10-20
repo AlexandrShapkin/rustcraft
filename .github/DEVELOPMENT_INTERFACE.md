@@ -154,6 +154,7 @@ pass repeated `--peer /path/to/other/repository` for cross-repository comparison
 The checker pins the shared revision and verifies required product gate text;
 it does not execute those gates or confer authority.
 
+```markdown
 <!-- shared-agent:start -->
 # Agent engineering contract
 
@@ -236,3 +237,4 @@ or preserved. Separate source preparation from installation and live-host proof.
 
 ## 10. Product-specific rules
 <!-- shared-agent:end -->
+```
