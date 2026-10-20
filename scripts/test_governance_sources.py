@@ -48,6 +48,14 @@ class GovernanceSources(unittest.TestCase):
                 with self.subTest(workflow=workflow, command=command):
                     self.assertIn(command, text)
 
+    def test_canonical_bytes_keep_lf_on_windows(self):
+        attributes = (ROOT / '.gitattributes').read_text(encoding='utf-8').splitlines()
+        paths = [*RECORDS, 'AGENTS.local.md', 'GOVERNANCE-NOTICE.txt']
+        for name in RECORDS:
+            paths.extend(json.loads((ROOT / name).read_bytes())['files'])
+        for name in paths:
+            self.assertIn('/' + name + ' text eol=lf', attributes)
+
     def fixture(self, destination):
         for name in [*RECORDS, 'AGENTS.local.md', 'GOVERNANCE-NOTICE.txt']:
             p = destination / name

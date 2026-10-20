@@ -1,0 +1,17 @@
+# Preserve reviewed source bytes across Git autocrlf checkouts.
+/.engineering-kit/PROFILE.md text eol=lf
+/.engineering-kit/contract/AGENT_COMMON.md text eol=lf
+/.engineering-kit/contract/DEVELOPMENT_INTERFACE.md text eol=lf
+/.engineering-kit/skills/ek-context/SKILL.md text eol=lf
+/.engineering-kit/skills/ek-pr-closeout/SKILL.md text eol=lf
+/.engineering-kit/skills/ek-verify/SKILL.md text eol=lf
+/.engineering-kit/source.json text eol=lf
+/.github/DEVELOPMENT_INTERFACE.md text eol=lf
+/.github/ISSUE_TEMPLATE/task.yml text eol=lf
+/.github/pull_request_template.md text eol=lf
+/.project-template/OWNERSHIP.md text eol=lf
+/.project-template/source.json text eol=lf
+/AGENTS.local.md text eol=lf
+/AGENTS.md text eol=lf
+/GOVERNANCE-NOTICE.txt text eol=lf
+/docs/WORKFLOW.md text eol=lf
