@@ -1,0 +1,35 @@
+# Autonomous Development Contract v1. Metadata only, NOT executable authority.
+# Candidate prepared against Codex Smart Issue #165 / Draft #166 / Draft #167.
+schema_version = 1
+project_id = "rustcraft"
+project_type = "rust-workspace"
+repository = "AlexandrShapkin/rustcraft"
+
+[context]
+entrypoint = "AGENTS.md"
+architecture = "docs/INDEX.md"
+workflow = "docs/WORKFLOW.md"
+current_plan = "docs/stages.toml"
+security = "docs/SECURITY.md"
+task_source = "github-issues"
+
+[verification]
+# Names are externally mapped IDs; not shell commands or evidence of execution.
+# RustCraft's full gate is just ci, plus Ubuntu/Windows exact-head CI.
+profiles = ["rust-ci", "rust-tests", "rust-format", "rust-clippy", "docs-check", "linux-ci", "windows-ci"]
+ci_workflows = [".github/workflows/ci.yml"]
+live_device_proof = "separate"
+
+[execution]
+enabled = false
+max_stage_seconds = 1200
+max_changed_files = 2
+max_changed_lines = 180
+checkpoint_mode = "external-private"
+auto_merge = false
+auto_deploy = false
+
+[change_policy]
+# Source hints are NOT authority. DX2 remains planned, not activated.
+candidate_paths = ["crates/", "docs/", "scripts/", "AGENTS.md", "justfile"]
+blocked_unattended_paths = [".github/", "reference/", "automation/"]
