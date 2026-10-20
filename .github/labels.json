@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "note": "Declarative GitHub label taxonomy. Changes to actual GitHub labels require a separate authenticated, reviewed admin migration; this file is not executable.",
+  "priority_order": [
+    "priority:P0",
+    "priority:P1",
+    "priority:P2",
+    "priority:P3"
+  ],
+  "labels": [
+    {
+      "name": "priority:P0",
+      "color": "B60205",
+      "description": "Critical security, safety, data integrity or foundational blocker"
+    },
+    {
+      "name": "priority:P1",
+      "color": "D93F0B",
+      "description": "Blocks current authorized work or a required integration gate"
+    },
+    {
+      "name": "priority:P2",
+      "color": "FBCA04",
+      "description": "Important planned work with measurable acceptance"
+    },
+    {
+      "name": "priority:P3",
+      "color": "C2E0C6",
+      "description": "Deferred hardening or optional improvement"
+    },
+    {
+      "name": "area:core",
+      "color": "5319E7",
+      "description": "Core product or architecture"
+    },
+    {
+      "name": "area:automation",
+      "color": "0052CC",
+      "description": "Development automation and project contract"
+    },
+    {
+      "name": "area:ci",
+      "color": "1D76DB",
+      "description": "Continuous integration and verification"
+    },
+    {
+      "name": "area:docs",
+      "color": "0075CA",
+      "description": "Documentation, onboarding and canonical references"
+    },
+    {
+      "name": "area:security",
+      "color": "B60205",
+      "description": "Security policy or boundary"
+    },
+    {
+      "name": "type:maintenance",
+      "color": "6F42C1",
+      "description": "Maintenance of supported existing behavior"
+    },
+    {
+      "name": "type:documentation",
+      "color": "0E8A16",
+      "description": "Documentation-only change"
+    },
+    {
+      "name": "type:investigation",
+      "color": "D4C5F9",
+      "description": "Evidence gathering with an explicit decision gate"
+    },
+    {
+      "name": "type:security",
+      "color": "B60205",
+      "description": "Security-specific review or remediation"
+    }
+  ],
+  "legacy_aliases": [
+    {
+      "repository": "codex-smart",
+      "pattern": "severity:P*",
+      "target": "priority:P*",
+      "migration": "explicit reviewed mapping only; never auto-delete, overwrite, or double-apply"
+    }
+  ],
+  "not_automated": [
+    "creation",
+    "renaming",
+    "relabeling historical Issues",
+    "deletion",
+    "Project/milestone updates"
+  ]
+}
