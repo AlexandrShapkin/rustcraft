@@ -14,6 +14,7 @@ The owning cross-project task is
 | `AGENTS.md` | Agent bootstrap and repo-local invariants; never a capability grant |
 | `.github/DEVELOPMENT_INTERFACE.md` | This consistent cross-repository workflow |
 | `.github/ISSUE_TEMPLATE/task.yml` | Canonical form for ordinary new development tasks |
+| `.github/labels.json` | Same non-executable desired GitHub label names/colors; not a server migration |
 | `.github/pull_request_template.md` | Shared PR evidence and security checklist |
 | `.github/workflows/` | Actual native CI; never replaced by a generic smoke check |
 | `automation/project.toml` | Optional **disabled-only** Contract v1 metadata, not an executor |
@@ -73,14 +74,18 @@ prohibited regardless of template or green CI.
 
 The **semantics** of status/context/doctor/check/docs-check/smoke should
 ultimately be offered through a trusted, offline, read-only or appropriately
-bounded adapter in every repository. Some current repos lack `just` recipes
-for all names; do **not** fabricate green no-op recipes or silently weaken
-product checks to make CLI names match. Missing capability is explicit.
+bounded adapter in every repository. The common `status`, `context`, `doctor`, `docs-check`, `verify` surface is
+being added through separate per-repository Draft PRs. `verify` must run the
+full native project checks, not a no-op or weaker smoke recipe. GitHub's
+exact-head/platform/security checks and independent authority remain separate.
+Do **not** infer command availability on accepted `main` from an unmerged PR,
+or automatically install `just`/toolchains to satisfy an absent dependency.
 
 ## GitHub administration / migration
 
 This PR standardizes tracked templates and written policy. GitHub server
 labels, Projects fields, milestones, branch rules and historical Issue labels
+(**including the declarative `.github/labels.json` proposal**)
 are **not** modified by adding these files. Harmonize them in a separate
 authenticated administrative migration after an inventory, with no removal
 of historical labels before mappings and rollback are verified. No
