@@ -1,0 +1,56 @@
+name: "Bug report"
+description: "Reproducible defect or security-safe regression"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Search existing Issues. Never post tokens, credentials, private hardware data or sensitive evidence. Use the private security process where applicable."
+  - type: textarea
+    id: goal
+    attributes:
+      label: "Observed problem and expected behavior"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Reproduction / sanitized evidence"
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "Scope and non-goals"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "Acceptance / regression test"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: "Native CI / platform verification"
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: "Risk / permissions"
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      options: ["P0 - critical", "P1 - blocking", "P2 - important", "P3 - later"]
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: "Primary area"
+    validations:
+      required: true
