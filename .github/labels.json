@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "Declarative GitHub label taxonomy. Changes to actual GitHub labels require a separate authenticated, reviewed admin migration; this file is not executable.",
+  "note": "Canonical Template label taxonomy; initial scaffold, not a managed sync channel. Apply only through an authorized reviewed metadata migration.",
   "priority_order": [
     "priority:P0",
     "priority:P1",
@@ -72,21 +72,32 @@
       "name": "type:security",
       "color": "B60205",
       "description": "Security-specific review or remediation"
-    }
-  ],
-  "legacy_aliases": [
+    },
     {
-      "repository": "codex-smart",
-      "pattern": "severity:P*",
-      "target": "priority:P*",
-      "migration": "explicit reviewed mapping only; never auto-delete, overwrite, or double-apply"
+      "name": "stage:foundation",
+      "color": "C5DEF5",
+      "description": "Accepted administrative and technical foundation"
+    },
+    {
+      "name": "stage:distribution",
+      "color": "C5DEF5",
+      "description": "Publication boundaries and distribution readiness"
+    },
+    {
+      "name": "stage:release",
+      "color": "C5DEF5",
+      "description": "Independent release policy and qualification"
+    },
+    {
+      "name": "stage:rollout",
+      "color": "C5DEF5",
+      "description": "Individually reviewed consumer adoption"
     }
   ],
   "not_automated": [
-    "creation",
-    "renaming",
-    "relabeling historical Issues",
-    "deletion",
-    "Project/milestone updates"
+    "GitHub writes",
+    "historical relabeling",
+    "renaming/deletion",
+    "Projects/milestone updates"
   ]
 }
