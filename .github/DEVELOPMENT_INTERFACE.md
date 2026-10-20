@@ -81,6 +81,58 @@ exact-head/platform/security checks and independent authority remain separate.
 Do **not** infer command availability on accepted `main` from an unmerged PR,
 or automatically install `just`/toolchains to satisfy an absent dependency.
 
+## Required workspace lifecycle and disk-space hygiene
+
+Disk space is a shared development resource. **The end of every completed,
+abandoned or superseded task includes an explicit cleanup audit**, and any
+reported low-disk condition triggers a read-only inventory **before** starting
+another heavyweight build. Do not accumulate obsolete worktrees, short-lived
+branches, repeated build products, caches or generated artifacts indefinitely.
+
+1. **Inventory first:** identify the exact checkout/root, disk usage, current
+   branch and HEAD; inspect `git worktree list --porcelain`, local/remote
+   branches, `git status --porcelain=v1 --untracked-files=all`, open PRs,
+   active tasks and the sizes/owners of candidate build/cache directories.
+   Enumerating is not permission to delete.
+2. **Generated artifacts and caches:** promptly remove no-longer-needed
+   *project-owned, reproducible* build/test outputs and caches (for example
+   `target/`, `__pycache__/`, `.pytest_cache/`, `node_modules/`,
+   `dist/` where actually generated). First confirm their source-based
+   regeneration, exact bounded paths, that no process is using them, and that
+   they contain no unique reports, downloaded-only inputs or local user data.
+   Do not delete an entire directory by name alone.
+3. **Worktrees:** remove a non-current worktree promptly after its task
+   has been merged/closed or deliberately abandoned **only if** it has no
+   staged, unstaged, untracked or otherwise unsaved content; no active
+   process/task/PR needs it; its required commits are recoverable from
+   verified refs; and the exact worktree path is identified. Preserve the
+   active checkout and registered worktrees while a task is open. Do not
+   force-remove or prune an uncertain worktree.
+4. **Branches:** delete obsolete **local** task branches only after
+   confirming their merged/recoverable state or explicit abandonment and
+   checking that they have no live Issue/PR, worktree or unsaved commits.
+   Never delete `main`, protected/release branches or any open/draft PR
+   branch, including a vetoed or retained PR. **Remote** branch deletion
+   is a separate, explicitly authorized source-control operation; it is
+   not implied by local disk cleanup. Do not perform indiscriminate
+   `git branch -D`, `git clean -fdx`, `git worktree prune`,
+   `git gc --prune=now` or recursive deletion against guessed paths.
+5. **Preserve evidence:** do not silently delete private checkpoints,
+   unmerged code, local databases, benchmark baselines, reference assets,
+   unique logs/reports, CI/debug evidence, security artifacts or personal
+   files. Archive independently valuable material under the owner's
+   storage policy first; deletion requires verified redundancy and scope.
+   Age, untracked status and absence from the last commit are **not**
+   proof that data is disposable.
+
+For every cleanup, record privately the exact paths/ref names, classification,
+preconditions, actions, freed disk space if actually measured, and any
+protected/uncertain leftovers. On ambiguity, **do not delete**: report a
+bounded candidate inventory and the blocking evidence. A policy in Git cannot
+authorize execution on the owner's computer, destructive remote operations,
+or use of secrets. Do not add a background auto-cleaner or privileged CI
+cleanup on the strength of this text alone.
+
 ## GitHub administration / migration
 
 This PR standardizes tracked templates and written policy. GitHub server
