@@ -1,0 +1,95 @@
+name: "Task (shared development interface)"
+description: "A bounded unit of development, investigation, repair or documentation work"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search open and closed Issues before filing. GitHub Issues is the only live
+        task queue. Do not disclose credentials, private devices, prompts or data.
+        Form selections are metadata for triage, never execution authority.
+  - type: textarea
+    id: goal
+    attributes:
+      label: "Goal / problem"
+      description: "What observable problem or outcome does this issue own?"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Current evidence / baseline"
+      description: "Observed state, links and limitations. Mark unknown facts as unknown."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "In scope / out of scope"
+      description: "State both the bounded change and explicit non-goals."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "Acceptance criteria"
+      description: "Measurable completion and refusal/negative criteria."
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: "Verification and required platforms"
+      description: "Native tests, CI, Security, Windows/Linux/device proof as appropriate."
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "Dependencies / blockers"
+      description: "Link owning Issues/PRs across repos or write None."
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: "Risk / permissions / sensitive data"
+      description: "Threat boundary and any independently required authorization."
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      options:
+        - "P0 - critical / safety or data integrity"
+        - "P1 - blocking current authorized work"
+        - "P2 - planned important"
+        - "P3 - later improvement"
+    validations:
+      required: true
+  - type: dropdown
+    id: work_kind
+    attributes:
+      label: "Work kind"
+      options:
+        - "bug"
+        - "enhancement"
+        - "maintenance"
+        - "documentation"
+        - "investigation"
+        - "security"
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: "Primary area"
+      description: "One area; use the repository's existing GitHub area label if present."
+      placeholder: "core / automation / ci / docs / security / ..."
+    validations:
+      required: true
+  - type: input
+    id: stage
+    attributes:
+      label: "Stage / roadmap pointer (optional)"
+      description: "Navigation and dependency only; never permission to start work."

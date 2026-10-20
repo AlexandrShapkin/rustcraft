@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Security or private evidence"
+    url: "https://github.com/AlexandrShapkin/rustcraft/blob/main/docs/SECURITY.md"
+    about: "Read the repository's security policy. Do not publish proprietary fixtures, secrets or private devices."

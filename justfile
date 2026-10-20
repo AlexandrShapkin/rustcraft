@@ -382,3 +382,9 @@ f1-test:
 # Owner-controlled normal release client; disposable F1 state and bounded trace.
 f1-manual:
     python3 scripts/f1_client.py release --manual
+
+# Shared cross-repository entry point; native stage reader still owns interpretation.
+alias context := codex-context
+
+# Full native gate. Exact-head Ubuntu/Windows CI and hardware proof remain separate.
+verify: ci
