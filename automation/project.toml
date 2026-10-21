@@ -1,5 +1,5 @@
 # Autonomous Development Contract v1. Metadata only, NOT executable authority.
-# Candidate prepared against Codex Smart Issue #165 / Draft #166 / Draft #167.
+# Schema: Codex Smart #166; passive validator #167 (integration pending).
 schema_version = 1
 project_id = "rustcraft"
 project_type = "rust-workspace"

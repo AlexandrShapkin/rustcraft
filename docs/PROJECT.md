@@ -36,3 +36,21 @@ must be reconciled explicitly during independent review; do not merge either
 policy activation blindly. This branch starts from main, not an unreviewed stack.
 Author checks, exact-head native CI, independent acceptance and merge authority
 remain separate. No consumer is ACCEPTED by opening this Draft.
+
+## Bounded release matrix qualification
+
+| Product | Targets / format | Qualification |
+| --- | --- | --- |
+| Client and server | Linux tar.gz; Windows zip | Existing `scripts/release.py` build/check/publication-check and both native CI platforms; package SHA-256 sidecars. |
+
+A significant release changes the user-facing client/server delivery. Keep the
+existing pre-release history immutable; a final `vMAJOR.MINOR.PATCH` release is a
+separate decision. Native checks, content/package compatibility and proprietary
+asset exclusions in `docs/RELEASE.md` remain required. Notes must describe player
+and operator effects, upgrade/rollback and known limitations; generated PR-title
+notes alone do not satisfy the shared narrative requirement.
+
+Contract v1 adoption remains inert. Its canonical schema and passive validator
+are Codex Smart #166/#167; independently pinned adapter mappings and Git evidence
+must be accepted before claiming authenticated readiness. GitHub Issues remain
+the live queue. No runtime or optional Hub integration is enabled.
