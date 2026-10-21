@@ -73,3 +73,6 @@ GitHub alone determines live concern state.
 [REFERENCE_POLICY](REFERENCE_POLICY.md) and [reference sources](../reference/SOURCES.md) govern evidence
 and proprietary materials. Read for behavior/asset research; never make offline correctness depend
 on private assets. Historical captures remain evidence, not redistributed project resources.
+
+Shared administrative lifecycle: [Template interface](../.github/DEVELOPMENT_INTERFACE.md).
+Native rules: [AGENTS.local.md](../AGENTS.local.md); [source ownership and updates](PROJECT.md).

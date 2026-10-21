@@ -1,0 +1,32 @@
+{
+  "method": "reviewed-public-source-migration",
+  "repository": "AlexandrShapkin/codex-engineering-kit",
+  "revision": "f808af695c7787fb68f332d8ff1214fb2100f9b5",
+  "license_at": "cdfc2050733388402a70674d22de3f9e7e2a5a74",
+  "files": {
+    ".engineering-kit/contract/AGENT_COMMON.md": {
+      "source_path": "contract/AGENT_COMMON.md",
+      "sha256": "3465b1b6a879859b3b327466f4c069d25a8cf50c0b0dd9b2bf4e5a75959714be"
+    },
+    ".engineering-kit/contract/DEVELOPMENT_INTERFACE.md": {
+      "source_path": "contract/DEVELOPMENT_INTERFACE.md",
+      "sha256": "f1b7f088b1475d29b09830e459570544e57323c9ab11744ade805aa31e2b29c6"
+    },
+    ".engineering-kit/skills/ek-context/SKILL.md": {
+      "source_path": "skills/ek-context/SKILL.md",
+      "sha256": "8ff6fd5cb4597418ba52a84cca775ed9765ea97c832473fd12b4e8406ca5b482"
+    },
+    ".engineering-kit/skills/ek-pr-closeout/SKILL.md": {
+      "source_path": "skills/ek-pr-closeout/SKILL.md",
+      "sha256": "e70f3629b31b3c9d64a80d092bef906691c6bad499e01f40f3bc0d1362fcb0fb"
+    },
+    ".engineering-kit/skills/ek-verify/SKILL.md": {
+      "source_path": "skills/ek-verify/SKILL.md",
+      "sha256": "953af86f8b3581ef8acb5310c34bd0a2359761bb2ba2f4ee1a4be2aaed2a3de8"
+    },
+    ".engineering-kit/PROFILE.md": {
+      "source_path": "profiles/sync/minimal.md",
+      "sha256": "84e63ea30041e1c68c70d569be93005978dcc9530f77c7a8ebbaa2c6cd735eb0"
+    }
+  }
+}

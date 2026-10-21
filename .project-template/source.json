@@ -1,0 +1,32 @@
+{
+  "method": "reviewed-public-source-migration",
+  "repository": "AlexandrShapkin/project-template",
+  "revision": "d15d0a20b91f54be1a27b78d90f9d367b2e46408",
+  "license_at": "8550ec7fa8f58dc41a8af652ff912b62ebf78c22",
+  "files": {
+    "AGENTS.md": {
+      "source_path": "AGENTS.md",
+      "sha256": "f2bd56969e314ae5f89c8fad4a5bb3e00efc6c7f2170523e9b06da81e1b7cb69"
+    },
+    ".github/DEVELOPMENT_INTERFACE.md": {
+      "source_path": ".github/DEVELOPMENT_INTERFACE.md",
+      "sha256": "0608d6582bd25052dc1a3c3dac63845b7efc58bf131682ff92f6f244ed80a433"
+    },
+    ".github/ISSUE_TEMPLATE/task.yml": {
+      "source_path": ".github/ISSUE_TEMPLATE/task.yml",
+      "sha256": "4e0302c98a6a9ebfe1d78dc09865d81080e2487d71b5753e2e4d299ae1537dfb"
+    },
+    ".github/pull_request_template.md": {
+      "source_path": ".github/pull_request_template.md",
+      "sha256": "981a47114f1158431f56f94b4aad1e799a8669baac93de1198cd26d80699725b"
+    },
+    ".project-template/OWNERSHIP.md": {
+      "source_path": ".project-template/OWNERSHIP.md",
+      "sha256": "4aac2285025e41b8f30ea1635e53c2260d558500117df7b89db5f84c4e55dc77"
+    },
+    "docs/WORKFLOW.md": {
+      "source_path": "docs/WORKFLOW.md",
+      "sha256": "923fd338abe7aa969505f52c764f5fae2921e3feaae681957b664415754988a6"
+    }
+  }
+}
