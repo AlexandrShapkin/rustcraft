@@ -7300,9 +7300,11 @@ mod tests {
         let mut app = ClientApp::new(None, None);
         app.simulation = Some(simulation);
         app.world_storage = Some(storage.clone());
-        app.player_autosave_interval = Duration::from_secs(1);
-        app.last_player_autosave = Instant::now() - Duration::from_secs(2);
+        // Make each explicit checkpoint due, then suppress timer-driven retries while
+        // polling its worker. Slow completion must not add submissions to this test.
+        app.player_autosave_interval = Duration::ZERO;
         app.service_player_autosave();
+        app.player_autosave_interval = Duration::MAX;
         let deadline = Instant::now() + Duration::from_secs(3);
         let original = loop {
             app.service_player_autosave();
@@ -7333,12 +7335,12 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(app.player_persisted_revision, original.revision);
-        app.last_player_autosave = Instant::now() - Duration::from_secs(2);
+        app.player_autosave_interval = Duration::ZERO;
         app.service_player_autosave();
         assert_eq!(app.player_autosave_writes, 1);
         app.simulation.as_mut().unwrap().player.position.x = 9.5;
-        app.last_player_autosave = Instant::now() - Duration::from_secs(2);
         app.service_player_autosave();
+        app.player_autosave_interval = Duration::MAX;
         let expected_revision = app.player_revision;
         let deadline = Instant::now() + Duration::from_secs(3);
         while app.player_persisted_revision < expected_revision && Instant::now() < deadline {
