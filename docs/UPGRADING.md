@@ -53,3 +53,40 @@ review. For later source updates, revert only the affected channel's reviewed
 files/record to its retained previous Git snapshot, then rerun all gates/CI.
 Partial writes are not transactional: preserve evidence and restore affected paths
 from the pre-write verified Git snapshot before replanning. Never reset user work.
+
+
+## Reproducible source-update proposals (Kit #8)
+
+The Kit-owned source-update adapter at proposed implementation commit
+`6c8acc6df12eab9009b53a73e1710b05ef12ac83` supports these existing source.json
+records without converting them to bundle locks. Independently accept that
+implementation before production adoption. The complete operator and rollback
+procedure is [pinned in Kit](https://github.com/AlexandrShapkin/codex-engineering-kit/blob/6c8acc6df12eab9009b53a73e1710b05ef12ac83/docs/SOURCE_UPDATES.md).
+
+This proposal advances only the two provenance references to already accepted
+public MIT upstream mains: Kit `cdfc2050733388402a70674d22de3f9e7e2a5a74`
+and Template `8550ec7fa8f58dc41a8af652ff912b62ebf78c22`. All twelve managed
+payloads remain byte-identical; original license_at identities/notices remain.
+The original pin list above records initial adoption history. Select future Kit
+and Template updates independently; each channel records its own source and hashes.
+
+From a separately trusted Kit checkout, run `source-update plan` with an explicit
+`--channel`, consumer `--root`, canonical `--source` and accepted full `--revision`.
+Inspect immutable-source diffs and deterministic path/before/after hashes.
+Run `source-update write` only with the fresh plan SHA and every changed exact
+`--allow` path; records are last. Changed native integrity-record hashes require
+an explicit reviewed edit of the corresponding RECORDS entry, never local-rule,
+notice or native-CI assertion changes. Repeat plan (empty), run all native gates
+and exact-head hosted CI, and open a separate Draft PR for independent review and
+explicit owner merge. No automatic merge or artifact authorization is implied.
+
+Rollback this proposal using an ordinary reviewed revert, restoring both source
+records, their two integrity-test pins and this additive procedure; rerun native
+checks/CI. Later channel updates can plan/write the retained older full revision,
+verify original payload hashes/record semantics and separately restore its test
+pin. A reviewed Git revert also restores exact historical JSON formatting.
+After interrupted I/O, preserve observations and restore only affected managed
+files and record from the verified pre-write Git snapshot before replanning.
+Never reset user work, delete a lock/record or bypass collisions to recover.
+AGENTS.local.md, product/security boundaries, native CI and unrelated PRs remain
+consumer-owned. Public source is not approval to distribute generated artifacts.

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-RECORDS = {'.engineering-kit/source.json': 'ba0463e28ae15dc9f19a5d72b7fbc67a9374e2ab0e1b09854baa76c4f19ab12f', '.project-template/source.json': 'df3f4f93f44d9662e5b8c83dd24137ddbc5438215a717401b67d3215c90356e5'}
+RECORDS = {'.engineering-kit/source.json': '50e9158576f3c4802dd3960f82d04d7364097da1b27f593dcbca408c477c1893', '.project-template/source.json': 'c44415fd3ac5bac73f8420ef01fe21fc89fe8b3046f28f2350610c3f970fc75d'}
 LOCAL_SHA256 = '0b49d2cb5b7212eef66e165495a564524d69b649fa28651f781276e11fa6f8a3'
 
 
