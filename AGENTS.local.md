@@ -1,6 +1,6 @@
 # Project-local rules
 
-Read the canonical interface through root AGENTS.md first. These retained native
+Follow root AGENTS.md; load canonical interface sections only when task-triggered, while preserving all binding requirements. These retained native
 rules may strengthen it; shared lifecycle policy belongs to Project Template.
 This migration grants no merge, deployment or runtime authority.
 
