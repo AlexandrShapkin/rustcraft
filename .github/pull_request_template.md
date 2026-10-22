@@ -21,4 +21,5 @@ Owner merge authorization: not granted by this template
 Risks, data/publication classification, rollback and follow-ups:
 Release applicability / compatibility / migration (or N/A with reason):
 Debt introduced / removed / outstanding (links, priority, owner, impact, completion criteria; or none):
-Cleanup inventory (removed / kept with reason / blocked or unknown with next action):
+Cleanup inventory (removed / retained / unknown; temporary paths, approximate disk usage, deletion safety):
+Retained environments (purpose, owner/task, retention reason, cleanup conditions; or none):
