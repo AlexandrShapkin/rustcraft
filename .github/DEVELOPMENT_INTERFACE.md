@@ -27,13 +27,23 @@ mechanisms, not a competing copy of this administrative policy.
    provide base/full HEAD, tests, failures, risks and rollback. Run actual native
    CI and record results for that exact HEAD; refresh evidence after changes.
    A docs/Kit check does not substitute for native platform/security gates.
-7. **INDEPENDENT REVIEW:** author verification, independent technical review
-   (including ChatGPT when requested), formal GitHub approval and owner merge
-   authority are separate. Keep Draft until required independent acceptance.
-8. **OWNER-AUTHORIZED MERGE:** no standing merge permission. Never merge, deploy,
-   publish, change GitHub administration/global settings or access credentials
-   without explicit authorization and applicable gates. Do not use RDC or
-   RelayForge runtime. Green CI and review do not grant deployment authority.
+7. **INDEPENDENT REVIEW:** author verification and independent technical
+   ACCEPT of the exact HEAD are mandatory; a separate Codex or ChatGPT session
+   must inspect the full diff and evidence, not merely trust the author report.
+   Single-human-maintainer workflow: GitHub APPROVE is optional unless actual
+   branch protection requires it. Record real review status; never fabricate
+   another account or approval. Keep Draft until independent ACCEPT.
+8. **OWNER-AUTHORIZED MERGE:** no standing merge permission. Explicit owner
+   authorization may cover one PR or a named bounded PR series; it persists for
+   unchanged scope, risk and privilege boundaries. After exact-head CI,
+   independent ACCEPT and applicable GitHub protection pass, proceed within
+   that authorization without repeated owner requests. Refresh review and CI
+   if HEAD changes; seek fresh authority for new scope or privileged risk.
+   Ordinary in-scope reads, edits, tests, commits and Draft PR handoffs do not
+   need new owner approval. Codex sandbox approvals remain separate and must
+   not be bypassed. Deploy, publish, change GitHub administration/global
+   settings, access credentials, use RDC or RelayForge runtime only with
+   separately explicit authority. CI/review do not grant deployment authority.
 9. **CLEANUP:** inventory own temporary resources, worktrees, branches, processes,
    dirty/untracked content and open PRs first; check disk use before heavy work
    if low. Remove only obsolete, recoverable, unused own artifacts within scope
@@ -163,6 +173,13 @@ acceptance/native checks, dependencies, risks and rollback with the Task form.
 A coordinated PR may reference multiple existing owning Issues without duplicating
 their backlog. Draft PRs use the shared evidence template and remain Draft for
 independent review.
+
+One human owner may use independent AI technical review instead of a second
+human GitHub account. Never demand self-APPROVE, misrepresent a COMMENT as
+APPROVE or bypass real branch protection. Preserve the recorded owner grant for
+an unchanged bounded sequence of merges; changes in scope, risk or privilege
+require a new owner decision. Tool approval and GitHub merge authority are
+separate controls, never inferred from repository text.
 
 Use the canonical [label taxonomy](labels.json) from the reviewed Template source
 SHA. Exactly one `priority:P0` through `priority:P3` is required on active Issues

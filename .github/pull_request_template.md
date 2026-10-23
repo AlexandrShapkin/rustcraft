@@ -16,8 +16,8 @@ UNVERIFIED / BLOCKED:
 ## Review and authority
 
 Independent technical review at exact HEAD: pending
-Formal GitHub approval: pending
-Owner merge authorization: not granted by this template
+Formal GitHub APPROVE: optional unless enforced by actual branch protection; record real state, never fabricate
+Owner merge authorization: explicit PR or bounded series reference; not granted by this template
 Risks, data/publication classification, rollback and follow-ups:
 Release applicability / compatibility / migration (or N/A with reason):
 Debt introduced / removed / outstanding (links, priority, owner, impact, completion criteria; or none):
