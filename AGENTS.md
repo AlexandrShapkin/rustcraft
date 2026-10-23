@@ -21,10 +21,18 @@ never grants execution authority; respect existing explicit authorization.
   toolchains and docs/Kit checks never establish product or live readiness.
 - Use bounded branches and Issue-linked Draft PRs; refresh exact-head CI evidence
   after changes. Author checks, independent technical acceptance, formal GitHub
-  approval and owner merge authority are separate; remain Draft until acceptance.
-- No standing merge authority: merge, deployment, publication, credentials,
-  GitHub administration/global settings require explicit authority and applicable
-  gates. Never use RDC or RelayForge runtime. Never expose secrets or user data.
+  approval (if required by actual GitHub protection) and owner merge authority
+  are distinct. Solo-maintainer workflow: an independent AI session/reviewer
+  may record exact-head ACCEPT; GitHub APPROVE is optional unless enforced and
+  must never be fabricated. Remain Draft until independent acceptance.
+- No standing merge authority: explicit owner consent can authorize a named,
+  bounded PR series, subject to exact-head ACCEPT, CI and actual protection.
+  Continue already-authorized in-scope work without repeat permission requests;
+  ordinary reads, edits, tests, commits and Draft PR handoffs need no new owner
+  approval. Sandbox approval controls remain separate and must not be bypassed.
+  Deployment, publication, credentials, GitHub administration/global settings
+  require separate explicit authority and applicable gates. Never use RDC or RelayForge runtime.
+  Never expose secrets or user data.
 - Inventory before cleanup; preserve user work, active/Draft branches, unknown
   resources and unique evidence. No forced clean/prune, history rewrite or
   age-based/background deletion. Never delete uncommitted work, test evidence,

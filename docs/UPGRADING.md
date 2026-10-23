@@ -90,3 +90,22 @@ files and record from the verified pre-write Git snapshot before replanning.
 Never reset user work, delete a lock/record or bypass collisions to recover.
 AGENTS.local.md, product/security boundaries, native CI and unrelated PRs remain
 consumer-owned. Public source is not approval to distribute generated artifacts.
+
+## Solo-maintainer canonical policy update (Template #16 / Kit #8)
+
+Template PR #17 independently accepted at `355788547e62ce8fc582e847f0131a541702a1b0`,
+merged at `cd08531493b34c98f0587544cd09e36c5da8fb11`. This bounded proposal
+uses accepted immutable administrative source `935022f96e0654d997d511dce79ab022dcae9d92`
+through Kit source-update plan/write at reviewed Kit HEAD
+`58bc7a282bcb148d94bfb0b0d609cd20a85fbce1` (Kit PR #23).
+The exact plan digest and final-head verification/review evidence are recorded on
+this repository’s rollout PR, linked to existing owning Issues. Only the three
+changed canonical policy files and administrative source record are written by
+the adapter; the corresponding consumer-owned integrity pin is explicitly updated.
+The technical record, license_at identities, frozen contracts, local rules, native
+platform/security gates and actual branch protection are preserved. Formal APPROVE
+is optional only where actual protection permits; exact-head independent ACCEPT
+and CI remain mandatory. Owner authorized this named six-repository series only.
+Rollback is a reviewed revert including the affected integrity pin, preserving
+subsequent work. Isolated /tmp/solo-governance-*-20261023 checkouts and logs are
+retained for review/rollback until the coordinated rollout closes.

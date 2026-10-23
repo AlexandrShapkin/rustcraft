@@ -1,7 +1,7 @@
 {
   "files": {
     ".github/DEVELOPMENT_INTERFACE.md": {
-      "sha256": "3e111ca53734654114076dbac312f76b36d28fdca077d6cc9d1b994fcd5b21cf",
+      "sha256": "627369eb6e2c811dc5802b4963e4a8ddb953024f6ada43fe5f9b4358c6db0f74",
       "source_path": ".github/DEVELOPMENT_INTERFACE.md"
     },
     ".github/ISSUE_TEMPLATE/task.yml": {
@@ -9,7 +9,7 @@
       "source_path": ".github/ISSUE_TEMPLATE/task.yml"
     },
     ".github/pull_request_template.md": {
-      "sha256": "5d792a6acd81211e1ca771f32a51d8b80f319db752269b4ee759455c99e9fa7d",
+      "sha256": "28dd4dfbe8bb15f4b8833545d1378327a07445e29d8b45937e412489c516ce3a",
       "source_path": ".github/pull_request_template.md"
     },
     ".project-template/OWNERSHIP.md": {
@@ -17,7 +17,7 @@
       "source_path": ".project-template/OWNERSHIP.md"
     },
     "AGENTS.md": {
-      "sha256": "98e3c6b61e516d6a110ea38ffd35c631eb3571e05e51aa6b409a0e4f34a5cebb",
+      "sha256": "97b975d6581996e2054e85625fac3ed160b622aec677f6a20cc72dc96f954071",
       "source_path": "AGENTS.md"
     },
     "docs/WORKFLOW.md": {
@@ -28,5 +28,5 @@
   "license_at": "8550ec7fa8f58dc41a8af652ff912b62ebf78c22",
   "method": "reviewed-public-source-migration",
   "repository": "AlexandrShapkin/project-template",
-  "revision": "bd9f586937100ec522fd1fd9c24a2888c464111a"
+  "revision": "935022f96e0654d997d511dce79ab022dcae9d92"
 }
