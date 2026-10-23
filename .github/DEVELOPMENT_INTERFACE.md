@@ -4,6 +4,8 @@ Canonical owner: AlexandrShapkin/project-template. This is the shared lifecycle;
 project rules live in AGENTS.local.md and docs/PROJECT.md. Kit owns technical
 mechanisms, not a competing copy of this administrative policy.
 
+## Task lifecycle
+
 1. **TASK / START:** inspect root, full HEAD, branch, status, worktrees and active
    PRs. Search open and closed Issues; reuse the owning task. Record goal, scope,
    non-goals, acceptance, dependencies and risks. Verify the base before branching.

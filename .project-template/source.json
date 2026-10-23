@@ -1,7 +1,7 @@
 {
   "files": {
     ".github/DEVELOPMENT_INTERFACE.md": {
-      "sha256": "ef358ea6728bd90cf79029257eecce1712e17027b900cabb1ca4342d4c85e3ae",
+      "sha256": "3e111ca53734654114076dbac312f76b36d28fdca077d6cc9d1b994fcd5b21cf",
       "source_path": ".github/DEVELOPMENT_INTERFACE.md"
     },
     ".github/ISSUE_TEMPLATE/task.yml": {
@@ -17,7 +17,7 @@
       "source_path": ".project-template/OWNERSHIP.md"
     },
     "AGENTS.md": {
-      "sha256": "f2bd56969e314ae5f89c8fad4a5bb3e00efc6c7f2170523e9b06da81e1b7cb69",
+      "sha256": "98e3c6b61e516d6a110ea38ffd35c631eb3571e05e51aa6b409a0e4f34a5cebb",
       "source_path": "AGENTS.md"
     },
     "docs/WORKFLOW.md": {
@@ -28,5 +28,5 @@
   "license_at": "8550ec7fa8f58dc41a8af652ff912b62ebf78c22",
   "method": "reviewed-public-source-migration",
   "repository": "AlexandrShapkin/project-template",
-  "revision": "84fedb44125ab6316ca7e0a147ec7b98f5fc81e6"
+  "revision": "bd9f586937100ec522fd1fd9c24a2888c464111a"
 }
