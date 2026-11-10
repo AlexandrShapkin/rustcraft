@@ -1,8 +1,6 @@
 # Project-local rules
 
-Follow root AGENTS.md; load canonical interface sections only when task-triggered, while preserving all binding requirements. These retained native
-rules may strengthen it; shared lifecycle policy belongs to Project Template.
-This migration grants no merge, deployment or runtime authority.
+Follow root AGENTS.md. This repository owns its native procedures and security boundaries.
 
 # Repository instructions for Codex
 
